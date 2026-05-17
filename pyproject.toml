@@ -1,0 +1,70 @@
+[project]
+name = "doc-pipeline"
+version = "0.1.0"
+description = "Document intelligence pipeline: scanned PDF → structured data."
+requires-python = ">=3.11"
+dependencies = [
+    # Web / config
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "httpx>=0.27",
+    # DB
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    # Object storage
+    "aioboto3>=12.3",
+    # Logging
+    "structlog>=24.1",
+    # Vector + graph
+    "qdrant-client>=1.8",
+    "neo4j>=5.18",
+    # Embeddings (heavy — installs torch; pin minor if image size matters)
+    "sentence-transformers>=2.5",
+    # OCR + image
+    "pytesseract>=0.3.10",
+    "pymupdf>=1.23",
+    "pdf2image>=1.17",
+    "opencv-python-headless>=4.9",
+    "Pillow>=10.2",
+    "scikit-image>=0.22",
+    # Matching + NLP
+    "rapidfuzz>=3.6",
+    "spacy>=3.7",
+    # Reference data
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+    "ruff>=0.3",
+    "mypy>=1.9",
+    "moto[s3]>=5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+# Start loose; tighten when stages stabilize.
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: requires running services (run with `make test-integration`)",
+]
