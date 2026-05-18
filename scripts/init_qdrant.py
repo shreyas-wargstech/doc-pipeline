@@ -41,7 +41,7 @@ DISTANCE        = Distance.COSINE
 EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"   # multilingual, 384-dim
 
 
-async def main() -> None:
+async def main() -> int:
     configure_logging(fmt="console")
     log.info(
         "init_qdrant_start",
@@ -73,19 +73,19 @@ async def main() -> None:
             "collection_status",
             collection=COLLECTION,
             status=str(status),
-            vectors_count=info.vectors_count,
             points_count=info.points_count,
         )
 
         if str(status).lower() not in ("green", "ok", "optimizing"):
             log.error("collection_unhealthy", status=str(status))
-            sys.exit(1)
+            return 1
 
         log.info("init_qdrant_ok", embedding_model=EMBEDDING_MODEL)
+        return 0
 
     except Exception as exc:
         log.error("init_qdrant_failed", error=str(exc))
-        sys.exit(1)
+        return 1
 
     finally:
         await client.close()

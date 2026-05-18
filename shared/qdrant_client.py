@@ -28,17 +28,24 @@ def get_qdrant() -> AsyncQdrantClient:
     return AsyncQdrantClient(url=s.qdrant_url)
 
 
-async def ensure_collection(client: AsyncQdrantClient | None = None) -> None:
+async def ensure_collection(
+    client: AsyncQdrantClient | None = None,
+    *,
+    name: str | None = None,
+    size: int = VECTOR_SIZE,
+    distance: Distance = DISTANCE,
+    ) -> bool:
     """Create the configured collection if missing. Idempotent."""
     s = get_settings()
+    collection_name = name or s.qdrant_collection
     owns = client is None
     client = client or get_qdrant()
     try:
         existing = await client.get_collections()
         names = {c.name for c in existing.collections}
-        if s.qdrant_collection in names:
+        if collection_name in names:
             log.info("qdrant.collection.exists", name=s.qdrant_collection)
-            return
+            return False
         await client.create_collection(
             collection_name=s.qdrant_collection,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=DISTANCE),
@@ -49,6 +56,7 @@ async def ensure_collection(client: AsyncQdrantClient | None = None) -> None:
             dim=VECTOR_SIZE,
             distance=DISTANCE.value,
         )
+        return True
     except Exception as e:
         raise PersistError(f"Failed to ensure Qdrant collection: {e}") from e
     finally:

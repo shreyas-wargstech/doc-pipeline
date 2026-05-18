@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from shared.db import get_engine          # noqa: E402
 from shared.logging import configure_logging  # noqa: E402
+from sys import exit
 
 log = structlog.get_logger()
 
@@ -147,7 +148,7 @@ async def verify() -> bool:
     return ok
 
 
-async def main() -> None:
+async def main() -> int:
     configure_logging(fmt="console")
     log.info("init_postgres_start")
 
@@ -155,11 +156,12 @@ async def main() -> None:
 
     if passed:
         log.info("init_postgres_ok")
+        return 0
     else:
         log.error("init_postgres_failed",
                   hint="Run: make down-clean && make up && make init")
-        sys.exit(1)
+        return 1
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    exit(asyncio.run(main()))
