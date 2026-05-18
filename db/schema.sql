@@ -15,7 +15,7 @@
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS reference_data (
     id                   SERIAL      PRIMARY KEY,
-    app_no               INTEGER,
+    app_no               BIGINT,
     app_date             TEXT,
     registration_no      INTEGER     NOT NULL UNIQUE,    -- THE join key
     registration_date    TEXT,

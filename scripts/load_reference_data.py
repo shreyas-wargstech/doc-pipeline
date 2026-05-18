@@ -16,6 +16,7 @@ import asyncio
 import json
 import re
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +29,8 @@ import structlog
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from shared.db import get_engine          # noqa: E402
+from shared.db import get_engine              # noqa: E402
 from shared.logging import configure_logging  # noqa: E402
-
 
 log = structlog.get_logger()
 
@@ -39,8 +39,15 @@ DEFAULT_CHUNK = 1000
 
 # ---------------------------------------------------------------------------
 # Column map: normalised Excel header → DB column name
-# Normalisation = lowercase + strip + collapse whitespace to underscore.
-# Add entries here whenever the Excel headers differ from DB column names.
+# Normalisation = lowercase + strip + collapse whitespace/special chars → underscore.
+#
+# Pattern: add BOTH the clean alias (app_date) AND the raw no-separator form
+# (appdate) so any Excel export style is handled without code changes.
+#
+# DISTRINCT note: source Excel has a typo ("Distrinct" instead of "District").
+# Both variants map to "district".  When the source is fixed, remove the typo
+# entry from this map and the deprecation warning in load_and_map() will fire
+# until this line is cleaned up.
 # ---------------------------------------------------------------------------
 COLUMN_MAP: dict[str, str] = {
     # app_no
@@ -50,14 +57,16 @@ COLUMN_MAP: dict[str, str] = {
     "application_number": "app_no",
     # app_date
     "app_date": "app_date",
+    "appdate": "app_date",           # ← raw header form
     "application_date": "app_date",
-    # registration_no  ← THE key
+    # registration_no  ← THE natural key
     "registration_no": "registration_no",
+    "registrationno": "registration_no",
     "regno": "registration_no",
     "reg_no": "registration_no",
-    "registrationno": "registration_no",
     # registration_date
     "registration_date": "registration_date",
+    "registrationdate": "registration_date",  # ← raw header form
     "reg_date": "registration_date",
     # names
     "f_name": "f_name",
@@ -76,47 +85,59 @@ COLUMN_MAP: dict[str, str] = {
     # name change (post-marriage)
     "f_name_change": "f_name_change",
     "fname_change": "f_name_change",
+    "fnamechange": "f_name_change",  # ← raw header form
     "first_name_change": "f_name_change",
     "m_name_change": "m_name_change",
     "mname_change": "m_name_change",
+    "mnamechange": "m_name_change",  # ← raw header form
     "middle_name_change": "m_name_change",
     "l_name_change": "l_name_change",
     "lname_change": "l_name_change",
+    "lnamechange": "l_name_change",  # ← raw header form
     "last_name_change": "l_name_change",
     # demographics
     "gender": "gender",
     "sex": "gender",
     "date_of_birth": "date_of_birth",
+    "dateofbirth": "date_of_birth",  # ← raw header form
     "dob": "date_of_birth",
     "birth_date": "date_of_birth",
     "birthdate": "date_of_birth",
     "place_of_birth": "place_of_birth",
+    "placeofbirth": "place_of_birth",  # ← raw header form
     "pob": "place_of_birth",
     "nationality": "nationality",
     # education
     "qualification": "qualification",
     "qual": "qualification",
     "exam_month": "exam_month",
+    "exammonth": "exam_month",   # ← raw header form
     "exam_year": "exam_year",
+    "examyear": "exam_year",     # ← raw header form
     "roll_no": "roll_no",
     "rollno": "roll_no",
     "university": "university",
     "college": "college",
     # residential address
     "address": "address",
-    "district": "district",
+    "district": "district",           # correct spelling — future-proof
+    "distrinct": "district",          # TYPO in source Excel — see note above
     "taluka": "taluka",
     "pin_no": "pin_no",
+    "pinno": "pin_no",
     "pincode": "pin_no",
     "pin": "pin_no",
-    "pinno": "pin_no",
     # professional address
     "prof_add": "prof_add",
+    "profadd": "prof_add",            # ← raw header form
     "professional_address": "prof_add",
     "prof_address": "prof_add",
     "prof_district": "prof_district",
+    "profdistrict": "prof_district",  # ← raw header form
     "prof_taluka": "prof_taluka",
+    "proftaluka": "prof_taluka",      # ← raw header form
     "prof_pin_no": "prof_pin_no",
+    "profpinno": "prof_pin_no",       # ← raw header form
     "prof_pincode": "prof_pin_no",
     "prof_pin": "prof_pin_no",
     # contact
@@ -124,20 +145,25 @@ COLUMN_MAP: dict[str, str] = {
     "mobile": "mobile_no",
     "mobileno": "mobile_no",
     "telephone_no": "telephone_no",
+    "telephoneno": "telephone_no",    # ← raw header form
     "telephone": "telephone_no",
     "tel_no": "telephone_no",
     "prof_telephone_no": "prof_telephone_no",
+    "prof_telephoneno": "prof_telephone_no",  # ← raw header form
     "prof_telephone": "prof_telephone_no",
     "prof_tel": "prof_telephone_no",
     "email_id": "email_id",
+    "emailid": "email_id",            # ← raw header form
     "email": "email_id",
     # status / dates
     "cr_dt": "cr_dt",
     "created_date": "cr_dt",
     "status": "status",
     "valid_upto_date": "valid_upto_date",
+    "validupto_date": "valid_upto_date",   # ← raw header form
     "valid_upto": "valid_upto_date",
     "doctor_status": "doctor_status",
+    "doctorstatus": "doctor_status",       # ← raw header form
 }
 
 # All data columns in insert order (excluding id, fields_norm, created_at, updated_at)
@@ -154,20 +180,41 @@ DB_COLUMNS: list[str] = [
     "cr_dt", "status", "valid_upto_date", "doctor_status",
 ]
 
-# Columns that should be cast to int (NULL on failure)
-INT_COLS = {"app_no", "registration_no", "pin_no", "prof_pin_no"}
-# Columns that should be cast to float (NULL on failure)
+# Columns cast to int (NULL on failure)
+# INT4 cols (INTEGER in schema): registration_no, pin_no, prof_pin_no
+# INT8 cols (BIGINT in schema): app_no (per migration 001)
+INT_COLS = {"registration_no", "pin_no", "prof_pin_no"}
+BIGINT_COLS = {"app_no"}
+_INT4_MAX = 2_147_483_647
+_INT4_MIN = -2_147_483_648
+_INT8_MAX = 9_223_372_036_854_775_807
+_INT8_MIN = -9_223_372_036_854_775_808
+# Columns cast to float (NULL on failure)
 FLOAT_COLS = {"exam_year"}
+# Postgres TEXT columns holding date strings → return ISO 'YYYY-MM-DD'
+# (schema deliberately keeps these as TEXT because source has mixed formats)
+DATE_COLS = {"app_date", "registration_date", "date_of_birth", "valid_upto_date"}
+# Postgres TIMESTAMPTZ column → must pass datetime.datetime to asyncpg
+TIMESTAMP_COLS = {"cr_dt"}
+# All cols requiring date parsing
+_ALL_DATE_COLS = DATE_COLS | TIMESTAMP_COLS
+# Excel sentinel "no date" values → treated as None
+_SENTINEL_DATES: frozenset[str] = frozenset({
+    "01/01/1900",
+    "1900-01-01",
+    "1900-01-01 00:00:00",
+    "1900-01-01 00:00:00.000000",
+})
 
 # ---------------------------------------------------------------------------
 # SQL
 # ---------------------------------------------------------------------------
 _col_list = ", ".join(DB_COLUMNS + ["fields_norm"])
-_val_list = ", ".join(f":{c}" for c in DB_COLUMNS) + ", :fields_norm::jsonb"
+_val_list = ", ".join(f":{c}" for c in DB_COLUMNS) + ", CAST(:fields_norm AS jsonb)"
 _update_set = ",\n    ".join(
     f"{c} = EXCLUDED.{c}"
     for c in DB_COLUMNS
-    if c != "registration_no"          # don't overwrite the conflict key itself
+    if c != "registration_no"
 ) + ",\n    fields_norm = EXCLUDED.fields_norm,\n    updated_at = NOW()"
 
 UPSERT_SQL = f"""
@@ -183,7 +230,7 @@ ON CONFLICT (registration_no) DO UPDATE SET
 # ---------------------------------------------------------------------------
 
 def _norm_header(h: str) -> str:
-    """Lowercase + strip + collapse any whitespace/special chars to underscore."""
+    """Lowercase + strip + collapse whitespace/special chars to underscore."""
     h = h.strip().lower()
     h = re.sub(r"[\s\-/\\]+", "_", h)
     h = re.sub(r"[^\w]", "", h)
@@ -197,15 +244,75 @@ def _is_blank(v: Any) -> bool:
     return s in ("", "nan", "nat", "none", "null", "<na>")
 
 
+def _parse_date(col: str, val: Any) -> str | datetime | None:
+    """
+    Per db/schema.sql:
+      - cr_dt is TIMESTAMPTZ → return datetime.datetime
+      - app_date / registration_date / date_of_birth / valid_upto_date are TEXT
+        → return ISO 'YYYY-MM-DD' string (schema keeps them flexible because
+        source has mixed formats)
+
+    Sentinel 01/01/1900 → None (Excel placeholder for "no date").
+    """
+    if _is_blank(val):
+        return None
+
+    # pd.Timestamp / datetime (fallback when dtype is auto)
+    if isinstance(val, (pd.Timestamp, datetime)):
+        d = val.date() if hasattr(val, "date") else val
+        if d == date(1900, 1, 1):
+            return None
+        if col in TIMESTAMP_COLS:
+            return val if isinstance(val, datetime) else datetime(d.year, d.month, d.day)
+        return d.isoformat()
+
+    s = str(val).strip()
+    if s in _SENTINEL_DATES:
+        return None
+
+    _DT_FMTS = (
+        "%d/%m/%Y",
+        "%Y-%m-%d",
+        "%d-%m-%Y",
+        "%Y-%m-%d %H:%M:%S.%f",   # cr_dt with microseconds
+        "%Y-%m-%d %H:%M:%S",       # cr_dt without microseconds
+    )
+    for fmt in _DT_FMTS:
+        try:
+            dt = datetime.strptime(s, fmt)
+            if col in TIMESTAMP_COLS:
+                return dt                    # datetime for TIMESTAMPTZ
+            return dt.date().isoformat()    # ISO string for TEXT cols
+        except ValueError:
+            continue
+
+    log.warning("date_parse_failed", raw=s, col=col)
+    return None
+
+
 def _clean(col: str, val: Any) -> Any:
     if _is_blank(val):
         return None
+    if col in _ALL_DATE_COLS:
+        return _parse_date(col, val)
     s = str(val).strip()
-    if col in INT_COLS:
+    if col in INT_COLS or col in BIGINT_COLS:
         try:
-            return int(float(s))
+            n = int(float(s))
         except (ValueError, TypeError):
             return None
+        # Bound check — asyncpg encodes per schema type and will raise
+        # OverflowError if the value doesn't fit. Guard here to set None
+        # and log instead of crashing the whole batch.
+        if col in INT_COLS:
+            if n > _INT4_MAX or n < _INT4_MIN:
+                log.warning("int4_overflow", col=col, value=n)
+                return None
+        else:  # BIGINT_COLS
+            if n > _INT8_MAX or n < _INT8_MIN:
+                log.warning("int8_overflow", col=col, value=n)
+                return None
+        return n
     if col in FLOAT_COLS:
         try:
             return float(s)
@@ -216,8 +323,8 @@ def _clean(col: str, val: Any) -> Any:
 
 def _build_fields_norm(row: dict[str, Any]) -> str:
     """
-    Build the GIN-indexed JSONB blob used for fuzzy matching during the
-    confidence-handling stage.  All values lowercased and stripped.
+    GIN-indexed JSONB blob for fuzzy matching during the confidence-handling
+    stage. All values lowercased and stripped. dob stored as ISO YYYY-MM-DD.
     """
     def _s(v: Any) -> str:
         return str(v).strip().lower() if not _is_blank(v) else ""
@@ -233,7 +340,7 @@ def _build_fields_norm(row: dict[str, Any]) -> str:
         "registration_no": str(row.get("registration_no", "")),
         "full_name": full_name,
         "name_change": name_change,
-        "dob": _s(row.get("date_of_birth")),
+        "dob": _s(row.get("date_of_birth")),   # already ISO from _parse_date
         "qualification": _s(row.get("qualification")),
         "college": _s(row.get("college")),
         "university": _s(row.get("university")),
@@ -253,6 +360,28 @@ def load_and_map(path: Path) -> list[dict[str, Any]]:
     # Normalise headers
     df.columns = [_norm_header(c) for c in df.columns]
     log.info("excel_loaded", rows=len(df), raw_cols=list(df.columns))
+
+    # -----------------------------------------------------------------------
+    # Distrinct / district typo guard
+    # If source Excel is fixed (col = "district"), warn so we can remove the
+    # "distrinct" alias from COLUMN_MAP.  If BOTH columns present, prefer
+    # the correctly-spelled one; the typo col is ignored for that row.
+    # -----------------------------------------------------------------------
+    has_typo = "distrinct" in df.columns
+    has_correct = "district" in df.columns
+    if has_typo and has_correct:
+        log.warning(
+            "district_typo_fixed_in_source",
+            msg="Excel now has both 'distrinct' and 'district'. "
+                "Using 'district'; remove 'distrinct' alias from COLUMN_MAP.",
+        )
+        # Drop the typo column so COLUMN_MAP picks the correct one
+        df = df.drop(columns=["distrinct"])
+    elif has_correct and not has_typo:
+        log.info(
+            "district_typo_resolved",
+            msg="Excel 'distrinct' typo is fixed. Remove alias from COLUMN_MAP.",
+        )
 
     # Build excel_col → db_col mapping
     col_mapping: dict[str, str] = {}
@@ -292,21 +421,37 @@ def load_and_map(path: Path) -> list[dict[str, Any]]:
 async def upsert_chunks(rows: list[dict[str, Any]], chunk_size: int, dry_run: bool) -> int:
     if dry_run:
         log.info("dry_run_mode_skipping_db_writes", rows=len(rows))
-        # Print first row as sample
         if rows:
             log.info("sample_row", row=rows[0])
         return 0
 
+    import sqlalchemy as sa  # local import to avoid top-level dep for dry-run
+
     engine = get_engine()
     total = 0
+    stmt = sa.text(UPSERT_SQL)
 
     try:
-        async with engine.begin() as conn:
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i : i + chunk_size]
-                await conn.execute(__import__("sqlalchemy").text(UPSERT_SQL), chunk)
-                total += len(chunk)
-                log.info("progress", loaded=total, of=len(rows))
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i: i + chunk_size]
+            # New tx per chunk — failure in chunk N preserves chunks 0..N-1.
+            # Idempotency comes from ON CONFLICT (registration_no) DO UPDATE,
+            # so re-running the script safely resumes/overwrites.
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(stmt, chunk)
+            except Exception:
+                log.error(
+                    "chunk_failed",
+                    chunk_start=i,
+                    chunk_size=len(chunk),
+                    committed_so_far=total,
+                    msg="Prior chunks ARE committed. Re-run script to resume "
+                        "(ON CONFLICT handles duplicates).",
+                )
+                raise
+            total += len(chunk)
+            log.info("progress", loaded=total, of=len(rows))
     finally:
         await engine.dispose()
 
