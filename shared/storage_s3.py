@@ -8,6 +8,9 @@ from shared.config import get_settings
 from shared.exceptions import StorageError
 from shared.logging import get_logger
 
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Any
+
 log = get_logger(__name__)
 
 
@@ -61,3 +64,24 @@ class S3Storage:
                 return await obj["Body"].read()
             except ClientError as e:
                 raise StorageError(f"get_object failed for {key}") from e
+
+@asynccontextmanager
+async def get_s3_client() -> AsyncGenerator[Any, None]:
+    """Yield a raw aioboto3 S3 client using shared config.
+
+    Usage:
+        async with get_s3_client() as s3:
+            obj = await s3.get_object(Bucket=..., Key=...)
+    """
+    s = get_settings()
+    kwargs: dict = {
+        "aws_access_key_id": s.s3_access_key,
+        "aws_secret_access_key": s.s3_secret_key,
+        "region_name": s.s3_region,
+    }
+    if s.s3_endpoint_url:
+        kwargs["endpoint_url"] = s.s3_endpoint_url
+
+    session = aioboto3.Session()
+    async with session.client("s3", **kwargs) as client:
+        yield client

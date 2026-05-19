@@ -20,6 +20,9 @@ class StorageError(PipelineError):
 class ManifestError(PipelineError):
     """Manifest JSON missing, malformed, or schema-invalid."""
 
+class ClassifierError(PipelineError):
+    """Document classification failed (rules engine or LLM fallback)."""
+
 
 class PreprocessError(PipelineError):
     """Image preprocessing failure (deskew, threshold, etc.)."""

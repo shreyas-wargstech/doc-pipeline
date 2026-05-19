@@ -172,9 +172,9 @@ class ClassifierService:
             return hint
 
         # 2. Extract cover text
-        s3 = self._s3 or await get_s3_client()
+        s3 = self._s3 or get_s3_client()
 
-        cover_text = await _pdf_text_layer(manifest.original_s3_key, s3)
+        cover_text = await _pdf_text_layer(manifest.s3_key_original, s3)
         if len(cover_text.strip()) < 30:
             bound_log.info("no_text_layer_falling_back_to_ocr")
             cover_key = _cover_page_key(manifest)
