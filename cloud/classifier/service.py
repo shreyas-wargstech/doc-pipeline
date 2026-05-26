@@ -100,14 +100,14 @@ async def _ocr_cover_page(page_s3_key: str, s3_client) -> str:
 
 
 def _bucket() -> str:
-    from shared.config import settings
-    return settings.s3_bucket
+    from shared.config import get_settings
+    return get_settings().s3_bucket
 
 
 def _cover_page_key(manifest: Manifest) -> str | None:
     """Return S3 key of first non-blank page image."""
     for page in manifest.pages:
-        if page.page_type != "blank":
+        if getattr(page, "page_type", None) != "blank":
             return page.s3_key
     return manifest.pages[0].s3_key if manifest.pages else None
 
@@ -171,17 +171,24 @@ class ClassifierService:
         if hint is not None:
             return hint
 
-        # 2. Extract cover text
-        s3 = self._s3 or get_s3_client()
+        # 2. Extract cover text - manage context manager properly
+        cover_text = ""
+        if self._s3 is not None :
+            cover_text = await _pdf_text_layer(manifest.s3_key_original, self._s3)
+            if len(cover_text.strip()) < 30 :
+                bound_log.info("no_text_layer_falling_back_to_ocr")
+                cover_key = _cover_page_key(manifest)
+                if cover_key: 
+                    cover_text = await _ocr_cover_page(cover_key, self._s3)
+        else:
+            async with get_s3_client() as s3:
+                cover_text = await _pdf_text_layer(manifest.s3_key_original, s3)
+                if len(cover_text.strip()) < 30 :
+                    bound_log.info("no_text_layer_fallling_back_to_ocr")
+                    cover_key = _cover_page_key(manifest)
+                    if cover_key: 
+                        cover_text = await _ocr_cover_page(cover_key, s3)
 
-        cover_text = await _pdf_text_layer(manifest.s3_key_original, s3)
-        if len(cover_text.strip()) < 30:
-            bound_log.info("no_text_layer_falling_back_to_ocr")
-            cover_key = _cover_page_key(manifest)
-            if cover_key:
-                cover_text = await _ocr_cover_page(cover_key, s3)
-
-        # Inject QR content as additional signal
         cover_text += _qr_signals(manifest)
 
         if not cover_text.strip():

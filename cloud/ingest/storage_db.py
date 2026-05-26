@@ -28,6 +28,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
     select,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,11 +76,11 @@ class MatchStatus:
 
 class OCRStatus:
     PENDING = "pending"
-    DONE = "done"
-    FAILED = "failed"
+    QUEUED  = "queued"     # ← new: enqueued to SQS, not yet processed
+    DONE    = "done"
     SKIPPED = "skipped"
-
-    ALL = frozenset({PENDING, DONE, FAILED, SKIPPED})
+    FAILED  = "failed"
+    ALL     = {PENDING, QUEUED, DONE, SKIPPED, FAILED}
 
 
 # =============================================================================
@@ -122,12 +123,8 @@ class Document(Base):
         "metadata", JSONB, nullable=False, default=dict
     )
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Page(Base):
@@ -148,20 +145,12 @@ class Page(Base):
     confidence_score: Mapped[float | None] = mapped_column(Float)
     language_detected: Mapped[str | None] = mapped_column(Text)
 
-    ocr_status: Mapped[str] = mapped_column(
-        Text, nullable=False, default=OCRStatus.PENDING
-    )
+    ocr_status: Mapped[str] = mapped_column(Text, nullable=False, default=OCRStatus.PENDING)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    __table_args__ = (
-        UniqueConstraint("document_id", "page_num", name="uq_pages_doc_page"),
-    )
+    __table_args__ = (UniqueConstraint("document_id", "page_num", name="uq_pages_doc_page"),)
 
 
 # =============================================================================
@@ -171,6 +160,20 @@ class Page(Base):
 
 class DocumentRepository:
     """Async repository for documents. All writes idempotent on document_id."""
+
+    _DOCUMENT_UPDATE_WHITELIST: frozenset[str] = frozenset(
+        {
+            "document_category",
+            "match_status",
+            "status",
+            "registration_no",
+            "applicant_name_raw",
+            "application_number",
+            "dob",
+            "gender",
+            "reference_data_id",
+        }
+    )
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -244,9 +247,7 @@ class DocumentRepository:
             )
             return doc
         except Exception as e:
-            logger.error(
-                "document_upsert_failed", document_id=document_id, error=str(e)
-            )
+            logger.error("document_upsert_failed", document_id=document_id, error=str(e))
             raise PersistError(f"failed to upsert document {document_id}: {e}") from e
 
     async def get(self, document_id: str) -> Document | None:
@@ -266,7 +267,31 @@ class DocumentRepository:
             return
         doc.status = status
         logger.info("document_status_updated", document_id=document_id, status=status)
+    
+    async def update_fields(self, document_id: str, **kwargs: Any) -> None:
+        """
+        Targeted UPDATE of specific document columns.
 
+        Only whitelisted columns are accepted — prevents accidental overwrites
+        of primary key or audit timestamps. Raises PersistError on unknown keys.
+        """
+        bad = set(kwargs) - self._DOCUMENT_UPDATE_WHITELIST
+        if bad:
+            raise PersistError(f"update_fields: unknown/disallowed columns: {bad}")
+        if not kwargs:
+            return
+
+        set_clause = ", ".join(f"{col} = :{col}" for col in kwargs)
+        stmt = text(
+            f"UPDATE documents SET {set_clause}, updated_at = now() "
+            f"WHERE document_id = :document_id"
+        )
+        await self.session.execute(stmt, {"document_id": document_id, **kwargs})
+        logger.info(
+            "document_fields_updated",
+            document_id=document_id,
+            fields=sorted(kwargs),
+        )
 
 class PageRepository:
     """Async repository for pages. Idempotent on (document_id, page_num)."""
@@ -298,9 +323,7 @@ class PageRepository:
         if ocr_status not in OCRStatus.ALL:
             raise PersistError(f"invalid ocr_status: {ocr_status!r}")
         if confidence_score is not None and not (0 <= confidence_score <= 100):
-            raise PersistError(
-                f"confidence_score must be in [0, 100], got {confidence_score}"
-            )
+            raise PersistError(f"confidence_score must be in [0, 100], got {confidence_score}")
 
         page_id = self.make_page_id(document_id, page_num)
         values: dict[str, Any] = {
@@ -340,9 +363,7 @@ class PageRepository:
                 page_num=page_num,
                 error=str(e),
             )
-            raise PersistError(
-                f"failed to upsert page {page_id}: {e}"
-            ) from e
+            raise PersistError(f"failed to upsert page {page_id}: {e}") from e
 
     async def bulk_upsert(self, pages: list[dict[str, Any]]) -> list[Page]:
         """
@@ -388,23 +409,54 @@ class PageRepository:
             return saved
         except Exception as e:
             logger.error("pages_bulk_upsert_failed", count=len(values), error=str(e))
-            raise PersistError(
-                f"failed to bulk upsert {len(values)} pages: {e}"
-            ) from e
+            raise PersistError(f"failed to bulk upsert {len(values)} pages: {e}") from e
+    
+    async def bulk_update_ocr_status(
+        self,
+        document_id: str,
+        page_nums: list[int],
+        ocr_status: str,
+    ) -> None:
+        """
+        Set ocr_status for a list of pages in a single query.
+
+        Uses Postgres ANY(:array) so the round-trips stay constant regardless
+        of page count.
+        """
+        if not page_nums:
+            return
+        if ocr_status not in OCRStatus.ALL:
+            raise PersistError(f"bulk_update_ocr_status: invalid status {ocr_status!r}")
+
+        stmt = text(
+            "UPDATE pages "
+            "SET ocr_status = :ocr_status, updated_at = now() "
+            "WHERE document_id = :document_id AND page_num = ANY(:page_nums)"
+        )
+        await self.session.execute(
+            stmt,
+            {
+                "ocr_status": ocr_status,
+                "document_id": document_id,
+                "page_nums": page_nums,
+            },
+        )
+        logger.info(
+            "pages_ocr_status_bulk_updated",
+            document_id=document_id,
+            page_count=len(page_nums),
+            ocr_status=ocr_status,
+        )
 
     async def get(self, document_id: str, page_num: int) -> Page | None:
         page_id = self.make_page_id(document_id, page_num)
-        result = await self.session.execute(
-            select(Page).where(Page.page_id == page_id)
-        )
+        result = await self.session.execute(select(Page).where(Page.page_id == page_id))
         return result.scalar_one_or_none()
 
     async def list_for_document(self, document_id: str) -> list[Page]:
         """Return all pages for a document, ordered by page_num."""
         result = await self.session.execute(
-            select(Page)
-            .where(Page.document_id == document_id)
-            .order_by(Page.page_num)
+            select(Page).where(Page.document_id == document_id).order_by(Page.page_num)
         )
         return list(result.scalars().all())
 
@@ -423,9 +475,7 @@ class PageRepository:
             raise PersistError(f"invalid ocr_status: {ocr_status!r}")
         page = await self.get(document_id, page_num)
         if page is None:
-            raise PersistError(
-                f"page not found: doc={document_id} page_num={page_num}"
-            )
+            raise PersistError(f"page not found: doc={document_id} page_num={page_num}")
         if raw_text is not None:
             page.raw_text = raw_text
         if confidence_score is not None:
@@ -452,9 +502,7 @@ class PageRepository:
         """Update structure-stage fields on an existing page. Idempotent."""
         page = await self.get(document_id, page_num)
         if page is None:
-            raise PersistError(
-                f"page not found: doc={document_id} page_num={page_num}"
-            )
+            raise PersistError(f"page not found: doc={document_id} page_num={page_num}")
         if page_type is not None:
             page.page_type = page_type
         if structured_json is not None:

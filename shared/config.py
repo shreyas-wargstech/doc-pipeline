@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO", alias="LOG_LEVEL")
     log_format: str = Field("json", alias="LOG_FORMAT")
 
+    # SQS
+    sqs_ocr_queue_url: str = Field(..., alias="SQS_OCR_QUEUE_URL")
+    aws_region: str = Field("ap-south-1", alias="AWS_REGION")
+    sqs_endpoint_url: str = Field("", alias="SQS_ENDPOINT_URL")
+
 
 @lru_cache
 def get_settings() -> Settings:
