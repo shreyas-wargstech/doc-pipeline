@@ -107,7 +107,7 @@ def _bucket() -> str:
 def _cover_page_key(manifest: Manifest) -> str | None:
     """Return S3 key of first non-blank page image."""
     for page in manifest.pages:
-        if getattr(page, "page_type", None) != "blank":
+        if page.page_type != "blank":
             return page.s3_key
     return manifest.pages[0].s3_key if manifest.pages else None
 

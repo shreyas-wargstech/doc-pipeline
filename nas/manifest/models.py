@@ -8,9 +8,13 @@ Schema is versioned so the cloud side can refuse manifests it doesn't
 understand.
 """
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
+PageType = Literal["blank", "cover", "form", "receipt", "certificate", "other"]
+ContentType = Literal["typed", "handwritten", "unknown"]
+LanguageHint = Literal["latin", "devanagari", "mixed", "unknown"]
 
 class PageManifest(BaseModel):
     page_num: int = Field(..., ge=1, description="1-indexed page number")
@@ -18,6 +22,9 @@ class PageManifest(BaseModel):
     width: int = Field(..., gt=0)
     height: int = Field(..., gt=0)
     sha256: str = Field(..., min_length=64, max_length=64, description="sha256 of the PNG")
+    page_type: PageType = Field("other", description="triage / classifier page label")
+    content_type: ContentType = Field("unknown", description="typed vs handwritten (triage)")
+    language_hint: LanguageHint = Field("unknown", description="dominant script (triage OSD)")
 
 
 class Manifest(BaseModel):
