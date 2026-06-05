@@ -19,9 +19,6 @@ LanguageHint = Literal["latin", "devanagari", "mixed", "unknown"]
 class PageManifest(BaseModel):
     page_num: int = Field(..., ge=1, description="1-indexed page number")
     s3_key: str = Field(..., description="documents/<doc_id>/pages/page_NNN.png")
-    width: int = Field(..., gt=0)
-    height: int = Field(..., gt=0)
-    sha256: str = Field(..., min_length=64, max_length=64, description="sha256 of the PNG")
     page_type: PageType = Field("other", description="triage / classifier page label")
     content_type: ContentType = Field("unknown", description="typed vs handwritten (triage)")
     language_hint: LanguageHint = Field("unknown", description="dominant script (triage OSD)")
@@ -29,12 +26,7 @@ class PageManifest(BaseModel):
 
 class Manifest(BaseModel):
     schema_version: int = 1
-    document_id: str = Field(..., min_length=64, max_length=64, description="sha256 of original PDF")
-    original_name: str
-    original_sha256: str = Field(..., min_length=64, max_length=64)
-    s3_key_original: str = Field(..., description="documents/<doc_id>/original.pdf")
-    page_count: int = Field(..., gt=0)
+    document_id: str = Field(..., description="sha256 of original PDF")
+    original_s3_key: str = Field(..., description="documents/<doc_id>/original.pdf")
+    document_category: str = Field(..., description="practitioner|letter|receipt|record|other — NAS hint, classifier refines")
     pages: list[PageManifest]
-    preprocessed_at: datetime
-    nas_host: str | None = None
-    preprocess_version: str = "1.0.0"

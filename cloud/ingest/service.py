@@ -143,8 +143,8 @@ async def handle_manifest(manifest: Manifest) -> None:
         await doc_repo.update_fields(
             manifest.document_id,
             document_category=result.document_category,
-            match_status=MatchStatus.PENDING,
-        )
+            match_status=None if result.match_reference_data else MatchStatus.NOT_APPLICABLE,
+        )       
         if blank_page_nums:
             await page_repo.bulk_update_ocr_status(
                 manifest.document_id, blank_page_nums, OCRStatus.SKIPPED

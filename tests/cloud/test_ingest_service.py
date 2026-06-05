@@ -1,5 +1,6 @@
 """Unit tests for cloud/ingest/service.py — all externals mocked."""
 from __future__ import annotations
+from datetime import datetime, timezone
 
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
@@ -29,7 +30,6 @@ def _make_manifest(
         document_category=category,
         pages=[PageManifest(**p) for p in pages],
     )
-
 
 def _make_classifier_result(category: str, confidence: float = 0.9) -> ClassificationResult:
     return ClassificationResult(
