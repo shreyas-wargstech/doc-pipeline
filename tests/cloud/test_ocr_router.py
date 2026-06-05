@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from cloud.ingest.storage_db import OCRStatus
 from cloud.ocr.models import OcrResult, OcrWord
 from cloud.ocr.router import OcrRouter
 from cloud.ocr.tiers.base import TierNotImplemented
@@ -92,7 +93,7 @@ async def test_typed_starts_tesseract_high_conf_done():
 
     assert res.tier == "tesseract"
     assert t.calls == 1 and v.calls == 0  # no escalation
-    assert repo.saved[0]["ocr_status"].value == "done"
+    assert repo.saved[0]["ocr_status"] == OCRStatus.DONE
     assert repo.saved[0]["structured_json"]["entities"] == []
     assert repo.saved[0]["structured_json"]["ocr_confidence"] == 95.0
 
@@ -117,7 +118,7 @@ async def test_low_conf_but_next_tier_stub_keeps_best():
     res = await router.process_page(_msg("typed"), b"img", repo)
 
     assert res.tier == "tesseract"  # fell back to best available
-    assert repo.saved[0]["ocr_status"].value == "done"  # low conf still 'done'
+    assert repo.saved[0]["ocr_status"] == OCRStatus.DONE  # low conf still 'done'
     assert res.low_conf_count == 1
 
 
@@ -129,7 +130,7 @@ async def test_handwritten_hits_vision_stub_failed():
     res = await router.process_page(_msg("handwritten"), b"img", repo)
 
     assert res is None  # no tier produced a result
-    assert repo.saved[0]["ocr_status"].value == "failed"
+    assert repo.saved[0]["ocr_status"] == OCRStatus.FAILED
     assert repo.saved[0]["structured_json"] is None
 
 
