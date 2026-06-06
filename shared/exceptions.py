@@ -32,6 +32,10 @@ class PreprocessError(PipelineError):
     """Image preprocessing failure (deskew, threshold, etc.)."""
 
 
+class UploaderError(PipelineError):
+    """NAS uploader failure (PDF render, PNG encode, or S3 upload)."""
+
+
 class OCRError(PipelineError):
     """OCR engine failure or unrecoverable low-confidence result."""
 
