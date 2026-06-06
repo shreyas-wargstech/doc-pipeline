@@ -7,6 +7,11 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# NOTE: the CAST(:x AS text) on each nullable filter param is required, not
+# cosmetic. asyncpg prepares statements via the binary protocol and cannot
+# infer the type of a parameter that only appears in a bare ":x IS NULL"
+# predicate, raising AmbiguousParameterError at prepare time (even when the
+# value is NULL). The cast makes the type explicit. Do not remove.
 _LIST_SQL = text(
     """
     SELECT d.document_id, d.document_category, d.document_type, d.status,
@@ -22,10 +27,10 @@ _LIST_SQL = text(
         FROM pages
         GROUP BY document_id
     ) p ON p.document_id = d.document_id
-    WHERE (:category     IS NULL OR d.document_category = :category)
-      AND (:status       IS NULL OR d.status            = :status)
-      AND (:match_status IS NULL OR d.match_status      = :match_status)
-      AND (:search       IS NULL
+    WHERE (CAST(:category AS text)     IS NULL OR d.document_category = :category)
+      AND (CAST(:status AS text)       IS NULL OR d.status            = :status)
+      AND (CAST(:match_status AS text) IS NULL OR d.match_status      = :match_status)
+      AND (CAST(:search AS text)       IS NULL
            OR d.registration_no   ILIKE :search_like
            OR d.original_filename ILIKE :search_like)
     ORDER BY d.updated_at DESC
@@ -37,10 +42,10 @@ _COUNT_SQL = text(
     """
     SELECT count(*) AS n
     FROM documents d
-    WHERE (:category     IS NULL OR d.document_category = :category)
-      AND (:status       IS NULL OR d.status            = :status)
-      AND (:match_status IS NULL OR d.match_status      = :match_status)
-      AND (:search       IS NULL
+    WHERE (CAST(:category AS text)     IS NULL OR d.document_category = :category)
+      AND (CAST(:status AS text)       IS NULL OR d.status            = :status)
+      AND (CAST(:match_status AS text) IS NULL OR d.match_status      = :match_status)
+      AND (CAST(:search AS text)       IS NULL
            OR d.registration_no   ILIKE :search_like
            OR d.original_filename ILIKE :search_like)
     """

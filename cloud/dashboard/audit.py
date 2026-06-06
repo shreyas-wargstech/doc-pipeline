@@ -49,13 +49,17 @@ async def list_audit(
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Return recent audit rows (newest first), optionally filtered."""
+    # CAST(:x AS text) on each nullable filter: asyncpg prepares statements via
+    # the binary protocol and cannot infer the type of a param used only in a
+    # bare ":x IS NULL" predicate (raises AmbiguousParameterError). The cast
+    # makes the type explicit. Same reason for the casts in queries.py.
     result = await session.execute(
         text(
             "SELECT id, ts, username, action, document_id, params, result, detail "
             "FROM audit_log "
-            "WHERE (:username IS NULL OR username = :username) "
-            "  AND (:document_id IS NULL OR document_id = :document_id) "
-            "  AND (:action IS NULL OR action = :action) "
+            "WHERE (CAST(:username AS text) IS NULL OR username = :username) "
+            "  AND (CAST(:document_id AS text) IS NULL OR document_id = :document_id) "
+            "  AND (CAST(:action AS text) IS NULL OR action = :action) "
             "ORDER BY ts DESC LIMIT :limit OFFSET :offset"
         ),
         {
