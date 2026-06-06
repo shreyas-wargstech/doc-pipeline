@@ -335,3 +335,15 @@
 - Pre-existing tech debt noted (NOT fixed, out of DASH-1 scope): `cloud/classifier/service.py` + `test_classifier_service.py` carry F401/I001 ruff errors on main.
 - Open: review/merge PR #1; manual smoke; DASH-2 (cost) + DASH-3 (eval) still future. Carry-over: GCV creds, OPENROUTER_API_KEY integration tests, uncalibrated triage/preprocess thresholds.
 - Next step: await PR review; on merge, resume `cloud/structure/` stage.
+
+## 2026-06-07 — Pipeline-completion roadmap agreed (planning, no code)
+- Direction: finish the WHOLE pipeline, then smoke-test the full app. User also wants AWS infra (SQS/Lambda/S3) help. Strategy = **local-first** (stage logic is cloud-agnostic + already locally invocable; iterate fast/free; do Lambda packaging of heavy native deps ONCE at the end). "Ok cool" to this; explicit local-first-vs-infra-first confirm still open (default local-first unless infra is urgent).
+- Ground truth (code, not docs): BUILT = nas preprocess+triage, manifest model, cloud ingest (handle_manifest + sqs producer + storage_db), classifier (rules+LLM), OCR router+3 tiers+consumer/Lambda handler, DASH-1 dashboard. STUBS (0-byte) = `nas/uploader/`, `cloud/structure/`, `cloud/persist/`. No match-stage module. No local SQS (`SQS_OCR_QUEUE_URL` empty, no localstack).
+- Remaining sub-projects (each: brainstorm→spec→writing-plans→subagent-driven-development):
+  - **A. nas/uploader/** ← **NEXT STEP**. PDF → render pages (PyMuPDF) → preprocess/triage → upload original.pdf+pages+manifest.json to S3/MinIO → trigger ingest. Unblocks everything (can't get a PDF in today); enables real end-to-end local runs of the already-built ingest→OCR chain via a tiny runner calling `cloud.ocr.consumer.process_record` directly (no SQS).
+  - **B. cloud/structure/** — raw_text → LLM structured extraction → structured_json (OpenRouter, same key as T3).
+  - **C. match stage** — structured_json → rapidfuzz vs ~92K reference_data on RegistrationNo → set match_status + registration_no (match stage owns match_status).
+  - **D. cloud/persist/** — embed→Qdrant (document_pages, 384-dim), graph→Neo4j (MERGE; +Organization/Vendor TBD nodes), finalize Postgres.
+  - **E. orchestration + AWS infra (LAST)** — S3→SQS→Lambda; inter-stage chaining (Lambda-per-stage+SQS vs Step Functions) UNDECIDED; Lambda container images for Tesseract/OpenCV/PyMuPDF; pick Terraform vs SAM/CDK.
+- Recorded to auto-memory `pipeline-completion-roadmap.md` + MEMORY.md.
+- Next step: new session → brainstorm + spec the `nas/uploader/` stage (sub-project A), then writing-plans.
