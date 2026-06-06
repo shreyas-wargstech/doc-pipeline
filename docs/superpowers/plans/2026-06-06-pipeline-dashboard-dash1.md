@@ -128,15 +128,14 @@ Monitor pipeline state + safely re-drive idempotent stages, with HTTP Basic
 auth and an audit trail. See docs/superpowers/specs/2026-06-06-pipeline-dashboard-dash1-design.md.
 """
 from __future__ import annotations
-
-from cloud.dashboard.router import router
-
-__all__ = ["router"]
 ```
 
-> Note: `router` does not exist yet — this import will fail until Task 7. That is
-> expected; do not run this file in isolation before Task 7. It is committed now
-> so later tasks have a stable import target.
+> IMPORTANT: `__init__.py` must NOT import `router` (or any submodule) at package
+> import time. Tasks 3–8 import submodules like `cloud.dashboard.auth` directly,
+> which transitively executes this `__init__.py`; a top-level
+> `from cloud.dashboard.router import router` here would raise ImportError until
+> Task 9 exists. App wiring (Task 10) uses `from cloud.dashboard import router as
+> dashboard_router` (imports the router *module*), so no re-export is needed.
 
 - [ ] **Step 2: Commit**
 
