@@ -24,6 +24,9 @@ db-shell:  ## Open psql shell to local postgres
 init:  ## Initialize all services (idempotent: bucket, collection, constraints)
 	python -m scripts.init_all
 
+serve:  ## Run the cloud pipeline API (local dev)
+	uvicorn cloud.app:app --reload --host 0.0.0.0 --port 8000
+
 test:  ## Run unit tests only
 	pytest -v -m "not integration"
 

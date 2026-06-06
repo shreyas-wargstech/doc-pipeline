@@ -246,3 +246,22 @@
   - LLM classifier `cloud/classifier/llm.py` stub; FastAPI `/pipeline/notify` not wired; GCV creds + Gemini model undecided; triage thresholds uncalibrated; stale docs (TECH_DECISIONS §8, APP_DOC §6.1/§6.2).
 - Next step: pick next stage — FastAPI `/pipeline/notify` wiring OR GCV Tier 2 OCR implementation.
 - Files touched: `cloud/ingest/storage_db.py`, `tests/cloud/conftest.py` (new), `tests/shared/test_integration.py`, `pyproject.toml`, `documentation/error_fixes.md`, `documentation/session_log.md`
+
+## 2026-06-06 — FastAPI /pipeline/notify wired
+- Stage worked on: ingest (HTTP trigger)
+- Done:
+  - Created `cloud/app.py`: FastAPI app with lifespan (configure_logging + dispose_engine on shutdown), `GET /health`, `POST /pipeline/notify` (202 Accepted, background task → `handle_manifest()`), global 500 handler.
+  - `POST /pipeline/notify`: returns 202 immediately; `handle_manifest()` runs async in background; `IngestError` and unexpected exceptions caught + logged (caller already has 202).
+  - Created `tests/cloud/test_app.py`: 7 unit tests — health, 202 happy path, manifest arg correctness, missing field → 422, empty pages, IngestError swallowed, invalid category passes validation (classifier refines).
+  - Added `make serve` to Makefile (uvicorn on :8000 with --reload).
+  - **41 unit tests green** (7 new + 34 prior).
+- Decisions locked:
+  - `/pipeline/notify` returns 202 (not 200) — ingest is async; caller polls DB or logs for completion.
+  - `document_category` in `Manifest` is unconstrained at HTTP layer (plain str) — classifier owns validation; no Literal needed on the model.
+- Open questions (carry-over):
+  - GCV Tier 2 (`cloud/ocr/tiers/vision.py`) still a stub; GCV creds + project not configured.
+  - `cloud/classifier/llm.py` still a stub.
+  - Triage/preprocess thresholds uncalibrated on real scans.
+  - Stale docs: TECH_DECISIONS §8, APP_DOC §6.1/§6.2.
+- Next step: implement GCV Tier 2 (`cloud/ocr/tiers/vision.py`) OR `cloud/classifier/llm.py`.
+- Files touched: `cloud/app.py` (new), `tests/cloud/test_app.py` (new), `Makefile`

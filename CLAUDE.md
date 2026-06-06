@@ -72,16 +72,18 @@ docs/     INTEGRATION.md
 
 ## Current state (as of 2026-06-06)
 
-Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + Tier 1 Tesseract + Vision/Gemini stubs, **48/48 tests green (34 unit + 14 integration)**.
+Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + Tier 1 Tesseract + Vision/Gemini stubs, **FastAPI `cloud/app.py` with `/pipeline/notify` wired**, **55/55 tests green (41 unit + 14 integration)**.
 
 Key storage_db facts (bitten twice — remember):
 - `DocumentRepository.upsert()` stores metadata under key `"metadata_"` (not `"metadata"`) in `.values()` to avoid SQLAlchemy's internal `MetaData` conflict; `_ATTR_TO_SQL_COL` map translates it back to `"metadata"` for `.excluded` access.
 - All three ORM `pg_insert().returning()` calls use `execution_options={"populate_existing": True}` — without this, re-upsert on same PK returns stale identity-map object.
 - `tests/cloud/conftest.py` calls `dispose_engine()` after each test — required on Windows to prevent asyncpg stale-loop errors between function-scoped event loops.
 
-Next step: wire FastAPI `/pipeline/notify` → `handle_manifest()` OR implement GCV Tier 2 (`cloud/ocr/tiers/vision.py`).
+FastAPI app: `cloud/app.py`. Run with `make serve` (uvicorn on :8000). `/pipeline/notify` returns 202 immediately; `handle_manifest()` runs in background task.
 
-Open threads: wire `/pipeline/notify` FastAPI endpoint → `handle_manifest()`; implement `cloud/classifier/llm.py`; wire GCV creds; pick Gemini model; calibrate triage + preprocess thresholds on real scans (all uncalibrated); refresh stale docs (TECH_DECISIONS §8 OCR, APP_DOC §6.1/§6.2).
+Next step: implement GCV Tier 2 (`cloud/ocr/tiers/vision.py`) OR implement `cloud/classifier/llm.py`.
+
+Open threads: implement `cloud/classifier/llm.py`; wire GCV creds; pick Gemini model; calibrate triage + preprocess thresholds on real scans (all uncalibrated); refresh stale docs (TECH_DECISIONS §8 OCR, APP_DOC §6.1/§6.2).
 
 ## Default assumptions (override per task)
 
