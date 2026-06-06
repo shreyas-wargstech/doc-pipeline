@@ -25,6 +25,9 @@ from shared.logging import get_logger
 
 log = get_logger(__name__)
 
+# Fallback model for the injected-client / test path only (which deliberately
+# skips get_settings() to avoid constructing real Settings in unit tests). The
+# production path uses settings.gemini_model — keep both in sync if changing.
 _DEFAULT_MODEL = "gemini-2.5-flash"
 
 # VLMs don't emit per-word confidence. Fixed prior, above the 70 net so T3

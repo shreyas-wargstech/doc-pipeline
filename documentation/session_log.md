@@ -274,6 +274,16 @@
 - Files: `cloud/ocr/tiers/vision.py` (replaced stub), `shared/config.py` (+google_application_credentials), `pyproject.toml` (+dep +gcv marker), `.env.example`, `tests/cloud/test_vision_tier.py` (new).
 - Next: `cloud/classifier/llm.py` OR T3 Gemini.
 
+## 2026-06-06 — T3 Gemini VLM implemented (brainstorm → spec → plan → subagent-driven exec)
+- Stage worked on: ocr (Tier 3 GeminiTier) + router hardening. Full superpowers flow: brainstorming → writing-plans → subagent-driven-development (fresh subagent per task, sonnet; final code-quality review on opus).
+- Spec: `docs/superpowers/specs/2026-06-06-t3-gemini-vlm-design.md`. Plan: `docs/superpowers/plans/2026-06-06-t3-gemini-vlm.md`.
+- Done: `cloud/ocr/tiers/gemini.py` (replaced stub) — `GeminiTier`: API-key auth (`GEMINI_API_KEY`→`Settings.gemini_api_key`, absent=`TierNotImplemented`), model `gemini-2.5-flash` (`Settings.gemini_model`), plain-transcription output (`_ocr_sync` → words split with `_CONF_PRIOR=85.0` + `bbox=(0,0,0,0)`), `run()` async via `anyio.to_thread.run_sync`. `google-genai` v2.8.0; SDK surface verified (`generate_content`, `Part.from_bytes`, `GenerateContentConfig`, `genai_errors.APIError`→`OCRError`).
+- Router fix (deviation from spec's "no router change"): `_default_tiers()` built `VisionTier()`/`GeminiTier()` eagerly → both raise `TierNotImplemented` at construction w/o creds → `OcrRouter()` un-buildable even for typed pages. Added `_UnavailableTier` + `_build_tier` so construction-time `TierNotImplemented` → placeholder that raises at run() (route()'s existing `break` handles it). Fixes a latent Vision build bug too.
+- Tests: `tests/cloud/test_gemini_tier.py` (10 unit + 1 skipped gemini-integration), +2 router tests. **64 unit green, 16 integration deselected. Ruff clean.** Code-quality review = APPROVED-WITH-NITS (model-default-literal comment + .env trailing newline applied; broad-except skip-guard left as acceptable).
+- Decisions locked: see "Key GeminiTier facts" in CLAUDE.md. Confidence prior 85 (above 70 net; T3 top-of-ladder). Injected-client path uses module `_DEFAULT_MODEL` to avoid constructing real `Settings()` in unit tests.
+- Open: GEMINI_API_KEY not set (integration test skipped); same for GCV creds. Next: `cloud/classifier/llm.py`.
+- Commits: 3e1f8f8, ed4c33a, 46f0a2c, a9d96ff, d7bb13f, 2c74ede (+ nits/docs this commit).
+
 ## 2026-06-06 — refreshed stale docs (TECH_DECISIONS §8, APP_DOC §6.1/§6.2)
 - Stage worked on: docs only (no code). Verified every claim against live code (manifest models.py, db/schema.sql) before editing — docs lagged repo.
 - Done:

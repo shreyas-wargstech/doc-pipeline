@@ -72,7 +72,7 @@ docs/     INTEGRATION.md
 
 ## Current state (as of 2026-06-06)
 
-Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + **Tier 1 Tesseract (done) + Tier 2 GCV VisionTier (done) + Tier 3 Gemini (stub)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **52/52 unit tests green + 1 integration test (gcv, skipped until creds)**. `google-genai>=1.0` dep added (resolves 2.8.0); `gemini_api_key` + `gemini_model` config fields added; `gemini` pytest marker registered (T3 setup complete — Tasks 2-6 remaining).
+Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + **Tier 1 Tesseract (done) + Tier 2 GCV VisionTier (done) + Tier 3 Gemini GeminiTier (done)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **64 unit tests green + 2 integration tests (gcv + gemini, skipped until creds/key)**.
 
 Key VisionTier facts (remember):
 - `_bbox` guards against empty vertices → returns `(0, 0, 0, 0)` — real GCV can return no bounding box on noisy scans.
@@ -87,19 +87,11 @@ Key storage_db facts (bitten twice — remember):
 
 FastAPI app: `cloud/app.py`. Run with `make serve` (uvicorn on :8000). `/pipeline/notify` returns 202 immediately; `handle_manifest()` runs in background task.
 
-Tasks 1-4 DONE (2026-06-06): `cloud/ocr/tiers/gemini.py` fully implemented — injectable client, GEMINI_API_KEY guard, `_ocr_sync()` (Gemini SDK call → OcrWord list), `run()` (async anyio thread offload → OcrResult). No NotImplementedError stubs remain. 10/10 unit tests pass, 1 integration test skipped (no key). 62/62 unit tests pass. Commit: a9d96ff.
-
-Task 5 DONE (2026-06-06): `cloud/ocr/router.py` hardened — `_UnavailableTier` placeholder + `_build_tier` helper; `_default_tiers()` now catches `TierNotImplemented` at construction and substitutes `_UnavailableTier` instead of propagating. Router can build even when GCV creds or Gemini key absent (typed pages use only Tesseract). 8/8 unit tests pass. Commit: d7bb13f.
-
-Key _UnavailableTier facts:
-- `_build_tier(name, factory)` wraps construction in try/except TierNotImplemented; logs warning + returns `_UnavailableTier(name, reason)`.
-- `_UnavailableTier.run()` raises `TierNotImplemented(reason)` — router's existing `break` in `route()` handles it gracefully (uses prior `best`).
-- `from collections.abc import Callable` added to imports.
-
-Key GeminiTier facts:
-- `run()` offloads `_ocr_sync` via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
-- `mean_conf = _CONF_PRIOR (85.0)` if words else `0.0` — VLM has no per-word confidence.
-- Words = whitespace split of stripped `response.text`; bbox always `(0,0,0,0)`.
+Key GeminiTier facts (T3, remember):
+- Plain-transcription output: VLM returns verbatim text → split to words with FIXED `_CONF_PRIOR = 85.0` + `bbox=(0,0,0,0)` (VLM pixel-bboxes unreliable on messy scans; downstream Structure uses `raw_text`). 85 is above the 70 net so T3 output is accepted (T3 = top-of-ladder anyway).
+- Auth: `GEMINI_API_KEY` → `Settings.gemini_api_key`; absent = `TierNotImplemented`. Model = `Settings.gemini_model` (default `gemini-2.5-flash`); injected-client/test path uses module `_DEFAULT_MODEL` (keep both in sync).
+- SDK = `google-genai` (v2.8.0): `client.models.generate_content(model, contents=[types.Part.from_bytes(data,mime_type="image/png"), _PROMPT], config=GenerateContentConfig(temperature=0.0))`; `response.text or ""`; `genai_errors.APIError` → `OCRError`. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
+- Router: `_default_tiers()` wraps cloud-tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if creds/key absent, so `OcrRouter()` builds for typed-only pages. Fixed a latent Vision build bug too.
 
 Next step: implement `cloud/classifier/llm.py`.
 
