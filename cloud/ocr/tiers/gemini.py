@@ -73,4 +73,26 @@ class GeminiTier:
         raise NotImplementedError  # implemented in Task 4
 
     def _ocr_sync(self, image: bytes, page_num: int) -> tuple[str, list[OcrWord]]:
-        raise NotImplementedError  # implemented in Task 3
+        try:
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=[
+                    types.Part.from_bytes(data=image, mime_type="image/png"),
+                    _PROMPT,
+                ],
+                config=types.GenerateContentConfig(temperature=0.0),
+            )
+        except genai_errors.APIError as exc:
+            raise OCRError(f"Gemini API error: {exc}") from exc
+
+        raw_text = (response.text or "").strip()
+        words = [
+            OcrWord(
+                text=tok,
+                conf=_CONF_PRIOR,
+                bbox=(0, 0, 0, 0),
+                page_num=page_num,
+            )
+            for tok in raw_text.split()
+        ]
+        return raw_text, words
