@@ -37,7 +37,7 @@ Doc categories: practitioner applications, govt letters, vendor receipts, offici
 ```
 shared/   code used by NAS + Cloud (config, hashing, storage_s3, db, qdrant_client, neo4j_client, exceptions, logging)
 nas/      runs on local NAS — preprocess/ (pipeline + triage), manifest/models.py, uploader/
-cloud/    runs on AWS — ingest/, classifier/, ocr/ (TBD), structure/, persist/
+cloud/    runs on AWS — ingest/, classifier/, ocr/ (router + T1 Tesseract done; T2 Vision/T3 Gemini stubs), structure/, persist/
 scripts/  init_{postgres,minio,qdrant,neo4j,all}.py, load_reference_data.py
 db/       schema.sql (authoritative DDL)
 tests/    shared/ nas/ cloud/ — integration tests gated behind -m integration
@@ -70,13 +70,18 @@ docs/     INTEGRATION.md
 - `match_status` = `matched|unmatched|not_applicable|manual_review`. NULL = not-yet-matched; match stage owns the column.
 - SQS = one message per page; enqueue before final DB write; FIFO dedup key `<document_id>:<page_num>`.
 
-## Current state (as of 2026-06-04)
+## Current state (as of 2026-06-06)
 
-Done: full scaffold, all 4 services live (28 unit tests green), schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired.
+Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + Tier 1 Tesseract + Vision/Gemini stubs, **48/48 tests green (34 unit + 14 integration)**.
 
-Next step: build `cloud/ocr/router.py` + Tier 1 Tesseract.
+Key storage_db facts (bitten twice — remember):
+- `DocumentRepository.upsert()` stores metadata under key `"metadata_"` (not `"metadata"`) in `.values()` to avoid SQLAlchemy's internal `MetaData` conflict; `_ATTR_TO_SQL_COL` map translates it back to `"metadata"` for `.excluded` access.
+- All three ORM `pg_insert().returning()` calls use `execution_options={"populate_existing": True}` — without this, re-upsert on same PK returns stale identity-map object.
+- `tests/cloud/conftest.py` calls `dispose_engine()` after each test — required on Windows to prevent asyncpg stale-loop errors between function-scoped event loops.
 
-Open threads: wire `/pipeline/notify` FastAPI endpoint → `handle_manifest()`; implement `cloud/classifier/llm.py`; wire GCV creds; pick Gemini model; calibrate triage + preprocess thresholds on real scans (all uncalibrated); `get_s3_client()` async factory in `shared/storage_s3.py`; refresh stale docs (TECH_DECISIONS §8 OCR, APP_DOC §6.1/§6.2).
+Next step: wire FastAPI `/pipeline/notify` → `handle_manifest()` OR implement GCV Tier 2 (`cloud/ocr/tiers/vision.py`).
+
+Open threads: wire `/pipeline/notify` FastAPI endpoint → `handle_manifest()`; implement `cloud/classifier/llm.py`; wire GCV creds; pick Gemini model; calibrate triage + preprocess thresholds on real scans (all uncalibrated); refresh stale docs (TECH_DECISIONS §8 OCR, APP_DOC §6.1/§6.2).
 
 ## Default assumptions (override per task)
 

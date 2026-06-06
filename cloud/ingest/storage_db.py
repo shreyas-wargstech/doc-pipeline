@@ -163,6 +163,9 @@ class Page(Base):
 class DocumentRepository:
     """Async repository for documents. All writes idempotent on document_id."""
 
+    # Python attribute names that differ from their SQL column names.
+    _ATTR_TO_SQL_COL: dict[str, str] = {"metadata_": "metadata"}
+
     _DOCUMENT_UPDATE_WHITELIST: frozenset[str] = frozenset(
         {
             "document_category",
@@ -236,14 +239,20 @@ class DocumentRepository:
         }
 
         stmt = pg_insert(Document).values(**values)
-        update_cols = {k: stmt.excluded[k] for k in values if k != "document_id"}
+        update_cols = {
+            self._ATTR_TO_SQL_COL.get(k, k): stmt.excluded[self._ATTR_TO_SQL_COL.get(k, k)]
+            for k in values
+            if k != "document_id"
+        }
         stmt = stmt.on_conflict_do_update(
             index_elements=["document_id"],
             set_=update_cols,
         ).returning(Document)
 
         try:
-            result = await self.session.execute(stmt)
+            result = await self.session.execute(
+                stmt, execution_options={"populate_existing": True}
+            )
             doc = result.scalar_one()
             logger.info(
                 "document_upserted",
@@ -353,7 +362,9 @@ class PageRepository:
         ).returning(Page)
 
         try:
-            result = await self.session.execute(stmt)
+            result = await self.session.execute(
+                stmt, execution_options={"populate_existing": True}
+            )
             page = result.scalar_one()
             logger.info(
                 "page_upserted",
@@ -409,7 +420,9 @@ class PageRepository:
         ).returning(Page)
 
         try:
-            result = await self.session.execute(stmt)
+            result = await self.session.execute(
+                stmt, execution_options={"populate_existing": True}
+            )
             saved = list(result.scalars().all())
             logger.info("pages_bulk_upserted", count=len(saved))
             return saved

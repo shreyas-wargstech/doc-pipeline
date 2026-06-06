@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from shared.config import get_settings
 from shared.neo4j_client import ensure_constraints, session_scope as neo4j_session
 from shared.qdrant_client import VECTOR_SIZE, ensure_collection, get_qdrant
-from shared.storage_s3 import S3Storage
+from shared.storage_s3 import S3Storage, get_s3_client
 
 
 # ─── Postgres ─────────────────────────────────────────────────────────
@@ -39,6 +39,9 @@ async def test_s3_put_if_absent_is_idempotent() -> None:
     s3 = S3Storage()
     key = "_integration_test/sample.txt"
     payload = b"hello-s3"
+    # Delete leftover from prior runs so the first put_if_absent always uploads.
+    async with get_s3_client() as client:
+        await client.delete_object(Bucket=get_settings().s3_bucket, Key=key)
     uploaded_first = await s3.put_if_absent(key, payload)
     uploaded_second = await s3.put_if_absent(key, payload)
     assert uploaded_first is True

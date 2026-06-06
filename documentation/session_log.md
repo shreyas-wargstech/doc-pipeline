@@ -229,3 +229,20 @@
   - Still open from prior sessions: LLM classifier (`cloud/classifier/llm.py`) stub; FastAPI `/pipeline/notify` → `handle_manifest()` not wired; GCV creds + Gemini model undecided; triage/preprocess thresholds uncalibrated; stale docs (TECH_DECISIONS §8, APP_DOC §6.1/§6.2).
 - Next step: apply schema change to DB (FIX-018), land the `metadata_` upsert fix, then build Tier 1 Tesseract under the existing `cloud/ocr/router.py`.
 - Files touched: `cloud/classifier/service.py`, `cloud/ingest/service.py`, `cloud/ingest/storage_db.py`, `db/schema.sql`, `shared/exceptions.py`, `nas/preprocess/triage.py`
+
+## 2026-06-06 — storage_db upsert fixed; integration tests 48/48 green (FIX-020..023)
+- Stage worked on: ingest (storage_db upsert) + test infrastructure
+- Done:
+  - Confirmed DB schema already correct (`'queued'` in CHECK) — containers were fresh (no down-clean needed).
+  - Confirmed TesseractTier + OCR router already fully implemented (pre-existing).
+  - Fixed 4 bugs (see error_fixes FIX-020..023):
+    1. `stmt.excluded["metadata_"]` → `KeyError` because `.excluded` uses SQL column names, not attr names. Fixed via `_ATTR_TO_SQL_COL` class mapping in `DocumentRepository` (FIX-020).
+    2. SQLAlchemy identity map returns stale object on re-upsert same PK. Fixed by adding `execution_options={"populate_existing": True}` to all three ORM `pg_insert().returning()` calls (FIX-021).
+    3. pytest-asyncio Windows: "Event loop is closed" between integration tests due to stale asyncpg pool. Fixed by `tests/cloud/conftest.py` calling `dispose_engine()` after each test; set `asyncio_default_fixture_loop_scope = "function"` in pyproject.toml (FIX-022).
+    4. S3 integration test fails on re-run — leftover key in MinIO. Fixed with `delete_object` pre-clean (FIX-023).
+  - Full suite: **48 passed, 0 failed** (34 unit + 14 integration). First time all integration tests pass.
+- Decisions locked: none new.
+- Open questions (carry-over, unchanged):
+  - LLM classifier `cloud/classifier/llm.py` stub; FastAPI `/pipeline/notify` not wired; GCV creds + Gemini model undecided; triage thresholds uncalibrated; stale docs (TECH_DECISIONS §8, APP_DOC §6.1/§6.2).
+- Next step: pick next stage — FastAPI `/pipeline/notify` wiring OR GCV Tier 2 OCR implementation.
+- Files touched: `cloud/ingest/storage_db.py`, `tests/cloud/conftest.py` (new), `tests/shared/test_integration.py`, `pyproject.toml`, `documentation/error_fixes.md`, `documentation/session_log.md`

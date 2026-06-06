@@ -428,3 +428,61 @@ cfg = PreprocessConfig(threshold=False, denoise=False, deskew=False)
 **Rule:** All stage exceptions live in `shared/exceptions.py` under `PipelineError` (per coding standards). A local `try/except ImportError` exception shim is a smell — it silently breaks `isinstance`/`except PipelineError` when the fallback path is taken.
 
 ---
+
+## 2026-06-06 — storage_db upsert + test isolation fixes
+
+### FIX-020 · `stmt.excluded["metadata_"]` → `KeyError` because `.excluded` uses SQL column names
+
+**Symptom:** `test_document_upsert_practitioner_full_fields` fails with `KeyError: 'metadata_'` at the `on_conflict_do_update` set_ construction.
+
+**Root cause:** `DocumentRepository.upsert()` passes `"metadata_"` (Python attr name) to `.values()`, which SQLAlchemy correctly resolves to the `metadata` column. But the `update_cols` comprehension also used `"metadata_"` as the key into `stmt.excluded`, which only recognises SQL column names (`"metadata"`).
+
+**Fix:** Added `_ATTR_TO_SQL_COL = {"metadata_": "metadata"}` class attr. The `update_cols` comprehension now translates attr→col before indexing `.excluded`.
+
+**Files:** `cloud/ingest/storage_db.py`
+
+**Rule:** When building the `set_=` dict for `on_conflict_do_update`, always use the **SQL column name** (not the Python ORM attribute name). For columns whose ORM attribute differs from the column name (e.g., `metadata_` → `"metadata"`), maintain an explicit translation map.
+
+---
+
+### FIX-021 · SQLAlchemy identity map caches first upsert — re-upsert returns stale object
+
+**Symptom:** Second call to `DocumentRepository.upsert()` (or `PageRepository.upsert/bulk_upsert`) on the same PK returns the original values despite the DB row being updated. `assert d2.status == "processing"` fails — `d2.status` is still `"received"`.
+
+**Root cause:** With `expire_on_commit=False` in the sessionmaker, committed objects stay live in the session's identity map. When `pg_insert().on_conflict_do_update().returning()` runs again on the same PK, SQLAlchemy by default returns the cached identity-map object instead of overwriting it with the RETURNING values.
+
+**Fix:** Pass `execution_options={"populate_existing": True}` to all three `session.execute(stmt)` calls that use `pg_insert(...).on_conflict_do_update(...).returning(...)` (Document.upsert, Page.upsert, Page.bulk_upsert).
+
+**Files:** `cloud/ingest/storage_db.py`
+
+**Rule:** Any ORM `INSERT … ON CONFLICT DO UPDATE … RETURNING` upsert that may hit the identity map must use `execution_options={"populate_existing": True}`. Without it, re-upserts on the same PK silently return stale values.
+
+---
+
+### FIX-022 · pytest-asyncio on Windows: "Event loop is closed" between integration tests
+
+**Symptom:** Integration tests in `tests/cloud/test_storage_db.py` alternately PASS and ERROR at setup with `RuntimeError: Event loop is closed` / `'NoneType' object has no attribute 'send'`.
+
+**Root cause:** pytest-asyncio (function-scope default) creates a new event loop per test. The module-level asyncpg pool in `shared/db.py` holds connections bound to the previous (now-closed) loop. When the next test's setup tries to reuse a pooled connection, asyncpg writes to the old loop → crash.
+
+**Fix:** Added `tests/cloud/conftest.py` with `_dispose_db_engine` autouse async fixture that calls `shared.db.dispose_engine()` after each test, resetting the module-level engine singleton so the next test starts with a fresh pool on its own loop. Also set `asyncio_default_fixture_loop_scope = "function"` in `pyproject.toml` to suppress the deprecation warning.
+
+**Files:** `tests/cloud/conftest.py` (new), `pyproject.toml`
+
+**Rule:** Any integration test file that uses the shared `session_scope()` engine must apply `dispose_engine()` in an autouse fixture teardown. The module-level asyncpg pool is NOT safe to share across function-scoped event loops on Windows (ProactorEventLoop).
+
+---
+
+### FIX-023 · S3 integration test fails on re-run — key left over from prior session
+
+**Symptom:** `test_s3_put_if_absent_is_idempotent` fails with `assert False is True` on `uploaded_first` — the first `put_if_absent` returns `False` because the key already exists in MinIO from a previous run.
+
+**Root cause:** Test used a hardcoded key `_integration_test/sample.txt` with no pre-run cleanup, so any prior test session leaves the key behind.
+
+**Fix:** Added `await client.delete_object(...)` (via `get_s3_client()`) before the first `put_if_absent`. `delete_object` is a no-op if the key doesn't exist, so the test is now always idempotent.
+
+**Files:** `tests/shared/test_integration.py`
+
+**Rule:** Integration tests that assert "first upload returns True" must delete the key at test start. Never rely on a test being the first to run.
+
+---
