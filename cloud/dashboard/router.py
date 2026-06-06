@@ -172,11 +172,14 @@ async def action_requeue(
     page_nums: str | None = Form(default=None),
     user: str = Depends(require_user),
 ):
-    parsed = (
-        [int(x) for x in page_nums.split(",") if x.strip()]
-        if page_nums else None
-    )
+    # Parse inside the try so a malformed page_nums (e.g. "2,abc") surfaces as an
+    # error toast like every other failure here, not an uncaught 500.
+    parsed: list[int] | None = None
     try:
+        parsed = (
+            [int(x) for x in page_nums.split(",") if x.strip()]
+            if page_nums else None
+        )
         n = await actions.requeue_ocr(document_id, page_nums=parsed)
         await _audit(username=user, action="requeue_ocr", document_id=document_id,
                      params={"page_nums": parsed}, result="ok", detail=f"{n} pages")
