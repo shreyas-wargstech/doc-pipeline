@@ -7,9 +7,11 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from google.genai import errors as genai_errors
 
 from cloud.ocr.tiers.base import TierNotImplemented
-from cloud.ocr.tiers.gemini import GeminiTier
+from cloud.ocr.tiers.gemini import _CONF_PRIOR, GeminiTier
+from shared.exceptions import OCRError
 
 
 def test_no_api_key_raises_tier_not_implemented():
@@ -31,11 +33,6 @@ def test_model_override():
     """Explicit model arg wins over the default."""
     tier = GeminiTier(client=MagicMock(), model="gemini-2.0-flash")
     assert tier._model == "gemini-2.0-flash"
-
-
-from cloud.ocr.tiers.gemini import _CONF_PRIOR
-from google.genai import errors as genai_errors
-from shared.exceptions import OCRError
 
 
 class _FakeAPIError(genai_errors.APIError):

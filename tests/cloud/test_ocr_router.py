@@ -6,8 +6,11 @@ parser is exercised by monkeypatching `pytesseract.image_to_data`.
 
 from __future__ import annotations
 
+import types as _types
+
 import pytest
 
+import cloud.ocr.router as router_mod
 from cloud.ingest.storage_db import OCRStatus
 from cloud.ocr.models import OcrResult, OcrWord
 from cloud.ocr.router import OcrRouter
@@ -175,11 +178,6 @@ async def test_tesseract_parses_dict_filters_negative_conf(monkeypatch):
 
 
 # ── _default_tiers hardening ─────────────────────────────────────────────
-import types as _types
-
-import cloud.ocr.router as router_mod
-
-
 def test_default_tiers_tolerates_unconfigured_cloud_tiers(monkeypatch):
     """If VisionTier/GeminiTier raise TierNotImplemented at construction,
     _default_tiers substitutes _UnavailableTier instead of propagating."""
