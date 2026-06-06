@@ -1,7 +1,10 @@
 """Control actions: thin wrappers over existing idempotent stage entry points.
 
-Never performs a stage's own DB write directly — re-drives the stage. Callers
-(the router) wrap these and write the audit row.
+Re-drives a stage through its real entry point wherever one exists
+(`reingest` → handle_manifest, `requeue_ocr` → enqueue_page). The exception is
+`reclassify`, which writes category/type directly via `update_fields` because
+classify has no single re-drive entry point of its own. Callers (the router)
+wrap these and write the audit row.
 """
 from __future__ import annotations
 
@@ -80,6 +83,12 @@ async def requeue_ocr(document_id: str, page_nums: list[int] | None = None) -> i
     ]
     enqueued: list[int] = []
     for p in selected:
+        # content_type / language_hint are NOT persisted on the page row, so a
+        # requeued page falls back to OcrPageMessage's "unknown" defaults and the
+        # OCR confidence-net handles routing. (pages.language_detected is the
+        # post-OCR script eng|mar|hin|mixed — a different vocabulary from the
+        # pre-OCR language_hint latin|devanagari|mixed|unknown — so it is
+        # deliberately NOT forwarded here.)
         msg = OcrPageMessage(
             document_id=document_id,
             page_num=p.page_num,
