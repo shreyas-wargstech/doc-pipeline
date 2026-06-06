@@ -1,4 +1,4 @@
-"""Tier 3 — Gemini VLM.
+"""Tier 3 — Gemini VLM (via OpenRouter).
 
 Last-resort OCR for messy / hardest-handwriting pages the lower tiers flunk.
 Plain transcription only: the VLM returns verbatim text, which we split into
@@ -6,16 +6,19 @@ words with a fixed confidence prior and zero bounding boxes — VLM pixel-bboxes
 are unreliable on the messy scans this tier handles, and the downstream
 Structure stage works off `raw_text`.
 
-Auth: API key via GEMINI_API_KEY. Absent → TierNotImplemented so the router
-degrades gracefully (mirrors VisionTier). The sync SDK call is offloaded to
+Transport: OpenRouter's OpenAI-compatible Chat Completions API, reached with the
+`openai` SDK pointed at `OPENROUTER_BASE_URL`. The model is still Gemini (id
+`google/gemini-2.5-flash`) — OpenRouter is just the gateway. Auth via
+OPENROUTER_API_KEY; absent → TierNotImplemented so the router degrades
+gracefully (mirrors VisionTier). The sync SDK call is offloaded to
 anyio.to_thread.run_sync, identical to TesseractTier / VisionTier.
 """
 from __future__ import annotations
 
+import base64
+
 import anyio
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types
+from openai import OpenAI, OpenAIError
 
 from cloud.ocr.models import OcrResult, OcrWord
 from cloud.ocr.tiers.base import TierNotImplemented
@@ -27,8 +30,8 @@ log = get_logger(__name__)
 
 # Fallback model for the injected-client / test path only (which deliberately
 # skips get_settings() to avoid constructing real Settings in unit tests). The
-# production path uses settings.gemini_model — keep both in sync if changing.
-_DEFAULT_MODEL = "gemini-2.5-flash"
+# production path uses settings.openrouter_model — keep both in sync if changing.
+_DEFAULT_MODEL = "google/gemini-2.5-flash"
 
 # VLMs don't emit per-word confidence. Fixed prior, above the 70 net so T3
 # output is accepted; T3 is top-of-ladder so escalation is moot regardless.
@@ -48,7 +51,7 @@ class GeminiTier:
 
     def __init__(
         self,
-        client: genai.Client | None = None,
+        client: OpenAI | None = None,
         *,
         model: str | None = None,
     ) -> None:
@@ -58,12 +61,15 @@ class GeminiTier:
             self._model = model or _DEFAULT_MODEL
         else:
             settings = get_settings()
-            if not settings.gemini_api_key:
+            if not settings.openrouter_api_key:
                 raise TierNotImplemented(
-                    "Gemini not configured: set GEMINI_API_KEY"
+                    "OpenRouter not configured: set OPENROUTER_API_KEY"
                 )
-            self._client = genai.Client(api_key=settings.gemini_api_key)
-            self._model = model or settings.gemini_model
+            self._client = OpenAI(
+                base_url=settings.openrouter_base_url,
+                api_key=settings.openrouter_api_key,
+            )
+            self._model = model or settings.openrouter_model
 
     async def run(
         self,
@@ -95,19 +101,25 @@ class GeminiTier:
         )
 
     def _ocr_sync(self, image: bytes, page_num: int) -> tuple[str, list[OcrWord]]:
+        data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
         try:
-            response = self._client.models.generate_content(
+            response = self._client.chat.completions.create(
                 model=self._model,
-                contents=[
-                    types.Part.from_bytes(data=image, mime_type="image/png"),
-                    _PROMPT,
+                temperature=0.0,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _PROMPT},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
                 ],
-                config=types.GenerateContentConfig(temperature=0.0),
             )
-        except genai_errors.APIError as exc:
-            raise OCRError(f"Gemini API error: {exc}") from exc
+        except OpenAIError as exc:
+            raise OCRError(f"OpenRouter API error: {exc}") from exc
 
-        raw_text = (response.text or "").strip()
+        raw_text = (response.choices[0].message.content or "").strip()
         words = [
             OcrWord(
                 text=tok,

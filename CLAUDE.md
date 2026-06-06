@@ -62,7 +62,8 @@ docs/     INTEGRATION.md
 - Embedding model: `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, Cosine). Locked — changing = full re-embed.
 - Qdrant collection `document_pages`, 384-dim, Cosine.
 - Neo4j: `Document.document_id` UNIQUE, `Page.page_id` UNIQUE, Person merges on `registration_no`; index `(Entity.type, Entity.value)`. Rels: `HAS_PAGE`, `MENTIONS`, `BELONGS_TO`, `MATCHES`. All writes MERGE.
-- OCR = PROACTIVE classify-first routing (not reactive cascade). Tiers: T1 Tesseract `eng+mar+hin` (typed) → T2 Google Cloud Vision DOCUMENT_TEXT_DETECTION (handwriting, eng+devanagari) → T3 Gemini VLM (messy). Confidence-net (70) retained as safety net.
+- OCR = PROACTIVE classify-first routing (not reactive cascade). Tiers: T1 Tesseract `eng+mar+hin` (typed) → T2 Google Cloud Vision DOCUMENT_TEXT_DETECTION (handwriting, eng+devanagari) → T3 Gemini VLM via OpenRouter (messy). Confidence-net (70) retained as safety net.
+- T3 transport = OpenRouter (OpenAI-compatible `openai` SDK), model `google/gemini-2.5-flash`. REJECTED: Google AI Studio direct + Vertex AI (user is on OpenRouter).
 - REJECTED: AWS Textract (no Devanagari). LangChain/LangGraph (SQS/Lambda already orchestrate; flows too short). Old Qwen/Gemma local fallback (superseded by tier model).
 - `app_no` = BIGINT (overflows INT32). TEXT date cols store ISO `YYYY-MM-DD`; only `cr_dt` is TIMESTAMPTZ (datetime objects).
 - Reference data: per-chunk transactions + idempotent `ON CONFLICT` (single-txn wrapping caused full rollback on partial fail).
@@ -89,8 +90,8 @@ FastAPI app: `cloud/app.py`. Run with `make serve` (uvicorn on :8000). `/pipelin
 
 Key GeminiTier facts (T3, remember):
 - Plain-transcription output: VLM returns verbatim text → split to words with FIXED `_CONF_PRIOR = 85.0` + `bbox=(0,0,0,0)` (VLM pixel-bboxes unreliable on messy scans; downstream Structure uses `raw_text`). 85 is above the 70 net so T3 output is accepted (T3 = top-of-ladder anyway).
-- Auth: `GEMINI_API_KEY` → `Settings.gemini_api_key`; absent = `TierNotImplemented`. Model = `Settings.gemini_model` (default `gemini-2.5-flash`); injected-client/test path uses module `_DEFAULT_MODEL` (keep both in sync).
-- SDK = `google-genai` (v2.8.0): `client.models.generate_content(model, contents=[types.Part.from_bytes(data,mime_type="image/png"), _PROMPT], config=GenerateContentConfig(temperature=0.0))`; `response.text or ""`; `genai_errors.APIError` → `OCRError`. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
+- Transport = **OpenRouter** (OpenAI-compatible), NOT google-genai/Vertex. Auth: `OPENROUTER_API_KEY` → `Settings.openrouter_api_key`; absent = `TierNotImplemented`. Base url `Settings.openrouter_base_url` (default `https://openrouter.ai/api/v1`). Model = `Settings.openrouter_model` (default `google/gemini-2.5-flash`, OpenRouter-namespaced); injected-client/test path uses module `_DEFAULT_MODEL` (keep both in sync).
+- SDK = `openai` (`OpenAI(base_url=..., api_key=...)`): `client.chat.completions.create(model, temperature=0.0, messages=[{role:user, content:[{type:text,text:_PROMPT},{type:image_url,image_url:{url:"data:image/png;base64,..."}}]}])`; `response.choices[0].message.content or ""`; `openai.OpenAIError` → `OCRError`. Image sent as base64 data-URL. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
 - Router: `_default_tiers()` wraps cloud-tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if creds/key absent, so `OcrRouter()` builds for typed-only pages. Fixed a latent Vision build bug too.
 
 Next step: implement `cloud/classifier/llm.py`.

@@ -284,6 +284,15 @@
 - Open: GEMINI_API_KEY not set (integration test skipped); same for GCV creds. Next: `cloud/classifier/llm.py`.
 - Commits: 3e1f8f8, ed4c33a, 46f0a2c, a9d96ff, d7bb13f, 2c74ede (+ nits/docs this commit).
 
+## 2026-06-06 — T3 transport switched to OpenRouter (user runs on OpenRouter)
+- Stage worked on: ocr (Tier 3) — backend swap, same OcrResult contract.
+- Done: replaced google-genai with the OpenAI-compatible `openai` SDK against OpenRouter. `cloud/ocr/tiers/gemini.py`: `OpenAI(base_url=settings.openrouter_base_url, api_key=settings.openrouter_api_key)`, `chat.completions.create` with image as base64 `image_url` data-URL, `response.choices[0].message.content`, `openai.OpenAIError`→`OCRError`. Model `google/gemini-2.5-flash`. Tier name stays "gemini" (still the Gemini model; OpenRouter = transport).
+- Config: dropped `gemini_api_key`/`gemini_model`; added `openrouter_api_key` + `openrouter_base_url` (default https://openrouter.ai/api/v1) + `openrouter_model` (default `google/gemini-2.5-flash`). pyproject: `google-genai`→`openai>=1.0`; pytest marker `gemini`→`openrouter`. `.env.example` updated.
+- Tests: rewrote mocks to the openai chat-completions shape (`choices[0].message.content`), `_FakeAPIError(genai.APIError)`→`_FakeOpenAIError(OpenAIError)`, integration gate → `OPENROUTER_API_KEY`. **64 unit green, 16 deselected, ruff clean, zero stale gemini/google refs.**
+- Docs synced: CLAUDE.md (locked decisions + GeminiTier facts), TECH_DECISIONS §8 (T3 row + subsection + §18), spec revision banner.
+- Open: set `OPENROUTER_API_KEY` to exercise the skipped integration test. Next: `cloud/classifier/llm.py`.
+- NOTE: must `uv sync --extra dev` (not bare `uv sync`) — bare sync prunes pytest (dev extra).
+
 ## 2026-06-06 — refreshed stale docs (TECH_DECISIONS §8, APP_DOC §6.1/§6.2)
 - Stage worked on: docs only (no code). Verified every claim against live code (manifest models.py, db/schema.sql) before editing — docs lagged repo.
 - Done:

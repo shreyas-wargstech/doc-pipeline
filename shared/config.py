@@ -48,9 +48,14 @@ class Settings(BaseSettings):
         None, alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
 
-    # Gemini (Tier 3 OCR)
-    gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field("gemini-2.5-flash", alias="GEMINI_MODEL")
+    # OpenRouter (Tier 3 OCR — Gemini VLM via OpenAI-compatible gateway)
+    openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")
+    openrouter_base_url: str = Field(
+        "https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
+    )
+    openrouter_model: str = Field(
+        "google/gemini-2.5-flash", alias="OPENROUTER_MODEL"
+    )
 
 
 @lru_cache

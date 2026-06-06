@@ -1,13 +1,14 @@
 """Unit tests for GeminiTier (cloud/ocr/tiers/gemini.py).
 
-The genai client is fully mocked — no real API calls in unit tests.
+Gemini reached via OpenRouter's OpenAI-compatible API. The openai client is
+fully mocked — no real API calls in unit tests.
 """
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from google.genai import errors as genai_errors
+from openai import OpenAIError
 
 from cloud.ocr.tiers.base import TierNotImplemented
 from cloud.ocr.tiers.gemini import _CONF_PRIOR, GeminiTier
@@ -17,8 +18,8 @@ from shared.exceptions import OCRError
 def test_no_api_key_raises_tier_not_implemented():
     """GeminiTier() with no client AND no key → TierNotImplemented."""
     with patch("cloud.ocr.tiers.gemini.get_settings") as mock_settings:
-        mock_settings.return_value.gemini_api_key = None
-        with pytest.raises(TierNotImplemented, match="GEMINI_API_KEY"):
+        mock_settings.return_value.openrouter_api_key = None
+        with pytest.raises(TierNotImplemented, match="OPENROUTER_API_KEY"):
             GeminiTier()
 
 
@@ -26,25 +27,28 @@ def test_injected_client_skips_key_check():
     """A provided client bypasses the creds check (test path)."""
     tier = GeminiTier(client=MagicMock())
     assert tier.name == "gemini"
-    assert tier._model == "gemini-2.5-flash"
+    assert tier._model == "google/gemini-2.5-flash"
 
 
 def test_model_override():
     """Explicit model arg wins over the default."""
-    tier = GeminiTier(client=MagicMock(), model="gemini-2.0-flash")
-    assert tier._model == "gemini-2.0-flash"
+    tier = GeminiTier(client=MagicMock(), model="google/gemini-2.0-flash-001")
+    assert tier._model == "google/gemini-2.0-flash-001"
 
 
-class _FakeAPIError(genai_errors.APIError):
-    """APIError whose constructor we control (the real one's signature
-    varies across SDK versions)."""
+class _FakeOpenAIError(OpenAIError):
+    """OpenAIError whose constructor we control (concrete subclasses like
+    APIError require message/request/body args)."""
     def __init__(self) -> None:
         Exception.__init__(self, "quota exceeded")
 
 
 def _mock_client_returning(text: str) -> MagicMock:
+    """Mock an openai client whose chat.completions.create returns `text`."""
     client = MagicMock()
-    client.models.generate_content.return_value = MagicMock(text=text)
+    message = MagicMock(content=text)
+    choice = MagicMock(message=message)
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
     return client
 
 
@@ -69,19 +73,17 @@ def test_ocr_sync_strips_and_handles_empty():
 
 
 def test_ocr_sync_none_text_handled():
-    """response.text is None (blocked/empty) → no crash, empty result."""
-    client = MagicMock()
-    client.models.generate_content.return_value = MagicMock(text=None)
-    tier = GeminiTier(client=client)
+    """message.content is None (blocked/empty) → no crash, empty result."""
+    tier = GeminiTier(client=_mock_client_returning(None))
     raw_text, words = tier._ocr_sync(b"x", page_num=1)
     assert raw_text == ""
     assert words == []
 
 
 def test_ocr_sync_api_error_becomes_ocr_error():
-    """SDK APIError → OCRError (not a silent return)."""
+    """SDK OpenAIError → OCRError (not a silent return)."""
     client = MagicMock()
-    client.models.generate_content.side_effect = _FakeAPIError()
+    client.chat.completions.create.side_effect = _FakeOpenAIError()
     tier = GeminiTier(client=client)
     with pytest.raises(OCRError, match="quota exceeded"):
         tier._ocr_sync(b"x", page_num=1)
@@ -129,25 +131,25 @@ async def test_run_offloads_to_thread():
 
 
 # ---------------------------------------------------------------------------
-# Integration test — skipped unless a Gemini API key is configured
+# Integration test — skipped unless an OpenRouter API key is configured
 # ---------------------------------------------------------------------------
 
-def _gemini_configured() -> bool:
+def _openrouter_configured() -> bool:
     try:
         from shared.config import get_settings
-        return bool(get_settings().gemini_api_key)
+        return bool(get_settings().openrouter_api_key)
     except Exception:
         return False
 
 
 @pytest.mark.integration
-@pytest.mark.gemini
-@pytest.mark.skipif(not _gemini_configured(), reason="GEMINI_API_KEY not set")
+@pytest.mark.openrouter
+@pytest.mark.skipif(not _openrouter_configured(), reason="OPENROUTER_API_KEY not set")
 @pytest.mark.asyncio
 async def test_gemini_tier_real_image():
     """Sends a real PNG to Gemini and checks a well-formed result comes back.
 
-    Requires GEMINI_API_KEY pointing to a valid Google AI Studio key.
+    Requires OPENROUTER_API_KEY pointing to a valid OpenRouter key.
     """
     import struct
     import zlib

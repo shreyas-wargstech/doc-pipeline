@@ -2,7 +2,19 @@
 
 **Date:** 2026-06-06
 **Stage:** `cloud/ocr` — Tier 3 (final OCR tier)
-**Status:** Approved, pending implementation
+**Status:** Implemented
+
+> **Revised 2026-06-06 (post-implementation):** transport switched from Google
+> AI Studio direct (`google-genai` SDK, `GEMINI_API_KEY`) to **OpenRouter** —
+> the user runs on OpenRouter. T3 now uses the OpenAI-compatible `openai` SDK
+> against `OPENROUTER_BASE_URL` with model id `google/gemini-2.5-flash`, auth via
+> `OPENROUTER_API_KEY`, and the image passed as a base64 `image_url` data-URL.
+> Everything else below (pure-tier contract, plain-transcription output,
+> `_CONF_PRIOR=85.0`, zero bbox, sync+`anyio.to_thread`, router hardening) is
+> unchanged. Mentally substitute: `GEMINI_API_KEY`→`OPENROUTER_API_KEY`,
+> `gemini_model`→`openrouter_model`, `genai.Client`→`openai.OpenAI(base_url=...)`,
+> `generate_content`/`response.text`→`chat.completions.create`/
+> `choices[0].message.content`, `genai_errors.APIError`→`openai.OpenAIError`.
 
 ## Goal
 

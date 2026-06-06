@@ -229,7 +229,7 @@ proactive router (catches typed pages Tesseract mangles).
 |---|---|---|---|
 | **T1** | Tesseract `eng+mar+hin` (`pytesseract`) | Typed / printed pages | ✅ done |
 | **T2** | Google Cloud Vision `DOCUMENT_TEXT_DETECTION` | Handwriting (English + Devanagari) | ✅ done |
-| **T3** | Gemini VLM | Messy / Vision-flunk edge cases | ⛔ stub |
+| **T3** | Gemini VLM via OpenRouter (`google/gemini-2.5-flash`) | Messy / Vision-flunk edge cases | ✅ done |
 
 Escalation is by **difficulty (typed → handwritten → messy)**, not by language —
 one tool (GCV) covers handwritten-English *and* handwritten-Devanagari, so we
@@ -251,11 +251,17 @@ don't fan out per script.
 - Sync SDK (`google-cloud-vision>=3.7`) wrapped in `anyio.to_thread.run_sync`
   (mirrors the TesseractTier pattern); word-level parsing, conf ×100.
 
-### T3 — Gemini VLM
+### T3 — Gemini VLM (via OpenRouter)
 
 - Last-resort tier for messy scans / pages the lower tiers flunk. VLM reads the
-  page image directly (no character segmentation). **Model + cost not yet
-  decided** (see §18).
+  page image directly (no character segmentation).
+- **Transport = OpenRouter**, reached with the `openai` SDK pointed at
+  `OPENROUTER_BASE_URL` (OpenAI-compatible Chat Completions). The user runs on
+  OpenRouter, so we go through it rather than Google AI Studio direct or Vertex
+  AI. Model id `google/gemini-2.5-flash` (OpenRouter-namespaced).
+- Auth via `OPENROUTER_API_KEY` → `Settings.openrouter_api_key`; absent →
+  `TierNotImplemented` (graceful degradation). Image sent as a base64
+  `image_url` data-URL. Sync call offloaded via `anyio.to_thread.run_sync`.
 
 **Alternatives considered / rejected:**
 
@@ -431,5 +437,6 @@ don't fan out per script.
 | torch / sentence-transformers as optional extras | Accepted for now (~2GB install) | Slow cold starts on Lambda if not containerised |
 | Pre-commit hooks (ruff + mypy) | Deferred | Code quality drift in fast-moving dev phase |
 | Heavy dep split | Low priority | Revisit before Lambda deployment |
-| Gemini VLM model selection (T3 OCR + structure) | Pending | T3 tier stubbed; final model (e.g. gemini-2.x-flash) + cost depends on accuracy vs latency benchmarks on sample PDFs. Qwen/Gemma local VLM dropped (§8). |
+| Gemini VLM model tuning (T3 OCR + structure) | Resolved (model) / Pending (calibration) | T3 done via OpenRouter `google/gemini-2.5-flash` (§8). Cost/accuracy on real sample PDFs not yet benchmarked. Qwen/Gemma local VLM dropped. |
+| OpenRouter API key | Pending | T3 implemented but unexercised; OpenRouter integration test skipped until `OPENROUTER_API_KEY` set. |
 | Google Cloud Vision credentials / project | Pending | T2 implemented but unexercised; GCV integration test skipped until `GOOGLE_APPLICATION_CREDENTIALS` set. |
