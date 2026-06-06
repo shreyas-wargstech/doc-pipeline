@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
@@ -66,10 +67,12 @@ async def doc_list(
             session, **filters, limit=_PAGE_SIZE, offset=offset
         )
         total = await queries.count_documents(session, **filters)
+    # Carry active filters across pagination so Prev/Next don't reset the view.
+    filter_qs = urlencode({k: v for k, v in filters.items() if v})
     return templates.TemplateResponse(
         request, "doc_list.html",
         {"documents": documents, "total": total, "filters": filters,
-         "offset": offset, "limit": _PAGE_SIZE},
+         "offset": offset, "limit": _PAGE_SIZE, "filter_qs": filter_qs},
     )
 
 

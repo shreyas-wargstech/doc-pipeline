@@ -30,6 +30,17 @@ def test_doc_list_renders(client):
     assert "practitioner" in resp.text
 
 
+def test_doc_list_pagination_preserves_filters(client):
+    # offset=50, limit=50, total=200 → both Prev and Next pager links render.
+    with patch.object(dash_router.queries, "list_documents", AsyncMock(return_value=[])), \
+         patch.object(dash_router.queries, "count_documents", AsyncMock(return_value=200)):
+        resp = client.get("/dashboard/?search=ashish&category=practitioner&offset=50")
+    assert resp.status_code == 200
+    # Pager links carry the active filters instead of resetting to the full set.
+    assert "search=ashish" in resp.text
+    assert "category=practitioner" in resp.text
+
+
 def test_reingest_action_calls_action_and_writes_audit(client):
     with patch.object(dash_router.actions, "reingest",
                       AsyncMock(return_value={"document_id": "d"})) as act, \

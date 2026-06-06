@@ -33,7 +33,7 @@
   </tbody>
 </table>
 <div class="pager">
-  {% if offset > 0 %}<a href="/dashboard/?offset={{ [offset - limit, 0]|max }}">Prev</a>{% endif %}
-  {% if offset + limit < total %}<a href="/dashboard/?offset={{ offset + limit }}">Next</a>{% endif %}
+  {% if offset > 0 %}<a href="/dashboard/?offset={{ [offset - limit, 0]|max }}{% if filter_qs %}&{{ filter_qs }}{% endif %}">Prev</a>{% endif %}
+  {% if offset + limit < total %}<a href="/dashboard/?offset={{ offset + limit }}{% if filter_qs %}&{{ filter_qs }}{% endif %}">Next</a>{% endif %}
 </div>
 {% endblock %}
