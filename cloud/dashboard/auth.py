@@ -5,6 +5,8 @@ applies require_user as a dependency; the returned username feeds the audit log.
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from passlib.hash import bcrypt
@@ -31,7 +33,7 @@ async def _lookup_hash(username: str) -> str | None:
 
 
 async def require_user(
-    credentials: HTTPBasicCredentials = Depends(_security),
+    credentials: Annotated[HTTPBasicCredentials, Depends(_security)],
 ) -> str:
     """FastAPI dependency: validate Basic credentials, return the username."""
     stored = await _lookup_hash(credentials.username)
