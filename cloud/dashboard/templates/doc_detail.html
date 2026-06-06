@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.document_id[:12] }}{% endblock %}
+{% block content %}
+<h1>Document {{ doc.document_id[:16] }}…</h1>
+<a href="/dashboard/">&larr; all documents</a>
+
+<section class="meta">
+  <dl>
+    <dt>Category</dt><dd>{{ doc.document_category }}</dd>
+    <dt>Type</dt><dd>{{ doc.document_type or '—' }}</dd>
+    <dt>Status</dt><dd>{{ doc.status }}</dd>
+    <dt>Match</dt><dd>{{ doc.match_status or '—' }}</dd>
+    <dt>Registration</dt><dd>{{ doc.registration_no or '—' }}</dd>
+    <dt>Pages</dt><dd>{{ doc.page_count }}</dd>
+  </dl>
+</section>
+
+<section class="stages">
+  <h2>Pipeline stages</h2>
+  <ul>
+    <li>Ingested ✓</li>
+    <li>Classified {{ '✓' if doc.document_type else '…' }}</li>
+    <li>OCR {{ ocr_done }}/{{ pages|length }}</li>
+    <li>Structured {{ structured_done }}/{{ pages|length }}</li>
+    <li>Persisted <em>(not implemented)</em></li>
+  </ul>
+</section>
+
+<section class="controls">
+  <h2>Controls</h2>
+  <div id="toast"></div>
+  <button hx-post="/dashboard/doc/{{ doc.document_id }}/ingest"     hx-target="#toast">Re-run ingest</button>
+  <button hx-post="/dashboard/doc/{{ doc.document_id }}/requeue-ocr" hx-target="#toast">Requeue OCR (all)</button>
+  <button hx-post="/dashboard/doc/{{ doc.document_id }}/reclassify"  hx-target="#toast">Re-classify</button>
+</section>
+
+<section class="pages">
+  <h2>Pages</h2>
+  <table>
+    <thead><tr><th>#</th><th>Type</th><th>OCR</th><th>Conf</th><th>Lang</th><th></th></tr></thead>
+    <tbody>
+    {% for p in pages %}
+      <tr>
+        <td>{{ p.page_num }}</td>
+        <td>{{ p.page_type or '—' }}</td>
+        <td>{{ p.ocr_status }}</td>
+        <td>{{ '%.0f'|format(p.confidence_score) if p.confidence_score is not none else '—' }}</td>
+        <td>{{ p.language_detected or '—' }}</td>
+        <td><a href="/dashboard/doc/{{ doc.document_id }}/page/{{ p.page_num }}">view</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Audit{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<table>
+  <thead><tr><th>When</th><th>User</th><th>Action</th><th>Document</th><th>Result</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr class="{{ 'err' if r.result == 'error' else 'ok' }}">
+      <td>{{ r.ts }}</td><td>{{ r.username }}</td><td>{{ r.action }}</td>
+      <td>{% if r.document_id %}<a href="/dashboard/doc/{{ r.document_id }}">{{ r.document_id[:12] }}…</a>{% else %}—{% endif %}</td>
+      <td>{{ r.result }}</td><td>{{ r.detail or '' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6">No audit entries.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
