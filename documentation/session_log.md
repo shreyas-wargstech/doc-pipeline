@@ -273,3 +273,16 @@
 - Bug fixed during review: `_bbox` empty-vertices crash → `(0,0,0,0)` fallback; error check switched from `.message` to `.code`.
 - Files: `cloud/ocr/tiers/vision.py` (replaced stub), `shared/config.py` (+google_application_credentials), `pyproject.toml` (+dep +gcv marker), `.env.example`, `tests/cloud/test_vision_tier.py` (new).
 - Next: `cloud/classifier/llm.py` OR T3 Gemini.
+
+## 2026-06-06 — refreshed stale docs (TECH_DECISIONS §8, APP_DOC §6.1/§6.2)
+- Stage worked on: docs only (no code). Verified every claim against live code (manifest models.py, db/schema.sql) before editing — docs lagged repo.
+- Done:
+  - TECH_DECISIONS §8 rewritten: old reactive Tesseract→Qwen/Gemma confidence-cascade → **proactive classify-first tier routing**. Tier table (T1 Tesseract done / T2 GCV done / T3 Gemini stub), routing keyed off triage `content_type`, 70-gate retained as safety net. Textract = REJECTED (no Devanagari); Qwen/Gemma = SUPERSEDED.
+  - §17 thresholds: "LLM fallback gate" → "tier-escalation gate"; reworded OCR confidence row to "escalate to next tier".
+  - §18 deferred: Qwen/Gemma row → Gemini T3 model selection; added GCV creds row.
+  - APP_DOC §6.1: PageManifest now shows `content_type` + correct `LanguageHint` Literal (latin|devanagari|mixed|unknown); dropped stale `"eng+mar"` example; added Literal aliases + triage→router note.
+  - APP_DOC §6.2: `match_status` fixed to NULL|matched|unmatched|not_applicable|manual_review (was pending|matched|manual_review|unmatched); `ocr_status` +`queued`; ENUM→`TEXT CHECK`; added `applicant_name_raw`; `reference_data_id` BIGINT→INTEGER FK.
+- Decisions locked: none new (docs realigned to existing locked contracts).
+- Open questions (carry-over): `cloud/classifier/llm.py` stub; GCV creds + skipped integration test; Gemini T3 model undecided; triage/preprocess thresholds uncalibrated.
+- Next step: implement `cloud/classifier/llm.py` OR T3 Gemini VLM.
+- Files touched: `documentation/TECH_DECISIONS.md`, `documentation/APP_DOCUMENTATION.md`, `CLAUDE.md` (open threads).

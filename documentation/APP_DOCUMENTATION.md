@@ -339,34 +339,47 @@ NEO4J_PASSWORD=password
 ### 6.1 Manifest (`nas/manifest/models.py`)
 
 ```python
+# Literal aliases (single source of truth — OcrPageMessage imports these)
+PageType     = Literal["blank", "cover", "form", "receipt", "certificate", "other"]
+ContentType  = Literal["typed", "handwritten", "unknown"]      # triage
+LanguageHint = Literal["latin", "devanagari", "mixed", "unknown"]  # triage OSD
+
 class PageManifest(BaseModel):
-    page_num: int
-    s3_key: str
-    page_type: str          # blank | cover | form | receipt | certificate | other
-    language_hint: str      # e.g. "eng+mar"
+    page_num: int                          # 1-indexed
+    s3_key: str                            # documents/<doc_id>/pages/page_NNN.png
+    page_type: PageType = "other"          # triage / classifier page label
+    content_type: ContentType = "unknown"  # typed vs handwritten → OCR tier routing
+    language_hint: LanguageHint = "unknown"  # dominant script (triage OSD)
 
 class Manifest(BaseModel):
     schema_version: int = 1
     document_id: str        # SHA-256 of original PDF
     original_s3_key: str
-    document_category: str  # practitioner | letter | receipt | record | other
+    document_category: str  # practitioner | letter | receipt | record | other (NAS hint, classifier refines)
     pages: list[PageManifest]
 ```
+
+> `content_type` + `language_hint` are produced by NAS-side triage (§9 / triage.py)
+> and drive the proactive OCR tier router (`typed`→T1 Tesseract, `handwritten`→T2
+> Vision). `width`/`height`/`sha256` were dropped from the slim contract.
 
 ### 6.2 Postgres Schema (`db/schema.sql`)
 
 **`documents`**
 
+> Status/category columns are `TEXT` + `CHECK` (not Postgres `ENUM` types) — see `db/schema.sql`.
+
 | Column | Type | Notes |
 |---|---|---|
 | `document_id` | `TEXT PK` | SHA-256 |
-| `document_category` | `ENUM` | practitioner\|letter\|receipt\|record\|other |
+| `document_category` | `TEXT CHECK` | practitioner\|letter\|receipt\|record\|other |
 | `application_number` | `TEXT` | nullable |
-| `registration_no` | `TEXT` | nullable; FK to reference_data |
+| `registration_no` | `TEXT` | nullable; join key to reference_data |
+| `applicant_name_raw` | `TEXT` | nullable; as OCR'd, pre-normalization |
 | `dob` | `DATE` | nullable |
 | `gender` | `TEXT` | nullable |
-| `match_status` | `ENUM` | pending\|matched\|manual_review\|unmatched |
-| `reference_data_id` | `BIGINT FK` | nullable |
+| `match_status` | `TEXT CHECK` | NULL (not-yet-matched) \| matched \| unmatched \| not_applicable \| manual_review — match stage owns this column |
+| `reference_data_id` | `INTEGER FK` | nullable; → reference_data(id) |
 | `metadata` | `JSONB` | category-specific fields |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | auto-managed |
 
@@ -378,9 +391,9 @@ class Manifest(BaseModel):
 | `document_id` | `TEXT FK` | → documents |
 | `page_num` | `INT` | |
 | `s3_key` | `TEXT` | PNG location |
-| `page_type` | `TEXT` | blank\|cover\|form\|receipt\|certificate\|other |
-| `language_detected` | `TEXT` | |
-| `ocr_status` | `ENUM` | pending\|done\|skipped\|failed |
+| `page_type` | `TEXT` | triage/classifier label (e.g. cover, form, certificate, blank) |
+| `language_detected` | `TEXT` | eng \| mar \| hin \| mixed |
+| `ocr_status` | `TEXT CHECK` | pending \| queued \| done \| failed \| skipped |
 | `structured_json` | `JSONB` | LLM/OCR structured output |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
 

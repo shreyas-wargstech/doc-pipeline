@@ -89,7 +89,7 @@ FastAPI app: `cloud/app.py`. Run with `make serve` (uvicorn on :8000). `/pipelin
 
 Next step: implement `cloud/classifier/llm.py` OR T3 Gemini VLM.
 
-Open threads: wire `/pipeline/notify` FastAPI endpoint → `handle_manifest()` (done); implement `cloud/classifier/llm.py`; wire GCV creds; pick Gemini model; calibrate triage + preprocess thresholds on real scans (all uncalibrated); refresh stale docs (TECH_DECISIONS §8 OCR, APP_DOC §6.1/§6.2).
+Open threads: implement `cloud/classifier/llm.py`; wire GCV creds (+ run skipped GCV integration test); pick Gemini model; calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs — TECH_DECISIONS §8 (proactive tier routing replaces Qwen/Gemma cascade) + §17/§18 rows + APP_DOC §6.1 (content_type added) / §6.2 (match_status values, ocr_status queued, TEXT+CHECK not ENUM).
 
 ## Default assumptions (override per task)
 

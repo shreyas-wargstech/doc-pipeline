@@ -208,31 +208,64 @@ Distance:    Cosine
 
 ---
 
-## 8. OCR Engine
+## 8. OCR Engine — Proactive Tier Routing
 
-### Primary: Tesseract (via `pytesseract`)
+> **Revised 2026-05-26 (strategy) / 2026-06-06 (impl).** Replaces the old
+> reactive confidence-cascade (Tesseract → Qwen/Gemma VLM on low confidence).
+> The cascade was abandoned because Tesseract is bad at handwriting and can
+> emit *confident garbage* that slips the 70 gate — so a reactive net never
+> fires. We now **classify first, then route** to the right engine up front.
 
-**Chosen because:**
-- `image_to_data(output_type=DICT)` returns per-word confidence scores and bounding boxes — essential for the confidence-handling stage.
-- Supports `eng+mar+hin` language packs natively.
-- Open source; no API cost; runs locally on NAS.
-- Mature; well-understood failure modes.
+### Routing model
 
-**Language pack:** `eng+mar+hin` (English + Marathi + Hindi). Tesseract handles Devanagari script reasonably well when trained data is loaded.
+Triage (NAS-side, see §9) labels each page with a `content_type`
+(`typed | handwritten | unknown`) and a `language_hint`
+(`latin | devanagari | mixed | unknown`). `cloud/ocr/router.py` picks the
+**starting tier** from `content_type`, then escalates on failure / low
+confidence. The 70-confidence gate is **retained as a safety net** under the
+proactive router (catches typed pages Tesseract mangles).
 
-**Fallback: Qwen / Gemma VLM**
-- Triggered when page-level average confidence < `OCR_CONFIDENCE_THRESHOLD` (70).
-- Vision-language model processes the page image directly; not dependent on character-level segmentation.
-- Dev: runs locally. Prod: Lambda-hosted.
+| Tier | Engine | Handles | Status |
+|---|---|---|---|
+| **T1** | Tesseract `eng+mar+hin` (`pytesseract`) | Typed / printed pages | ✅ done |
+| **T2** | Google Cloud Vision `DOCUMENT_TEXT_DETECTION` | Handwriting (English + Devanagari) | ✅ done |
+| **T3** | Gemini VLM | Messy / Vision-flunk edge cases | ⛔ stub |
 
-**Alternatives considered:**
+Escalation is by **difficulty (typed → handwritten → messy)**, not by language —
+one tool (GCV) covers handwritten-English *and* handwritten-Devanagari, so we
+don't fan out per script.
+
+### T1 — Tesseract (via `pytesseract`)
+
+- `image_to_data(output_type=DICT)` returns per-word confidence + bounding
+  boxes — feeds the confidence-net gate.
+- `eng+mar+hin` language packs; handles Devanagari reasonably on *typed* text.
+- Open source, no API cost, runs locally on NAS / in Lambda.
+
+### T2 — Google Cloud Vision (`DOCUMENT_TEXT_DETECTION`)
+
+- **Vendor = Cloud Vision, not Document AI** — Vision's dense-text mode covers
+  handwritten English and handwritten Devanagari in one call.
+- Auth via `GOOGLE_APPLICATION_CREDENTIALS` → `Settings.google_application_credentials`;
+  absent creds degrade gracefully to `TierNotImplemented`.
+- Sync SDK (`google-cloud-vision>=3.7`) wrapped in `anyio.to_thread.run_sync`
+  (mirrors the TesseractTier pattern); word-level parsing, conf ×100.
+
+### T3 — Gemini VLM
+
+- Last-resort tier for messy scans / pages the lower tiers flunk. VLM reads the
+  page image directly (no character segmentation). **Model + cost not yet
+  decided** (see §18).
+
+**Alternatives considered / rejected:**
 
 | Option | Why not |
 |---|---|
-| PaddleOCR | Good multilingual support; considered as primary fallback; slightly more complex setup |
-| docTR | Strong on printed text; less tested on mixed-script Devanagari |
-| Google Vision API / AWS Textract | API cost; data privacy concern (government documents); network dependency |
-| EasyOCR | Weaker on dense multi-column layouts; slower than Tesseract |
+| **AWS Textract** | **Rejected** — no Devanagari (only eng/spa/ger/fre/ita/por; handwriting English-only). |
+| **Qwen / Gemma local VLM** | **Superseded** — was the old reactive fallback; replaced by the GCV (T2) + Gemini (T3) tiers. |
+| PaddleOCR | Good multilingual support but heavier setup; T1+T2 cover the need. |
+| docTR | Strong on printed text; weaker on mixed-script Devanagari. |
+| EasyOCR | Weaker on dense multi-column layouts; slower than Tesseract. |
 
 ---
 
@@ -378,13 +411,13 @@ Distance:    Cosine
 
 | Parameter | Value | How set | Notes |
 |---|---|---|---|
-| OCR confidence threshold | **70** | Config (`OCR_CONFIDENCE_THRESHOLD`) | Tokens below this trigger fuzzy match / LLM fallback. 70 chosen as balance between over-flagging (too high) and accepting garbage (too low). Tunable per document type. |
+| OCR confidence threshold | **70** | Config (`OCR_CONFIDENCE_THRESHOLD`) | Safety-net gate under the proactive router (§8): page-average confidence below this escalates to the next OCR tier. 70 balances over-flagging (too high) vs accepting garbage (too low). Tunable per document type. |
 | Embedding dimensions | **384** | Locked (model choice) | Changing requires full re-embed of all vectors. Do not change without planning a migration. |
 | Qdrant distance metric | **Cosine** | Locked (collection init) | Changing requires recreating the collection and re-upserting all vectors. |
 | Schema version (manifest) | **1** | `Manifest.schema_version` | Increment when manifest structure changes; enables migration path. |
 | Blank page skip threshold | **TBD** | Config (`BLANK_PAGE_VARIANCE_THRESHOLD`) | Pixel variance below this → skip OCR. Value not yet determined; needs calibration on sample scans. |
 | Fuzzy match threshold | **TBD** | Config (`FUZZY_MATCH_THRESHOLD`) | `rapidfuzz` score above this → accept substitution. Needs calibration. |
-| LLM fallback confidence gate | **70** (same as OCR) | Derived | If Tesseract page-average confidence < 70, route to LLM. May need independent tuning. |
+| Tier-escalation confidence gate | **70** (same as OCR) | Derived | If a tier's page-average confidence < 70, escalate to the next OCR tier (§8). May need independent tuning. |
 | Vector search top-k | **TBD** | Query time | How many Qdrant results to return before Neo4j re-ranking. |
 
 ---
@@ -398,4 +431,5 @@ Distance:    Cosine
 | torch / sentence-transformers as optional extras | Accepted for now (~2GB install) | Slow cold starts on Lambda if not containerised |
 | Pre-commit hooks (ruff + mypy) | Deferred | Code quality drift in fast-moving dev phase |
 | Heavy dep split | Low priority | Revisit before Lambda deployment |
-| LLM model selection for fallback OCR + structure | Pending | Qwen/Gemma shortlisted; final choice depends on accuracy vs latency benchmarks on sample PDFs |
+| Gemini VLM model selection (T3 OCR + structure) | Pending | T3 tier stubbed; final model (e.g. gemini-2.x-flash) + cost depends on accuracy vs latency benchmarks on sample PDFs. Qwen/Gemma local VLM dropped (§8). |
+| Google Cloud Vision credentials / project | Pending | T2 implemented but unexercised; GCV integration test skipped until `GOOGLE_APPLICATION_CREDENTIALS` set. |
