@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -65,3 +66,36 @@ async def test_reingest_loads_manifest_and_calls_handle_manifest():
          patch.object(actions, "handle_manifest", AsyncMock()) as hm:
         await actions.reingest("d")
     hm.assert_awaited_once_with(fake_manifest)
+
+
+@pytest.mark.asyncio
+async def test_reclassify_forces_content_path_and_persists_both_fields():
+    """Re-classify must force trust_manifest_hint=False (so it re-derives from
+    cover text rather than echoing the NAS hint with document_type=None, which
+    would null out an existing good document_type) and persist both fields."""
+    fake_manifest = object()
+    result = MagicMock()
+    result.document_category = "practitioner"
+    result.document_type = "renewal"
+
+    svc_instance = MagicMock()
+    svc_instance.classify = AsyncMock(return_value=result)
+
+    repo_instance = MagicMock()
+    repo_instance.update_fields = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield MagicMock()
+
+    with patch.object(actions, "_load_manifest", AsyncMock(return_value=fake_manifest)), \
+         patch.object(actions, "ClassifierService", return_value=svc_instance), \
+         patch.object(actions, "session_scope", fake_scope), \
+         patch.object(actions, "DocumentRepository", return_value=repo_instance):
+        out = await actions.reclassify("d")
+
+    svc_instance.classify.assert_awaited_once_with(fake_manifest, trust_manifest_hint=False)
+    repo_instance.update_fields.assert_awaited_once_with(
+        "d", document_category="practitioner", document_type="renewal"
+    )
+    assert out == {"document_category": "practitioner", "document_type": "renewal"}

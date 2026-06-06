@@ -105,9 +105,16 @@ async def requeue_ocr(document_id: str, page_nums: list[int] | None = None) -> i
 
 
 async def reclassify(document_id: str) -> dict[str, Any]:
-    """Re-run the classifier and persist the new category/type."""
+    """Re-run the classifier on the doc's cover text and persist category/type.
+
+    Forces ``trust_manifest_hint=False`` so this re-derives the classification
+    from the document's actual cover text (PyMuPDF text layer → Tesseract). The
+    default hint path would merely echo the stored NAS category with
+    document_type=None — re-classifying via that path would null out an existing
+    good document_type, a data regression.
+    """
     manifest = await _load_manifest(document_id)
-    result = await ClassifierService().classify(manifest)
+    result = await ClassifierService().classify(manifest, trust_manifest_hint=False)
     async with session_scope() as session:
         await DocumentRepository(session).update_fields(
             document_id,

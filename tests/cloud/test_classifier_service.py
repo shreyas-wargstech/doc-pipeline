@@ -85,6 +85,20 @@ async def test_manifest_hint_other_falls_through():
     assert result.method != "manifest_hint"
 
 
+@pytest.mark.asyncio
+async def test_trust_manifest_hint_false_bypasses_hint():
+    """trust_manifest_hint=False forces the cover-text path even for a
+    non-'other' category (used by the dashboard Re-classify control)."""
+    svc = ClassifierService(s3_client=MagicMock())
+    m = _manifest(category="practitioner")
+    with (
+        patch("cloud.classifier.service._pdf_text_layer", new=AsyncMock(return_value="")),
+        patch("cloud.classifier.service._ocr_cover_page", new=AsyncMock(return_value="")),
+    ):
+        result = await svc.classify(m, trust_manifest_hint=False)
+    assert result.method != "manifest_hint"
+
+
 # ---------------------------------------------------------------------------
 # Rules-engine path
 # ---------------------------------------------------------------------------
