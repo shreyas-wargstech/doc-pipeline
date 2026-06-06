@@ -629,3 +629,6 @@ Every storage decision (what gets embedded, what becomes a node, what payload is
 | Blank page skip logic | Medium | Pixel-variance threshold value TBD |
 | Heavy dep split (torch/sentence-transformers) | Low | Currently ~2GB install; consider optional extras |
 | Pre-commit hooks | Low | Deferred |
+| Ops/control dashboard — DASH-1 (operational) | Planned | FastAPI + HTMX/Jinja in new `cloud/dashboard/` pkg. Monitor + control (doc/stage status, inspect outputs, trigger ingest, idempotent stage re-drive, match-rate) + basic auth + `audit_log` table. Ready to build (reads existing state). See TECH_DECISIONS §19. |
+| Ops/control dashboard — DASH-2 (cost tracking) | Planned | Add `ocr_tier` to `pages`; instrument OCR tiers + `classifier/llm.py` → new `cost_events` table; cost views. Blocked on that plumbing. TECH_DECISIONS §19. |
+| Ops/control dashboard — DASH-3 (accuracy eval lab) | Planned | Ground-truth store + eval runner (OCR/classification accuracy, T1/T2/T3 tier comparison). Blocked on ground-truth data. TECH_DECISIONS §19. |

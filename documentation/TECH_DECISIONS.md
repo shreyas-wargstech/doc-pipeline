@@ -24,6 +24,7 @@
 16. [Data Validation](#16-data-validation)
 17. [Thresholds Reference](#17-thresholds-reference)
 18. [Deferred / Pending Decisions](#18-deferred--pending-decisions)
+19. [Operations / Control Dashboard (planned)](#19-operations--control-dashboard-planned)
 
 ---
 
@@ -440,3 +441,46 @@ don't fan out per script.
 | Gemini VLM model tuning (T3 OCR + structure) | Resolved (model) / Pending (calibration) | T3 done via OpenRouter `google/gemini-2.5-flash` (§8). Cost/accuracy on real sample PDFs not yet benchmarked. Qwen/Gemma local VLM dropped. |
 | OpenRouter API key | Pending | T3 implemented but unexercised; OpenRouter integration test skipped until `OPENROUTER_API_KEY` set. |
 | Google Cloud Vision credentials / project | Pending | T2 implemented but unexercised; GCV integration test skipped until `GOOGLE_APPLICATION_CREDENTIALS` set. |
+| Operations / control dashboard | **Planned — deferred** | Brainstormed 2026-06-06; tech locked (FastAPI + HTMX/Jinja), not yet built. 3-phase decomposition — see §19. DASH-2/3 each blocked on new plumbing (tier-tracking + cost events) / ground-truth data. |
+
+---
+
+## 19. Operations / Control Dashboard (planned)
+
+> **Status: planned, deferred (brainstormed 2026-06-06, not built).** Captured
+> here so the tech decision + decomposition survive to a future build session.
+> Full plan also in auto-memory `dashboard-plan.md`.
+
+A web dashboard to **monitor + control** the pipeline (currently driven only via
+`make` targets, SQS, and the `/pipeline/notify` HTTP shim). Deployment target =
+**shared internal, few users** → needs basic auth + an audit trail on control
+actions.
+
+### Tech decision — FastAPI + HTMX/Jinja
+
+Server-rendered pages bolted onto the existing FastAPI app (`cloud/app.py`) in a
+new `cloud/dashboard/` package (templates + static + an `APIRouter`). Served by
+the same uvicorn process; no separate toolchain.
+
+| Option | Decision | Why |
+|---|---|---|
+| **FastAPI + HTMX/Jinja** | **Chosen** | Minimal new deps, lives in `cloud/`, matches the existing async/FastAPI stack, fast to build, one process. |
+| Separate React/Vue SPA | Rejected | Whole new JS toolchain + build step + CORS; more polish than this internal ops tool needs. |
+| Streamlit / Gradio | Rejected | Separate process; weak control over layout/flow; awkward to wire to the existing auth + control seams. |
+
+### Decomposition (phased — build DASH-1 first; DASH-2/3 each get their own spec)
+
+| Phase | Scope | Blocked on |
+|---|---|---|
+| **DASH-1 — Operational dashboard** | Doc list w/ stage status; doc/page detail (inspect `raw_text`, `structured_json`, classification, S3 page image, reference match); trigger ingest (wrap `/pipeline/notify` → `handle_manifest()`); idempotent stage re-drive (re-classify, requeue OCR); match-rate aggregates; basic auth + new `audit_log` table. | Nothing — reads existing Postgres/S3 state. Ready to build. |
+| **DASH-2 — Cost & usage tracking** | Add `ocr_tier` col to `pages`; instrument the 3 OCR tiers + `cloud/classifier/llm.py` to emit token/cost per call → new `cost_events` table; cost-per-doc / per-tier / over-time views. | New schema + cross-cutting instrumentation. |
+| **DASH-3 — Accuracy eval lab** | Ground-truth store + eval runner: OCR accuracy vs truth, classification accuracy, on-demand T1-vs-T2-vs-T3 tier comparison on a page; results views. | Labeled ground-truth data (does not exist yet). |
+
+### Constraints discovered during brainstorm
+
+- `pages` records **no tier** that produced the OCR text → tier comparison +
+  cost attribution blocked until `ocr_tier` added (DASH-2).
+- **No cost/token tracking** anywhere yet.
+- **No ground-truth store** yet.
+- `cloud/structure/` + `cloud/persist/` are **empty stubs** → "per-stage status"
+  shows those stages as not-yet-implemented until built.

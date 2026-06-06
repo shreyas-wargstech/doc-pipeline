@@ -313,3 +313,15 @@
 - Open questions (carry-over): GCV creds; OPENROUTER_API_KEY for skipped integration tests; triage/preprocess thresholds uncalibrated.
 - Next step: implement `cloud/structure/` stage (LLM-driven structured field extraction from OCR output).
 - Files touched: `cloud/classifier/llm.py` (new), `cloud/classifier/service.py` (wired), `tests/cloud/test_llm_classifier.py` (new), `CLAUDE.md`.
+
+## 2026-06-06 — Dashboard brainstormed + DEFERRED (recorded for later)
+- Stage worked on: planning only (no code). Brainstormed an ops/control dashboard; user said record it, build later.
+- Decisions locked (brainstorm): tech = **FastAPI + HTMX/Jinja** (new `cloud/dashboard/` pkg on existing app). Deployment = **shared internal, few users** → basic auth + audit trail. Scope = monitor + control + evals.
+- Decomposition into 3 phased sub-projects (build DASH-1 first; each later one gets its own spec):
+  - **DASH-1 — Operational dashboard (ready now):** doc list w/ stage status; doc/page detail (inspect `raw_text`/`structured_json`/classification/S3 image/reference match); trigger ingest (wrap `/pipeline/notify`); idempotent stage re-drive (re-classify, requeue OCR); match-rate aggregates; basic auth + new `audit_log` table.
+  - **DASH-2 — Cost & usage tracking (needs plumbing):** add `ocr_tier` to `pages`; instrument 3 OCR tiers + `classifier/llm.py` to emit token/cost → new `cost_events` table; dashboard cost views.
+  - **DASH-3 — Accuracy eval lab (needs ground-truth data):** ground-truth store + eval runner (OCR accuracy, classification accuracy, on-demand T1/T2/T3 tier comparison); results views.
+- Key constraints found: `pages` records no tier → blocks tier comparison/cost attribution until `ocr_tier` added; no cost/token tracking yet; no ground-truth store; `cloud/structure/`+`cloud/persist/` are empty stubs (show as not-implemented in stage status).
+- Open questions: none new — superset of existing open threads.
+- Next step (when resumed): present DASH-1 architecture → approval → spec → writing-plans. Saved to auto-memory `dashboard-plan.md`.
+- Files touched: `documentation/session_log.md` (this entry); auto-memory `dashboard-plan.md` + `MEMORY.md`.
