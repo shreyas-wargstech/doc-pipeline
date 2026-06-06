@@ -32,6 +32,7 @@ from nas.manifest.models import Manifest
 from shared.exceptions import ClassifierError
 from shared.storage_s3 import get_s3_client
 
+from .llm import llm_classify as _llm_classify_impl
 from .models import ClassificationResult
 from .rules import classify_text
 
@@ -47,20 +48,11 @@ MAX_COVER_PAGES = 3              # check first N pages for classification signal
 
 
 # ---------------------------------------------------------------------------
-# LLM fallback (placeholder — replace with actual VLM/LLM call)
+# LLM fallback
 # ---------------------------------------------------------------------------
 async def _llm_classify(cover_text: str, manifest: Manifest) -> tuple[str, str | None, float]:
-    """
-    Call LLM to classify when rules are inconclusive.
-    Returns (category, document_type, confidence).
-
-    TODO: implement with Qwen/Gemma or Claude API call.
-          For now raises ClassifierError so callers fall back to 'other'.
-    """
-    raise NotImplementedError(
-        "LLM classifier not yet implemented. "
-        "Install cloud/classifier/llm.py and wire it here."
-    )
+    """Delegate to llm.llm_classify. Raises ClassifierError on failure."""
+    return await _llm_classify_impl(cover_text)
 
 
 # ---------------------------------------------------------------------------
@@ -232,9 +224,8 @@ class ClassifierService:
                 match_reference_data=(category == "practitioner"),
                 skip_ocr=False,
             )
-        except NotImplementedError:
-            # LLM not yet wired — use best rules guess or 'other'
-            bound_log.warning("llm_not_implemented_using_rules_or_other")
+        except ClassifierError as exc:
+            bound_log.error("llm_classifier_error", error=str(exc))
             if rules_result is not None:
                 category, document_type, confidence, signals = rules_result
                 return ClassificationResult(
@@ -242,14 +233,10 @@ class ClassifierService:
                     document_type=document_type,
                     confidence=confidence,
                     method="rules",
-                    signals=signals + ["[llm_skipped]"],
+                    signals=signals + ["[llm_unavailable]"],
                     match_reference_data=(category == "practitioner"),
                     skip_ocr=False,
                 )
-            return _default_other()
-
-        except ClassifierError as exc:
-            bound_log.error("llm_classifier_error", error=str(exc))
             return _default_other()
 
 

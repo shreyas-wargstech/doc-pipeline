@@ -305,3 +305,11 @@
 - Open questions (carry-over): `cloud/classifier/llm.py` stub; GCV creds + skipped integration test; Gemini T3 model undecided; triage/preprocess thresholds uncalibrated.
 - Next step: implement `cloud/classifier/llm.py` OR T3 Gemini VLM.
 - Files touched: `documentation/TECH_DECISIONS.md`, `documentation/APP_DOCUMENTATION.md`, `CLAUDE.md` (open threads).
+
+## 2026-06-06 — LLM classifier implemented (cloud/classifier/llm.py)
+- Stage worked on: classifier (LLM fallback).
+- Done: Created `cloud/classifier/llm.py` — `llm_classify(cover_text, *, client)` async function. Uses same OpenRouter credentials (`openrouter_api_key`/`openrouter_base_url`/`openrouter_model`) as T3 GeminiTier. `_classify_sync` sends system+user prompt (categories + sub-types listed), parses JSON response via `_parse_response`. Parse failure → graceful `("other", None, 0.4)` fallback. Absent key → `ClassifierError`. Sync call offloaded via `anyio.to_thread.run_sync`. Injectable `client` arg for testability. Wired into `service.py`: `_llm_classify` stub replaced with delegate to `llm_classify_impl`; dead `NotImplementedError` catch removed. 14 unit tests green (9 `_parse_response` + 5 async); 88 total unit tests pass, 3 skipped (integration + openrouter).
+- Decisions locked: classifier uses same OpenRouter config as T3 (no separate classifier_model setting). Absent key → `ClassifierError` (not `TierNotImplemented` — classifier is not a tier).
+- Open questions (carry-over): GCV creds; OPENROUTER_API_KEY for skipped integration tests; triage/preprocess thresholds uncalibrated.
+- Next step: implement `cloud/structure/` stage (LLM-driven structured field extraction from OCR output).
+- Files touched: `cloud/classifier/llm.py` (new), `cloud/classifier/service.py` (wired), `tests/cloud/test_llm_classifier.py` (new), `CLAUDE.md`.

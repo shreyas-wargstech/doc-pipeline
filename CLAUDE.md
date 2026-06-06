@@ -94,9 +94,15 @@ Key GeminiTier facts (T3, remember):
 - SDK = `openai` (`OpenAI(base_url=..., api_key=...)`): `client.chat.completions.create(model, temperature=0.0, messages=[{role:user, content:[{type:text,text:_PROMPT},{type:image_url,image_url:{url:"data:image/png;base64,..."}}]}])`; `response.choices[0].message.content or ""`; `openai.OpenAIError` → `OCRError`. Image sent as base64 data-URL. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
 - Router: `_default_tiers()` wraps cloud-tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if creds/key absent, so `OcrRouter()` builds for typed-only pages. Fixed a latent Vision build bug too.
 
-Next step: implement `cloud/classifier/llm.py`.
+Next step: implement `cloud/structure/` stage (LLM-driven structured extraction from OCR text).
 
-Open threads: implement `cloud/classifier/llm.py`; wire GCV creds (+ run skipped GCV integration test); wire Gemini creds (set GEMINI_API_KEY); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs — TECH_DECISIONS §8 (proactive tier routing replaces Qwen/Gemma cascade) + §17/§18 rows + APP_DOC §6.1 (content_type added) / §6.2 (match_status values, ocr_status queued, TEXT+CHECK not ENUM).
+Open threads: wire GCV creds (+ run skipped GCV integration test); wire OPENROUTER_API_KEY (skipped openrouter integration test); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs + implemented cloud/classifier/llm.py (OpenRouter, same key as T3, 14 unit tests green, 88 total).
+
+Key LLM classifier facts (remember):
+- `cloud/classifier/llm.py::llm_classify(cover_text, *, client)` — async, returns `(category, document_type, confidence)`.
+- Uses same `openrouter_api_key` / `openrouter_base_url` / `openrouter_model` as T3 GeminiTier. Absent key → `ClassifierError` (not `TierNotImplemented`).
+- `_classify_sync` is offloaded via `anyio.to_thread.run_sync`. JSON parsed via `_parse_response`; on parse error → `("other", None, 0.4)`.
+- `service.py` wired: `_llm_classify` now delegates to `llm_classify_impl`; `NotImplementedError` catch removed.
 
 ## Default assumptions (override per task)
 
