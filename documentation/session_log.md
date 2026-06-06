@@ -265,3 +265,11 @@
   - Stale docs: TECH_DECISIONS §8, APP_DOC §6.1/§6.2.
 - Next step: implement GCV Tier 2 (`cloud/ocr/tiers/vision.py`) OR `cloud/classifier/llm.py`.
 - Files touched: `cloud/app.py` (new), `tests/cloud/test_app.py` (new), `Makefile`
+
+## 2026-06-06 — GCV Tier 2 VisionTier implemented
+
+- Done: VisionTier fully implemented. Auth via GOOGLE_APPLICATION_CREDENTIALS → `Settings.google_application_credentials`. Sync SDK (`google-cloud-vision>=3.7`) + `anyio.to_thread.run_sync` (mirrors TesseractTier). Word-level parsing, bbox conversion (vertices→(x,y,w,h) with empty-vertices guard), conf ×100. Language hints BCP-47 map. `OCRError` on `response.error.code` (non-zero). `TierNotImplemented` if creds absent.
+- Tests: 11 new unit tests (mocked client) + 1 integration test (skipif no creds). 52/52 unit green.
+- Bug fixed during review: `_bbox` empty-vertices crash → `(0,0,0,0)` fallback; error check switched from `.message` to `.code`.
+- Files: `cloud/ocr/tiers/vision.py` (replaced stub), `shared/config.py` (+google_application_credentials), `pyproject.toml` (+dep +gcv marker), `.env.example`, `tests/cloud/test_vision_tier.py` (new).
+- Next: `cloud/classifier/llm.py` OR T3 Gemini.

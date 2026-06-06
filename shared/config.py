@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     aws_region: str = Field("ap-south-1", alias="AWS_REGION")
     sqs_endpoint_url: str = Field("", alias="SQS_ENDPOINT_URL")
 
+    # Google Cloud Vision (Tier 2 OCR)
+    google_application_credentials: str | None = Field(
+        None, alias="GOOGLE_APPLICATION_CREDENTIALS"
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
