@@ -32,6 +32,7 @@ dependencies = [
     "scikit-image>=0.22",
     # Cloud OCR
     "google-cloud-vision>=3.7",
+    "google-genai>=1.0",
     # Matching + NLP
     "rapidfuzz>=3.6",
     "spacy>=3.7",
@@ -71,4 +72,5 @@ testpaths = ["tests"]
 markers = [
     "integration: requires running services (run with `make test-integration`)",
     "gcv: requires Google Cloud Vision credentials (GOOGLE_APPLICATION_CREDENTIALS set)",
+    "gemini: requires a Gemini API key (GEMINI_API_KEY set)",
 ]

@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         None, alias="GOOGLE_APPLICATION_CREDENTIALS"
     )
 
+    # Gemini (Tier 3 OCR)
+    gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
+    gemini_model: str = Field("gemini-2.5-flash", alias="GEMINI_MODEL")
+
 
 @lru_cache
 def get_settings() -> Settings:
