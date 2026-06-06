@@ -20,6 +20,8 @@ on (fuzzy augment vs manual_review).
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from cloud.ingest.models import OcrPageMessage
 from cloud.ingest.storage_db import OCRStatus, PageRepository
 from cloud.ocr.models import OcrResult, Tier
@@ -43,13 +45,45 @@ _START: dict[str, int] = {
 }
 
 
+class _UnavailableTier:
+    """Stand-in for a cloud tier whose engine isn't configured.
+
+    VisionTier/GeminiTier raise TierNotImplemented at construction when creds
+    are absent. Eagerly building every tier would then fail the whole router —
+    even for typed pages that only need Tesseract. This placeholder raises at
+    run() time instead, so the router's escalation `break` handles it.
+    """
+
+    def __init__(self, name: Tier, reason: str) -> None:
+        self.name = name
+        self._reason = reason
+
+    async def run(
+        self,
+        image: bytes,
+        *,
+        document_id: str,
+        page_num: int,
+        language_hint: str = "unknown",
+    ) -> OcrResult:
+        raise TierNotImplemented(self._reason)
+
+
+def _build_tier(name: Tier, factory: Callable[[], OcrTier]) -> OcrTier:
+    try:
+        return factory()
+    except TierNotImplemented as exc:
+        log.warning("ocr_tier_unconfigured", tier=name, reason=str(exc))
+        return _UnavailableTier(name, str(exc))
+
+
 def _default_tiers() -> dict[Tier, OcrTier]:
     settings = get_settings()
     langs = getattr(settings, "ocr_langs", "eng+mar+hin")
     return {
         "tesseract": TesseractTier(langs=langs),
-        "vision": VisionTier(),
-        "gemini": GeminiTier(),
+        "vision": _build_tier("vision", VisionTier),
+        "gemini": _build_tier("gemini", GeminiTier),
     }
 
 

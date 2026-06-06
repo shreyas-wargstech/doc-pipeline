@@ -172,3 +172,39 @@ async def test_tesseract_parses_dict_filters_negative_conf(monkeypatch):
     assert [w.text for w in res.words] == ["Ashish", "Patil"]  # -1 conf dropped
     assert res.words[0].bbox == (10, 20, 40, 15)
     assert res.mean_conf == pytest.approx(89.0)
+
+
+# ── _default_tiers hardening ─────────────────────────────────────────────
+import types as _types
+
+import cloud.ocr.router as router_mod
+
+
+def test_default_tiers_tolerates_unconfigured_cloud_tiers(monkeypatch):
+    """If VisionTier/GeminiTier raise TierNotImplemented at construction,
+    _default_tiers substitutes _UnavailableTier instead of propagating."""
+    def boom():
+        raise TierNotImplemented("not configured")
+
+    monkeypatch.setattr(router_mod, "VisionTier", boom)
+    monkeypatch.setattr(router_mod, "GeminiTier", boom)
+    monkeypatch.setattr(
+        router_mod, "TesseractTier", lambda langs="x": FakeTier("tesseract")
+    )
+    monkeypatch.setattr(
+        router_mod, "get_settings", lambda: _types.SimpleNamespace(ocr_langs="eng")
+    )
+
+    tiers = router_mod._default_tiers()
+
+    assert tiers["tesseract"].name == "tesseract"
+    assert isinstance(tiers["vision"], router_mod._UnavailableTier)
+    assert isinstance(tiers["gemini"], router_mod._UnavailableTier)
+
+
+@pytest.mark.anyio
+async def test_unavailable_tier_raises_at_run():
+    """_UnavailableTier raises TierNotImplemented when run (so route() breaks)."""
+    t = router_mod._UnavailableTier("vision", "no creds")
+    with pytest.raises(TierNotImplemented, match="no creds"):
+        await t.run(b"img", document_id="d", page_num=1)
