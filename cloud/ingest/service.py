@@ -65,12 +65,8 @@ async def handle_manifest(manifest: Manifest) -> None:
                 document_id=manifest.document_id,
                 page_num=page.page_num,
                 s3_key_image=page.s3_key,
-                page_type=getattr(page, "page_type", None),
-                language_detected=getattr(page, "language_hint", None),
-                # Do not overwrite ocr_status if page is already queued/done —
-                # the upsert updates all columns, so only call with PENDING on
-                # truly fresh records. A re-run of handle_manifest should not
-                # re-queue pages already in flight.
+                page_type=page.page_type,
+                language_detected=page.language_hint,
                 # TODO: switch to INSERT … ON CONFLICT DO NOTHING for pages once
                 # the NAS page_type field is stable, to preserve OCR progress.
                 ocr_status=OCRStatus.PENDING,
@@ -114,8 +110,7 @@ async def handle_manifest(manifest: Manifest) -> None:
     enqueued_msgs: list[OcrPageMessage] = []
 
     for page in manifest.pages:
-        page_type = getattr(page, "page_type", None)
-        if page_type == "blank":
+        if page.page_type == "blank":
             blank_page_nums.append(page.page_num)
             continue
         enqueued_msgs.append(
@@ -124,7 +119,9 @@ async def handle_manifest(manifest: Manifest) -> None:
                 page_num=page.page_num,
                 s3_key=page.s3_key,
                 document_category=result.document_category,
-                page_type=page_type or "other",
+                page_type=page.page_type or "other",
+                content_type=page.content_type,
+                language_hint=page.language_hint,
             )
         )
 

@@ -38,19 +38,7 @@ import structlog
 from pydantic import BaseModel, Field
 from pytesseract import Output
 
-# NOTE: convention is for exception types to live in shared/exceptions.py under
-# the PipelineError hierarchy. Add `TriageError` there and import it instead of
-# the local fallback below when wiring into the repo.
-try:  # pragma: no cover - import shim for standalone use
-    from shared.exceptions import PipelineError
-except Exception:  # pragma: no cover
-
-    class PipelineError(Exception):
-        """Fallback base; replace with shared.exceptions.PipelineError."""
-
-
-class TriageError(PipelineError):
-    """Raised when triage fails and strict mode is on."""
+from shared.exceptions import PipelineError, TriageError  # noqa: F401
 
 
 log = structlog.get_logger(__name__)

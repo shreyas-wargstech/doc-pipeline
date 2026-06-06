@@ -228,7 +228,11 @@ class DocumentRepository:
             "gender": gender,
             "reference_data_id": reference_data_id,
             "match_status": match_status,
-            "metadata": metadata or {},
+            # Use the ORM attribute key (`metadata_`), not the SQL column name
+            # (`metadata`). SQLAlchemy bulk persistence intercepts the literal
+            # "metadata" key as the mapper's MetaData object, which blows up with
+            # `'MetaData' object has no attribute '_bulk_update_tuples'`.
+            "metadata_": metadata or {},
         }
 
         stmt = pg_insert(Document).values(**values)
@@ -516,38 +520,40 @@ class PageRepository:
             page_type=page_type,
         )
         return page
- 
-async def save_ocr_result(
-    self,
-    *,
-    page_id: str,
-    structured_json: dict | None,
-    ocr_status: "OCRStatus",
-    language_detected: str | None = None,
-) -> None:
-    """Persist OCR-stage output for one page. Idempotent on page_id —
-    safe to re-run on SQS redelivery. structured_json=None on failure
-    (leaves any prior value untouched via COALESCE-style guard below)."""
-    await self._session.execute(
-        text(
-            """
-            UPDATE pages
-               SET structured_json   = CASE
-                       WHEN :has_json THEN CAST(:structured_json AS jsonb)
-                       ELSE structured_json
-                   END,
-                   ocr_status        = :ocr_status,
-                   language_detected = COALESCE(:language_detected, language_detected)
-             WHERE page_id = :page_id
-            """
-        ),
-        {
-            "page_id": page_id,
-            "has_json": structured_json is not None,
-            "structured_json": json.dumps(structured_json)
-            if structured_json is not None
-            else None,
-            "ocr_status": ocr_status.value,
-            "language_detected": language_detected,
-        },
-    )
+
+    async def save_ocr_result(
+        self,
+        *,
+        page_id: str,
+        structured_json: dict | None,
+        ocr_status: str,
+        language_detected: str | None = None,
+    ) -> None:
+        """Persist OCR-stage output for one page. Idempotent on page_id —
+        safe to re-run on SQS redelivery. structured_json=None on failure
+        (leaves any prior value untouched via COALESCE-style guard below)."""
+        if ocr_status not in OCRStatus.ALL:
+            raise PersistError(f"save_ocr_result: invalid ocr_status {ocr_status!r}")
+        await self.session.execute(
+            text(
+                """
+                UPDATE pages
+                   SET structured_json   = CASE
+                           WHEN :has_json THEN CAST(:structured_json AS jsonb)
+                           ELSE structured_json
+                       END,
+                       ocr_status        = :ocr_status,
+                       language_detected = COALESCE(:language_detected, language_detected)
+                 WHERE page_id = :page_id
+                """
+            ),
+            {
+                "page_id": page_id,
+                "has_json": structured_json is not None,
+                "structured_json": json.dumps(structured_json)
+                if structured_json is not None
+                else None,
+                "ocr_status": ocr_status,
+                "language_detected": language_detected,
+            },
+        )

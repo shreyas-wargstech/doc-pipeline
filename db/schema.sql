@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS pages (
     language_detected    TEXT,                             -- eng | mar | hin | mixed
 
     ocr_status           TEXT        NOT NULL DEFAULT 'pending'
-        CHECK (ocr_status IN ('pending', 'done', 'failed', 'skipped')),
+        CHECK (ocr_status IN ('pending', 'queued', 'done', 'failed', 'skipped')),
 
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),

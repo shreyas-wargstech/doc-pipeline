@@ -24,6 +24,10 @@ class ClassifierError(PipelineError):
     """Document classification failed (rules engine or LLM fallback)."""
 
 
+class TriageError(PipelineError):
+    """Page triage failure (OSD, content-type detection)."""
+
+
 class PreprocessError(PipelineError):
     """Image preprocessing failure (deskew, threshold, etc.)."""
 
