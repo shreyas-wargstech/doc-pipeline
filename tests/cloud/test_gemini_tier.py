@@ -88,3 +88,95 @@ def test_ocr_sync_api_error_becomes_ocr_error():
     tier = GeminiTier(client=client)
     with pytest.raises(OCRError, match="quota exceeded"):
         tier._ocr_sync(b"x", page_num=1)
+
+
+@pytest.mark.asyncio
+async def test_run_returns_correct_ocr_result():
+    """run() produces a complete OcrResult with tier='gemini'."""
+    tier = GeminiTier(client=_mock_client_returning("Quick brown fox"))
+    result = await tier.run(
+        b"img",
+        document_id="doc1",
+        page_num=4,
+        language_hint="devanagari",
+    )
+    assert result.tier == "gemini"
+    assert result.document_id == "doc1"
+    assert result.page_num == 4
+    assert result.language_detected == "devanagari"
+    assert result.raw_text == "Quick brown fox"
+    assert len(result.words) == 3
+    assert result.mean_conf == _CONF_PRIOR
+    assert not result.is_empty
+
+
+@pytest.mark.asyncio
+async def test_run_empty_transcription_zero_conf():
+    """Blank page → empty words, mean_conf 0.0, is_empty True."""
+    tier = GeminiTier(client=_mock_client_returning(""))
+    result = await tier.run(b"img", document_id="d", page_num=1)
+    assert result.words == []
+    assert result.mean_conf == 0.0
+    assert result.is_empty
+
+
+@pytest.mark.asyncio
+async def test_run_offloads_to_thread():
+    """_ocr_sync must run in a worker thread, not on the event loop."""
+    tier = GeminiTier(client=MagicMock())
+    with patch("anyio.to_thread.run_sync", new_callable=AsyncMock) as mock_run:
+        mock_run.return_value = ("", [])
+        await tier.run(b"img", document_id="x", page_num=1)
+    mock_run.assert_awaited_once()
+    assert mock_run.call_args.args[0] == tier._ocr_sync
+
+
+# ---------------------------------------------------------------------------
+# Integration test — skipped unless a Gemini API key is configured
+# ---------------------------------------------------------------------------
+
+def _gemini_configured() -> bool:
+    try:
+        from shared.config import get_settings
+        return bool(get_settings().gemini_api_key)
+    except Exception:
+        return False
+
+
+@pytest.mark.integration
+@pytest.mark.gemini
+@pytest.mark.skipif(not _gemini_configured(), reason="GEMINI_API_KEY not set")
+@pytest.mark.asyncio
+async def test_gemini_tier_real_image():
+    """Sends a real PNG to Gemini and checks a well-formed result comes back.
+
+    Requires GEMINI_API_KEY pointing to a valid Google AI Studio key.
+    """
+    import struct
+    import zlib
+
+    def _minimal_png() -> bytes:
+        def chunk(name: bytes, data: bytes) -> bytes:
+            c = struct.pack(">I", len(data)) + name + data
+            return c + struct.pack(">I", zlib.crc32(name + data) & 0xFFFFFFFF)
+
+        ihdr = struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0)
+        raw = b"".join(b"\x00" + b"\xff\xff\xff" * 8 for _ in range(8))
+        idat = zlib.compress(raw)
+        return (
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", idat)
+            + chunk(b"IEND", b"")
+        )
+
+    tier = GeminiTier()
+    result = await tier.run(
+        _minimal_png(),
+        document_id="gemini_integration_test",
+        page_num=1,
+        language_hint="unknown",
+    )
+    assert result.tier == "gemini"
+    assert isinstance(result.words, list)
+    assert result.mean_conf >= 0.0

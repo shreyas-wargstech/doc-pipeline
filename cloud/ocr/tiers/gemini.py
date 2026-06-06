@@ -70,7 +70,26 @@ class GeminiTier:
         page_num: int,
         language_hint: str = "unknown",
     ) -> OcrResult:
-        raise NotImplementedError  # implemented in Task 4
+        raw_text, words = await anyio.to_thread.run_sync(
+            self._ocr_sync, image, page_num
+        )
+        mean_conf = _CONF_PRIOR if words else 0.0
+        log.info(
+            "gemini_done",
+            document_id=document_id,
+            page_num=page_num,
+            words=len(words),
+            mean_conf=round(mean_conf, 2),
+        )
+        return OcrResult(
+            document_id=document_id,
+            page_num=page_num,
+            tier="gemini",
+            words=words,
+            raw_text=raw_text,
+            mean_conf=mean_conf,
+            language_detected=language_hint,
+        )
 
     def _ocr_sync(self, image: bytes, page_num: int) -> tuple[str, list[OcrWord]]:
         try:
