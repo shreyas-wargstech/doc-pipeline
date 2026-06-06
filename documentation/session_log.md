@@ -325,3 +325,13 @@
 - Open questions: none new — superset of existing open threads.
 - Next step (when resumed): present DASH-1 architecture → approval → spec → writing-plans. Saved to auto-memory `dashboard-plan.md`.
 - Files touched: `documentation/session_log.md` (this entry); auto-memory `dashboard-plan.md` + `MEMORY.md`.
+
+## 2026-06-07 — DASH-1 operational dashboard IMPLEMENTED (PR #1)
+- Stage: new `cloud/dashboard/` package, mounted on `cloud/app.py` at `/dashboard`. Executed the DASH-1 plan task-by-task (subagent-driven-development): per-task spec + quality review, then a whole-branch final review.
+- Done (10 tasks): deps (jinja2/python-multipart/passlib[bcrypt], bcrypt<4 pin) + additive `dashboard_users`/`audit_log` tables; `auth.py` (HTTP Basic, bcrypt, timing-uniform dummy verify, Annotated dep form); `audit.py` (record/list); `queries.py` (read-only aggregates, OCR-progress subquery); `actions.py` (reingest/requeue_ocr/reclassify — re-drive idempotent stages only); router (6 GET + 3 POST, control actions return HTMX toast never 500); templates+vendored HTMX/CSS; `scripts/add_dashboard_user.py`; app wiring.
+- Final-review fixes: **I1 (blocking)** — reclassify clobbered `document_type`→NULL via the manifest-hint short-circuit; added `classify(..., trust_manifest_hint=True)`, reclassify passes False to force cover-text path (spec §5/§11). **M2** — pager now carries active filters. **auth B008** — Annotated dep form. Deferred M3/M4/M5 (image-proxy 500-vs-404, redundant per-route Depends, bcrypt 72B) as acceptable for an internal tool.
+- Verify: `uv run pytest` → **117 passed, 3 skipped** (pre-existing GCV/Gemini integration skips); ruff clean on dashboard scope; `import cloud.app` clean. NOT yet manually smoked (needs `make up` + seed user).
+- Locked: dashboard isolation — `queries.py` SELECT-only, `actions.py` only re-drives existing entry points; audit `username` is an immutable snapshot (no FK by design); `document_type` added to `_DOCUMENT_UPDATE_WHITELIST`.
+- Pre-existing tech debt noted (NOT fixed, out of DASH-1 scope): `cloud/classifier/service.py` + `test_classifier_service.py` carry F401/I001 ruff errors on main.
+- Open: review/merge PR #1; manual smoke; DASH-2 (cost) + DASH-3 (eval) still future. Carry-over: GCV creds, OPENROUTER_API_KEY integration tests, uncalibrated triage/preprocess thresholds.
+- Next step: await PR review; on merge, resume `cloud/structure/` stage.

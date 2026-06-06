@@ -71,9 +71,9 @@ docs/     INTEGRATION.md
 - `match_status` = `matched|unmatched|not_applicable|manual_review`. NULL = not-yet-matched; match stage owns the column.
 - SQS = one message per page; enqueue before final DB write; FIFO dedup key `<document_id>:<page_num>`.
 
-## Current state (as of 2026-06-06)
+## Current state (as of 2026-06-07)
 
-Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + **Tier 1 Tesseract (done) + Tier 2 GCV VisionTier (done) + Tier 3 Gemini GeminiTier (done)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **64 unit tests green + 2 integration tests (gcv + gemini, skipped until creds/key)**.
+Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + **Tier 1 Tesseract + Tier 2 GCV + Tier 3 Gemini (all done)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **DASH-1 operational dashboard (`cloud/dashboard/`, PR #1)**, **117 unit tests green, 3 skipped (gcv/gemini/integration until creds/key)**.
 
 Key VisionTier facts (remember):
 - `_bbox` guards against empty vertices → returns `(0, 0, 0, 0)` — real GCV can return no bounding box on noisy scans.
@@ -94,15 +94,23 @@ Key GeminiTier facts (T3, remember):
 - SDK = `openai` (`OpenAI(base_url=..., api_key=...)`): `client.chat.completions.create(model, temperature=0.0, messages=[{role:user, content:[{type:text,text:_PROMPT},{type:image_url,image_url:{url:"data:image/png;base64,..."}}]}])`; `response.choices[0].message.content or ""`; `openai.OpenAIError` → `OCRError`. Image sent as base64 data-URL. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
 - Router: `_default_tiers()` wraps cloud-tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if creds/key absent, so `OcrRouter()` builds for typed-only pages. Fixed a latent Vision build bug too.
 
-Next step: implement `cloud/structure/` stage (LLM-driven structured extraction from OCR text).
+Next step: await DASH-1 PR #1 review/merge; then implement `cloud/structure/` stage (LLM-driven structured extraction from OCR text).
 
-Open threads: wire GCV creds (+ run skipped GCV integration test); wire OPENROUTER_API_KEY (skipped openrouter integration test); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs + implemented cloud/classifier/llm.py (OpenRouter, same key as T3, 14 unit tests green, 88 total).
+Open threads: review/merge DASH-1 PR #1 (+ manual smoke — not yet run); wire GCV creds (+ run skipped GCV integration test); wire OPENROUTER_API_KEY (skipped openrouter integration test); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-07: DASH-1 operational dashboard (`cloud/dashboard/`, PR #1, 117 tests green). DONE 2026-06-06: refreshed stale docs + implemented cloud/classifier/llm.py (OpenRouter, same key as T3, 14 unit tests green, 88 total).
 
 Key LLM classifier facts (remember):
 - `cloud/classifier/llm.py::llm_classify(cover_text, *, client)` — async, returns `(category, document_type, confidence)`.
 - Uses same `openrouter_api_key` / `openrouter_base_url` / `openrouter_model` as T3 GeminiTier. Absent key → `ClassifierError` (not `TierNotImplemented`).
 - `_classify_sync` is offloaded via `anyio.to_thread.run_sync`. JSON parsed via `_parse_response`; on parse error → `("other", None, 0.4)`.
 - `service.py` wired: `_llm_classify` now delegates to `llm_classify_impl`; `NotImplementedError` catch removed.
+
+Key dashboard (DASH-1) facts (remember):
+- `cloud/dashboard/` (auth, audit, queries, actions, router, templates/, static/) mounted on `cloud/app.py` at `/dashboard`; FastAPI+HTMX/Jinja, HTTP Basic auth. Spec/plan under `docs/superpowers/{specs,plans}/2026-06-06-pipeline-dashboard-dash1*`. Built via PR #1.
+- Isolation (locked): `queries.py` = SELECT-only (no write-repo imports); `actions.py` only re-drives existing idempotent entry points (`handle_manifest`, `enqueue_page`, `ClassifierService`, repo `update_fields`/`bulk_update_ocr_status`) — never writes a stage's tables itself. Every control action writes one `audit_log` row (ok/error) and returns an HTMX toast (HTTP 200, never 500).
+- New additive tables: `dashboard_users` (username PK + bcrypt hash; seed via `python -m scripts.add_dashboard_user <user>`), `audit_log` (result CHECK in ('ok','error'); `username` is an immutable actor snapshot — intentionally NO FK). `document_type` added to `_DOCUMENT_UPDATE_WHITELIST`.
+- `ClassifierService.classify(manifest, *, trust_manifest_hint=True)`: default echoes NAS category hint with `document_type=None`; **reclassify passes `trust_manifest_hint=False`** to force the cover-text path (else it nulls a good document_type). Ingest keeps the default.
+- Auth dep uses `Annotated[HTTPBasicCredentials, Depends(_security)]` (ruff B008: `Depends(<instance>)` in a default is flagged; `Depends(<func>)` is not).
+- bcrypt pinned `<4` (passlib 1.7.4 incompatibility). Deferred minors (acceptable for internal tool): image-proxy 500-vs-404 on S3 miss, redundant per-route Depends on read views, bcrypt 72-byte truncation.
 
 ## Default assumptions (override per task)
 
