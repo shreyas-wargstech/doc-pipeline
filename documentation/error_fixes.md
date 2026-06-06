@@ -486,3 +486,42 @@ cfg = PreprocessConfig(threshold=False, denoise=False, deskew=False)
 **Rule:** Integration tests that assert "first upload returns True" must delete the key at test start. Never rely on a test being the first to run.
 
 ---
+
+## 2026-06-06 — T3 Gemini / OpenRouter build + tooling gotchas
+
+### FIX-024 · `uv sync` prunes dev deps → `pytest: program not found`
+
+**Symptom:**
+```
+uv run pytest ...
+error: Failed to spawn: `pytest`
+  Caused by: program not found
+```
+…immediately after a bare `uv sync` (e.g. run to install a new dependency).
+
+**Root cause:** pytest (and the other test/lint tools) live in the `dev` optional-dependency group. A bare `uv sync` resolves only the default deps and **removes** anything not in that set — including pytest — from the venv.
+
+**Fix:** Always sync with the dev extra: `uv sync --extra dev` (this is what the `Makefile` targets use). Re-running it restores pytest.
+
+**Files:** n/a (environment/tooling).
+
+**Rule:** In this repo, never run a bare `uv sync` during a dev session — use `uv sync --extra dev`. A bare sync silently uninstalls pytest/ruff/etc. and the next `uv run pytest` fails with "program not found", not a clear dependency error.
+
+---
+
+### FIX-025 · appended test imports land mid-file → ruff `E402`/`I001`
+
+**Symptom:**
+```
+E402 Module level import not at top of file   tests/cloud/test_gemini_tier.py:36
+I001 Import block is un-sorted or un-formatted
+```
+**Root cause:** A plan/edit that "appends" a block of new tests also appended its `import` lines next to that block (mid-file), instead of merging them into the module's top import group. Ruff flags every such import as `E402`, and the stray block as `I001`.
+
+**Fix:** Hoist the new imports into the existing top-of-file import group (stdlib / third-party / first-party order), then `uv run ruff check --fix` to settle sort order. No mid-file `import` statements.
+
+**Files:** `tests/cloud/test_gemini_tier.py`, `tests/cloud/test_ocr_router.py`
+
+**Rule:** When appending tests/helpers to an existing module, put any new imports at the **top** with the others — never inline above the appended block. Run `ruff check` on touched files before committing (the unit `make test` run does NOT catch lint).
+
+---
