@@ -1,7 +1,7 @@
 """Run all init scripts in order. Idempotent.
 
 Order: postgres (table check) → minio (bucket) → qdrant (collection) →
-neo4j (constraints). All can be re-run safely.
+neo4j (constraints) → sqs (elasticmq queue). All can be re-run safely.
 
 Usage:
     python -m scripts.init_all
