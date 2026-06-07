@@ -137,3 +137,33 @@ async def test_llm_extract_offloads_to_thread():
         await llm_extract("t", document_category="practitioner", page_type="other",
                           client=client)
     mock_run.assert_awaited_once()
+
+
+# ---- Integration — skipped unless OpenRouter key is set --------------------
+
+def _openrouter_configured() -> bool:
+    try:
+        from shared.config import get_settings
+        return bool(get_settings().openrouter_api_key)
+    except Exception:
+        return False
+
+
+@pytest.mark.integration
+@pytest.mark.openrouter
+@pytest.mark.skipif(not _openrouter_configured(), reason="OPENROUTER_API_KEY not set")
+@pytest.mark.asyncio
+async def test_llm_extract_real_api():
+    raw_text = (
+        "Maharashtra Council of Homoeopathy\n"
+        "Application Form — New Registration\n"
+        "AMR-MCH-26-A-07723\n"
+        "Name: Ashish Patil   Date of Birth: 26/02/1996   Gender: M\n"
+        "Registration No: 34903"
+    )
+    page_type, entities, identity = await llm_extract(
+        raw_text, document_category="practitioner", page_type="form"
+    )
+    assert page_type in {"app_cover", "application_form", "other"}
+    assert isinstance(entities, list)
+    assert isinstance(identity, dict)

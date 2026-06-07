@@ -1,4 +1,4 @@
-.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload
+.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?##"}{printf "%-18s %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ ocr-worker:  ## Drain the local OCR queue (elasticmq) — run alongside the pipe
 
 upload:  ## Upload a PDF end-to-end. Usage: make upload PDF=path [CATEGORY=practitioner] [TRIGGER=direct]
 	python -m scripts.upload_pdf "$(PDF)" --category "$(or $(CATEGORY),practitioner)" --trigger "$(or $(TRIGGER),direct)"
+
+structure:  ## Run the Structure stage on one document. Usage: make structure DOC=<document_id>
+	python -m scripts.run_structure --document-id "$(DOC)"
 
 test:  ## Run unit tests only
 	pytest -v -m "not integration"
