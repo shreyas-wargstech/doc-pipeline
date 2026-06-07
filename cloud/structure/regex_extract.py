@@ -6,6 +6,7 @@ source="regex".
 """
 from __future__ import annotations
 
+import datetime
 import re
 
 from cloud.structure.models import Entity
@@ -30,6 +31,10 @@ _DOB_CUE_RE = re.compile(r"birth|जन्म|d\.?o\.?b", re.IGNORECASE)
 
 _DATE_SENTINELS = {"1900-01-01"}
 
+# How many chars before a date to scan for a DOB cue (calibrated for typical
+# "Date of Birth : <date>" form spacing; widen if real scans under-classify).
+_DOB_CUE_WINDOW = 30
+
 
 def _translate_digits(text: str) -> str:
     return text.translate(_DEVANAGARI_DIGITS)
@@ -41,9 +46,10 @@ def _to_iso(m: re.Match[str]) -> str | None:
         d, mo, y = int(g[0]), int(g[1]), int(g[2])
     else:                         # YYYY-MM-DD
         y, mo, d = int(g[3]), int(g[4]), int(g[5])
-    if not (1 <= mo <= 12 and 1 <= d <= 31):
+    try:
+        iso = datetime.date(y, mo, d).isoformat()
+    except ValueError:
         return None
-    iso = f"{y:04d}-{mo:02d}-{d:02d}"
     return None if iso in _DATE_SENTINELS else iso
 
 
@@ -81,7 +87,7 @@ def regex_extract(raw_text: str) -> list[Entity]:
         iso = _to_iso(m)
         if iso is None:
             continue
-        window = text[max(0, m.start() - 30):m.start()]
+        window = text[max(0, m.start() - _DOB_CUE_WINDOW):m.start()]
         etype = "date_of_birth" if _DOB_CUE_RE.search(window) else "date"
         add(etype, iso, 0.85)
 

@@ -74,3 +74,9 @@ def test_empty_text_returns_empty_list():
 def test_duplicate_values_deduped():
     ents = regex_extract("AMR-MCH-26-A-07723 ... AMR-MCH-26-A-07723")
     assert _values(ents, "application_number") == ["AMR-MCH-26-A-07723"]
+
+
+def test_calendar_invalid_day_dropped():
+    # 31 April does not exist — must be dropped, not emitted as 2020-04-31.
+    ents = regex_extract("Issued on 31/04/2020")
+    assert _values(ents, "date") == [] and _values(ents, "date_of_birth") == []
