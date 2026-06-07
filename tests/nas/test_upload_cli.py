@@ -55,3 +55,4 @@ async def test_trigger_http_posts_manifest(monkeypatch):
     await cli.trigger_ingest(m, mode="http", notify_url="http://x/notify")
     assert posted["url"] == "http://x/notify"
     assert posted["json"]["document_id"] == "deadbeef"
+    assert posted["raised"] is False  # raise_for_status() was called
