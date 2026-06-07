@@ -284,29 +284,36 @@ NEO4J_PASSWORD=password
 
 ### 5.6 Structure
 
-**Responsibility:** Convert raw OCR token stream into structured entities.
+**Responsibility:** Convert per-page OCR `raw_text` into structured entities,
+refine each page's `page_type`, and roll up the document-level practitioner
+identity.
 
-**Steps:**
-1. **Layout analysis** — detect blocks: header, key-value pair, table, body text.
-2. **Entity extraction:**
-   - Regex: dates (`DD/MM/YYYY`, Devanagari numerals), phone numbers, IDs (RegistrationNo pattern)
-   - spaCy / LLM NER: person names, addresses, organisation names
-3. **Page-type classification:** rules-first (keyword/layout signals), LLM fallback.
+**Method (hybrid):**
+1. **Regex pre-pass** (`cloud/structure/regex_extract.py`) — deterministic,
+   high-precision: `application_number` (AMR-MCH pattern), `registration_no`
+   (context-anchored), dates (DD/MM/YYYY, ISO, Devanagari numerals → ISO,
+   `1900` sentinels + calendar-invalid dates dropped), phone, email, pincode.
+2. **LLM pass** (`cloud/structure/llm.py`, OpenRouter) — refined `page_type`
+   (aadhaar/ssc/hsc/marks_statement/…), NER (names, addresses, orgs), and
+   identity hints. Regex hits win on exact ID/date collisions.
+3. **Rollup** (practitioner only) — best `registration_no` / `applicant_name_raw`
+   / `application_number` / `dob` / `gender` across pages → `documents` table
+   via `update_fields`. `dob` stored as a DATE.
 
-**Normalised output (stored in `pages.structured_json`):**
+**Per-page output (stored in `pages.structured_json["entities"]`):**
 ```json
-{
-  "document_id": "abc123",
-  "page_num": 1,
-  "page_type": "application_form",
-  "language_detected": "eng+mar",
-  "entities": [
-    { "type": "person_name", "value": "Ashish Patil", "confidence": 0.92, "bbox": [...], "source": "ocr" },
-    { "type": "registration_no", "value": "I-96789", "confidence": 0.99, "bbox": [...], "source": "ocr" }
-  ],
-  "raw_text": "..."
-}
+[
+  { "type": "person_name", "value": "Ashish Patil", "confidence": 0.92, "source": "llm" },
+  { "type": "registration_no", "value": "34903", "confidence": 0.9, "source": "regex" }
+]
 ```
+
+Entities carry **no bbox** — extraction works off `raw_text`. Token bboxes
+remain available in `structured_json["words"]` (T1/T2) if a future highlight
+feature needs them.
+
+**Trigger:** `scripts/run_structure.py --document-id X` (per-document; rollup
+needs every page OCR'd). Auto-trigger on OCR-complete is deferred to AWS wiring.
 
 ---
 

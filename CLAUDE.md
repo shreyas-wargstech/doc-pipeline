@@ -103,7 +103,7 @@ Key NAS uploader facts (2026-06-07, remember):
 - **Local SQS = real, via elasticmq** (docker-compose; `elasticmq.conf` pre-declares `ocr-queue.fifo`). `scripts/init_sqs.py` (in `init_all`), `make ocr-worker` (`scripts/run_ocr_worker.py` drains queue → `consumer.process_record`, delete-on-success). `.env`: `SQS_OCR_QUEUE_URL=http://localhost:9324/000000000000/ocr-queue.fifo`, `SQS_ENDPOINT_URL=http://localhost:9324`, dummy `AWS_ACCESS_KEY_ID/SECRET=local`.
 - OCR output column gotcha: `save_ocr_result` writes `pages.structured_json` (key `raw_text`), NOT the `raw_text` TEXT col (stays NULL). Query OCR text via `structured_json->>'raw_text'`. (see error_fixes FIX-026)
 
-Next step: implement `cloud/structure/` stage (LLM-driven structured extraction from OCR text). (NAS uploader + local end-to-end DONE 2026-06-07 — 16 unit tests + 1 gated e2e; merged to main.)
+Next step: implement match stage (documents practitioner block → reference_data join on registration_no) OR cloud/persist/ (Qdrant + Neo4j). Structure stage DONE 2026-06-08. (NAS uploader + local end-to-end DONE 2026-06-07 — 16 unit tests + 1 gated e2e; merged to main.)
 
 Open threads: wire GCV creds (+ run skipped GCV integration test); wire OPENROUTER_API_KEY (skipped openrouter integration test); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs + implemented cloud/classifier/llm.py (OpenRouter, same key as T3, 14 unit tests green, 88 total).
 
@@ -117,6 +117,13 @@ Key LLM classifier facts (remember):
 - Uses same `openrouter_api_key` / `openrouter_base_url` / `openrouter_model` as T3 GeminiTier. Absent key → `ClassifierError` (not `TierNotImplemented`).
 - `_classify_sync` is offloaded via `anyio.to_thread.run_sync`. JSON parsed via `_parse_response`; on parse error → `("other", None, 0.4)`.
 - `service.py` wired: `_llm_classify` now delegates to `llm_classify_impl`; `NotImplementedError` catch removed.
+
+Key Structure facts (2026-06-08, remember):
+- `cloud/structure/` = hybrid regex+LLM. `service.structure_document(document_id, *, session, client=None)` — per-doc, idempotent. Per page: `regex_extract` (source=regex) + `llm_extract` (OpenRouter, source=llm) → `merge_entities` (dedup on (type, normalized value); regex wins exact collisions) → `update_structured(page_type=refined, structured_json={**sj, "entities":[...]})`.
+- Entities carry NO bbox: `{type, value, confidence, source}`. Refined per-page `PageType` Literal (app_cover/aadhaar/ssc/marks_statement/…) is FINER than triage's manifest PageType; `document_type` stays classifier-owned.
+- Rollup (practitioner only) → `documents` via `update_fields`: registration_no/applicant_name_raw/application_number/dob/gender + status="processing". **`dob` converted to `datetime.date`** before write (DATE col — FIX-006). Non-practitioner: status only, no identity.
+- LLM mirrors classifier/llm.py: `openrouter_*` creds, `anyio.to_thread`, graceful JSON fallback (page_type unchanged, []), absent key → `StructureError`. New setting `structure_max_chars` (default 6000) truncates raw_text. Injected-client path uses module `_DEFAULT_MODEL`.
+- Run: `make structure DOC=<document_id>` (`scripts/run_structure.py`). Reads OCR text from `structured_json["raw_text"]` (FIX-026), processes only `ocr_status="done"` pages with non-empty raw_text. Runs inside `session_scope()` → atomic (rolls back on mid-loop StructureError); re-run safe.
 
 ## Default assumptions (override per task)
 
