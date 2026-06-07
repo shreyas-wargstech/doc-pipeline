@@ -94,7 +94,16 @@ Key GeminiTier facts (T3, remember):
 - SDK = `openai` (`OpenAI(base_url=..., api_key=...)`): `client.chat.completions.create(model, temperature=0.0, messages=[{role:user, content:[{type:text,text:_PROMPT},{type:image_url,image_url:{url:"data:image/png;base64,..."}}]}])`; `response.choices[0].message.content or ""`; `openai.OpenAIError` → `OCRError`. Image sent as base64 data-URL. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
 - Router: `_default_tiers()` wraps cloud-tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if creds/key absent, so `OcrRouter()` builds for typed-only pages. Fixed a latent Vision build bug too.
 
-Next step: implement `cloud/structure/` stage (LLM-driven structured extraction from OCR text).
+Key NAS uploader facts (2026-06-07, remember):
+- `nas/uploader/service.py::upload_document(pdf_path, *, category, s3=None, dpi=300, config=None) -> Manifest` — pure: render (`render.py`, PyMuPDF→BGR) → `preprocess_page(img, PreprocessConfig(threshold=False))` (grayscale, no binarize; triage still runs) → blank check → `put_if_absent` original.pdf + pages/page_NNN.png → manifest.json LAST. `document_id = hash_bytes(pdf)`.
+- Uploaded page PNG = **grayscale, NOT thresholded** (Tesseract self-binarizes; protects GCV/Gemini handwriting). Triage maps: `content_type.value`→PageManifest.content_type, `script.value`→language_hint.
+- Blank detection = `triage.is_blank_page` (conservative: `count_text_components < min_components(=5)`, margin band + glyph-size filter; stains filtered; errors → not-blank). `page_type="blank"` → ingest skips OCR.
+- Category hint = CLI arg (`scripts/upload_pdf.py --category`, default `practitioner`); avoids `other`→skip-OCR trap (classifier trusts NAS hint).
+- Trigger = `scripts/upload_pdf.py --trigger {direct|http}`: direct = in-process `handle_manifest`; http = POST `/pipeline/notify`.
+- **Local SQS = real, via elasticmq** (docker-compose; `elasticmq.conf` pre-declares `ocr-queue.fifo`). `scripts/init_sqs.py` (in `init_all`), `make ocr-worker` (`scripts/run_ocr_worker.py` drains queue → `consumer.process_record`, delete-on-success). `.env`: `SQS_OCR_QUEUE_URL=http://localhost:9324/000000000000/ocr-queue.fifo`, `SQS_ENDPOINT_URL=http://localhost:9324`, dummy `AWS_ACCESS_KEY_ID/SECRET=local`.
+- OCR output column gotcha: `save_ocr_result` writes `pages.structured_json` (key `raw_text`), NOT the `raw_text` TEXT col (stays NULL). Query OCR text via `structured_json->>'raw_text'`. (see error_fixes FIX-026)
+
+Next step: implement `cloud/structure/` stage (LLM-driven structured extraction from OCR text). (NAS uploader + local end-to-end DONE 2026-06-07 — 16 unit tests + 1 gated e2e; merged to main.)
 
 Open threads: wire GCV creds (+ run skipped GCV integration test); wire OPENROUTER_API_KEY (skipped openrouter integration test); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs + implemented cloud/classifier/llm.py (OpenRouter, same key as T3, 14 unit tests green, 88 total).
 

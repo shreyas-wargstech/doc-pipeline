@@ -525,3 +525,19 @@ I001 Import block is un-sorted or un-formatted
 **Rule:** When appending tests/helpers to an existing module, put any new imports at the **top** with the others — never inline above the appended block. Run `ruff check` on touched files before committing (the unit `make test` run does NOT catch lint).
 
 ---
+
+## 2026-06-07 — nas/uploader + local end-to-end (final-review catch)
+
+### FIX-026 · OCR text lives in `pages.structured_json`, not the `raw_text` column
+
+**Symptom:** The gated end-to-end test (`tests/nas/test_uploader_e2e.py`) asserted `pages.raw_text` was non-empty after OCR. It would have failed on a real `-m integration` run: `raw_text` stays `NULL` even though OCR succeeded.
+
+**Root cause:** `PageRepository.save_ocr_result()` (called by `OcrRouter.process_page`) issues an `UPDATE pages SET structured_json=..., ocr_status=..., language_detected=...` — it never writes the `raw_text TEXT` column. The OCR transcription is stored as the `raw_text` **key inside the `structured_json` JSONB** (`OcrResult.to_structured_json()`), per the OCR-stage contract. The `raw_text` TEXT column is only ever set by `page_repo.upsert()` during ingest, where it is `None`.
+
+**Fix:** Query `structured_json->>'raw_text'` (with `AS raw_text` alias) instead of the bare column.
+
+**Files:** `tests/nas/test_uploader_e2e.py`
+
+**Rule:** OCR output is persisted under `pages.structured_json` (JSONB, key `raw_text`), NOT the `pages.raw_text` TEXT column. Any consumer/test reading post-OCR text must use `structured_json->>'raw_text'`. The dedicated `raw_text` column is currently vestigial (populated only as NULL at ingest).
+
+---

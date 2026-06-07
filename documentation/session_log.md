@@ -325,3 +325,12 @@
 - Open questions: none new — superset of existing open threads.
 - Next step (when resumed): present DASH-1 architecture → approval → spec → writing-plans. Saved to auto-memory `dashboard-plan.md`.
 - Files touched: `documentation/session_log.md` (this entry); auto-memory `dashboard-plan.md` + `MEMORY.md`.
+
+## 2026-06-07 — nas/uploader + local end-to-end BUILT (pipeline sub-project A; merged to main)
+- Full superpowers flow: brainstorming → spec (`docs/superpowers/specs/2026-06-07-nas-uploader-local-e2e-design.md`) → writing-plans (`docs/superpowers/plans/2026-06-07-nas-uploader-local-e2e.md`) → subagent-driven-development (fresh implementer + spec-review + quality-review per task; whole-branch final review).
+- 5 locked decisions (brainstorm): (1) **local SQS = real elasticmq** (revises earlier "no SQS locally" — end-to-end fidelity); (2) trigger CLI flag `direct|http`; (3) category hint CLI arg default `practitioner` (avoids `other`→skip-OCR, since classifier trusts NAS hint); (4) uploaded page PNG = **grayscale, no threshold** (Tesseract self-binarizes; protects GCV/Gemini handwriting); (5) blank detect = conservative text-structure (`count_text_components`, bias to not-blank — a stain = wasted OCR, never data loss).
+- Built: `nas/uploader/{render,service}.py`, `triage.count_text_components`/`is_blank_page`, `scripts/{upload_pdf,run_ocr_worker,init_sqs}.py`, `elasticmq.conf` + docker-compose `elasticmq` + init_all wiring, `UploaderError`, Makefile `ocr-worker`/`upload`. **16 new unit tests + 1 gated e2e; 102 unit green, 18 deselected.**
+- Final-review catch (FIX-026): e2e asserted `pages.raw_text` but OCR text lives in `structured_json->>'raw_text'` (save_ocr_result never writes the raw_text col). Fixed.
+- Locked: see "Key NAS uploader facts" in CLAUDE.md. Nits left by design: pre-existing ruff debt in triage.py/test_pipeline.py/test_triage.py (out of scope; StrEnum conversion risky); enqueue_page botocore-cred footgun (documented in .env.example).
+- Open (carry-over): GCV creds; OPENROUTER_API_KEY; uncalibrated triage/preprocess/blank thresholds (min_components=5); manual Docker smoke (`make up && make init && make upload && make ocr-worker`) NOT yet run.
+- Next step: implement `cloud/structure/` stage (sub-project B) — page `raw_text` (from structured_json) → LLM structured extraction → `structured_json` (OpenRouter, same key as T3).
