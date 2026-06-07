@@ -316,6 +316,69 @@ def triage_page(
     )
 
 
+# --------------------------------------------------------------------------- #
+# Blank-page detection (text-structure, conservative)
+# --------------------------------------------------------------------------- #
+def count_text_components(
+    gray: np.ndarray,
+    *,
+    margin_frac: float = 0.05,
+    min_glyph_h: int = 6,
+    max_glyph_h_frac: float = 0.25,
+    min_area: int = 4,
+) -> int:
+    """Count plausibly-glyph-sized connected components, ignoring a margin band.
+
+    Reuses the same intuition as ``HeuristicContentTypeDetector``: text is made
+    of many small, similarly-sized components. Stains/speckle are either too big
+    (filtered by ``max_glyph_h_frac``) or live in the page margins (punch holes,
+    staple shadows, edges) and are dropped by the ``margin_frac`` band.
+    """
+    if gray.ndim != 2:
+        gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
+    if gray.size == 0:
+        return 0
+
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    h, w = binary.shape
+    mx, my = int(w * margin_frac), int(h * margin_frac)
+    max_h = max(min_glyph_h + 1, int(h * max_glyph_h_frac))
+
+    n, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        binary, connectivity=8
+    )
+    count = 0
+    for i in range(1, n):  # 0 is background
+        x = int(stats[i, cv2.CC_STAT_LEFT])
+        y = int(stats[i, cv2.CC_STAT_TOP])
+        cw = int(stats[i, cv2.CC_STAT_WIDTH])
+        ch = int(stats[i, cv2.CC_STAT_HEIGHT])
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        # Drop anything touching the margin band (edge/punch/staple noise).
+        if x < mx or y < my or (x + cw) > (w - mx) or (y + ch) > (h - my):
+            continue
+        if min_glyph_h <= ch <= max_h and area >= min_area:
+            count += 1
+    return count
+
+
+def is_blank_page(gray: np.ndarray, *, min_components: int = 5, **kwargs: object) -> bool:
+    """True when a page has essentially no text structure.
+
+    Conservative by design: ``min_components`` is low, so only near-empty pages
+    are called blank. A stain costs at most a wasted OCR call; a real (even
+    sparse) page is never dropped. ``min_components`` is the key calibration knob
+    (uncalibrated until real scans). Any internal failure -> ``False`` (not blank).
+    """
+    try:
+        if gray.size == 0:
+            return False
+        return count_text_components(gray, **kwargs) < min_components  # type: ignore[arg-type]
+    except Exception as exc:  # noqa: BLE001 — never break the upload on a heuristic
+        log.warning("triage.blank_check_failed", error=str(exc))
+        return False
+
+
 __all__ = [
     "Script",
     "ContentType",
@@ -325,4 +388,6 @@ __all__ = [
     "HeuristicContentTypeDetector",
     "detect_script_and_orientation",
     "triage_page",
+    "count_text_components",
+    "is_blank_page",
 ]

@@ -20,6 +20,7 @@ class StorageError(PipelineError):
 class ManifestError(PipelineError):
     """Manifest JSON missing, malformed, or schema-invalid."""
 
+
 class ClassifierError(PipelineError):
     """Document classification failed (rules engine or LLM fallback)."""
 
@@ -30,6 +31,10 @@ class TriageError(PipelineError):
 
 class PreprocessError(PipelineError):
     """Image preprocessing failure (deskew, threshold, etc.)."""
+
+
+class UploaderError(PipelineError):
+    """NAS uploader failure (PDF render, PNG encode, or S3 upload)."""
 
 
 class OCRError(PipelineError):

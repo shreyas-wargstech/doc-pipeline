@@ -1,4 +1,4 @@
-.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean
+.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?##"}{printf "%-18s %s\n", $$1, $$2}'
@@ -26,6 +26,12 @@ init:  ## Initialize all services (idempotent: bucket, collection, constraints)
 
 serve:  ## Run the cloud pipeline API (local dev)
 	uvicorn cloud.app:app --reload --host 0.0.0.0 --port 8000
+
+ocr-worker:  ## Drain the local OCR queue (elasticmq) — run alongside the pipeline
+	python -m scripts.run_ocr_worker
+
+upload:  ## Upload a PDF end-to-end. Usage: make upload PDF=path [CATEGORY=practitioner] [TRIGGER=direct]
+	python -m scripts.upload_pdf "$(PDF)" --category "$(or $(CATEGORY),practitioner)" --trigger "$(or $(TRIGGER),direct)"
 
 test:  ## Run unit tests only
 	pytest -v -m "not integration"
