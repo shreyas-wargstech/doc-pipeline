@@ -334,3 +334,12 @@
 - Locked: see "Key NAS uploader facts" in CLAUDE.md. Nits left by design: pre-existing ruff debt in triage.py/test_pipeline.py/test_triage.py (out of scope; StrEnum conversion risky); enqueue_page botocore-cred footgun (documented in .env.example).
 - Open (carry-over): GCV creds; OPENROUTER_API_KEY; uncalibrated triage/preprocess/blank thresholds (min_components=5); manual Docker smoke (`make up && make init && make upload && make ocr-worker`) NOT yet run.
 - Next step: implement `cloud/structure/` stage (sub-project B) — page `raw_text` (from structured_json) → LLM structured extraction → `structured_json` (OpenRouter, same key as T3).
+
+## 2026-06-07 — first REAL end-to-end smoke test (15-pg bundle) — chain works, 2 OCR issues found + DEFERRED
+- `make upload` on AMR-MCH-26-A-07723.pdf (15pp), `--trigger direct`, worker draining elasticmq. Full plumbing worked: render→S3(put_if_absent)→manifest→ingest(classify `practitioner` via manifest_hint)→13 enqueued, 2 blank skipped (pp 3,5)→worker drained all 13. **uploader sub-project A validated on a real bundle.**
+- BUT 0 pages OCR'd. Worker log: every page triaged `content_type=handwritten` → router starts at **T2 GCV** → GCV unconfigured (`ocr_tier_unavailable tier=vision`) → `ocr_failed`, **no escalation to T3**. All 13 non-blank pages failed (the DB `queued` rows were a mid-flight snapshot).
+- **ISSUE 1 (triage, calibrate):** `HeuristicContentTypeDetector` over-classifies `handwritten` — even mostly-typed pages flagged handwritten. Thresholds (height_cv .35 / stroke_cv .45 / height_weight .5) uncalibrated for real scans → almost nothing routes to free T1.
+- **ISSUE 2 (router gap):** when the proactive START tier is unavailable (`TierNotImplemented` from `_UnavailableTier`), `route()` dead-ends the page instead of escalating. A handwritten page with GCV unconfigured should fall through to **T3 (OpenRouter, configured)** — or fall back to T1. Verify in `cloud/ocr/router.py::route()`.
+- User DEFERRED both ("log this, handle later"). Neither blocks sub-project A. Fix Issue 1 + 2 before re-running this bundle.
+- Local-run setup gotchas hit this session (see error_fixes FIX-027): `.env` inline comment read as value; tesseract must be on PATH of the shell *before* it launched; `hin`/`mar` traineddata live at tessdata repo ROOT, not `/script` (that holds `Devanagari`).
+- Next step (unchanged): `cloud/structure/` (sub-project B). Optional pre-work: triage calibration + router escalation fix (Issues 1–2).

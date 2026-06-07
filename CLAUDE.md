@@ -107,6 +107,11 @@ Next step: implement `cloud/structure/` stage (LLM-driven structured extraction 
 
 Open threads: wire GCV creds (+ run skipped GCV integration test); wire OPENROUTER_API_KEY (skipped openrouter integration test); calibrate triage + preprocess thresholds on real scans (all uncalibrated). DONE 2026-06-06: refreshed stale docs + implemented cloud/classifier/llm.py (OpenRouter, same key as T3, 14 unit tests green, 88 total).
 
+First real smoke test 2026-06-07 (15-pg bundle) — chain works, 2 OCR issues DEFERRED (see session_log + error_fixes FIX-027):
+- **ISSUE 1 — triage over-classifies `handwritten`:** `HeuristicContentTypeDetector` flags near-typed real scans as handwritten (thresholds height_cv .35/stroke_cv .45/height_weight .5 uncalibrated). Sends almost everything off free T1.
+- **ISSUE 2 — router dead-ends on unavailable START tier:** `cloud/ocr/router.py::route()` — when the proactive start tier (e.g. T2 GCV, unconfigured) raises `TierNotImplemented`, the page `ocr_failed`s with NO escalation to T3 (OpenRouter, configured) or fallback to T1. Should fall through the ladder. Without GCV, all-handwritten → all-fail.
+- Local run needs: tesseract on PATH with `eng+mar+hin`+`osd`; elasticmq up (`make up`); `.env` SQS block from `.env.example`.
+
 Key LLM classifier facts (remember):
 - `cloud/classifier/llm.py::llm_classify(cover_text, *, client)` — async, returns `(category, document_type, confidence)`.
 - Uses same `openrouter_api_key` / `openrouter_base_url` / `openrouter_model` as T3 GeminiTier. Absent key → `ClassifierError` (not `TierNotImplemented`).

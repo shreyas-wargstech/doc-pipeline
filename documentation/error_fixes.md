@@ -541,3 +541,26 @@ I001 Import block is un-sorted or un-formatted
 **Rule:** OCR output is persisted under `pages.structured_json` (JSONB, key `raw_text`), NOT the `pages.raw_text` TEXT column. Any consumer/test reading post-OCR text must use `structured_json->>'raw_text'`. The dedicated `raw_text` column is currently vestigial (populated only as NULL at ingest).
 
 ---
+
+### FIX-027 · local end-to-end run setup gotchas (.env, tesseract PATH, traineddata)
+
+**Symptom (3 distinct, all hit while first running `make upload` end-to-end):**
+1. `ValueError: Invalid endpoint: # leave blank unless using local ElasticMQ` from `init_sqs` / boto.
+2. `TriageError: Unexpected OSD failure: tesseract is not installed or it's not in your PATH` — even after installing tesseract.
+3. `tesseract --list-langs` shows only `eng, osd, Devanagari`; `eng+mar+hin` OCR can't load `mar`/`hin`.
+
+**Root cause:**
+1. The `.env` line was `SQS_ENDPOINT_URL=          # leave blank…` — pydantic-settings reads the whole inline-comment string as the **value** (it's truthy, so the `if not s.sqs_endpoint_url` skip-guard is bypassed and boto gets a junk endpoint).
+2. tesseract was added to System PATH, but the **already-open shell** (and VS Code) kept the stale PATH. PATH edits don't reach processes started before the edit.
+3. `hin.traineddata` / `mar.traineddata` are **language** files at the tessdata repo ROOT; `script/` only holds script-level models (`Devanagari`, `Latin`, …). The wrong file (`Devanagari`) was grabbed.
+
+**Fix:**
+1. Put comments on their own line; keep blank vars truly blank (`SQS_ENDPOINT_URL=` then newline). Copy the SQS block from `.env.example`.
+2. Open a **fresh** terminal (fully relaunch VS Code) so PATH refreshes, or `$env:Path += ";C:\Program Files\Tesseract-OCR"` for the current session. Verify with `tesseract --version` in the *same* shell before running.
+3. Download `hin`/`mar` from the tessdata (or `tessdata_fast`) repo ROOT into `…\Tesseract-OCR\tessdata\`; verify `tesseract --list-langs` shows `eng, hin, mar, osd`.
+
+**Files:** n/a (environment/config — user's `.env` + machine PATH + tessdata).
+
+**Rule:** Never put an inline `# comment` after a value/blank in `.env` (pydantic-settings keeps it as the value). After any PATH change, use a NEW shell (or patch `$env:Path` in-session) — open shells keep stale PATH. Tesseract **language** packs (`hin`,`mar`) live at the tessdata repo root, not `script/`; OSD needs `osd.traineddata`. tesseract `eng+mar+hin` is all-or-nothing — a missing pack fails the whole call.
+
+---
