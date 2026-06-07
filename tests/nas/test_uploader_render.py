@@ -43,3 +43,10 @@ def test_render_pdf_higher_dpi_is_larger(tmp_path):
 def test_render_pdf_missing_file_raises_uploader_error(tmp_path):
     with pytest.raises(UploaderError):
         render_pdf(tmp_path / "does_not_exist.pdf", dpi=150)
+
+
+def test_render_pdf_corrupt_file_raises_uploader_error(tmp_path):
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"not a pdf")
+    with pytest.raises(UploaderError):
+        render_pdf(bad, dpi=150)
