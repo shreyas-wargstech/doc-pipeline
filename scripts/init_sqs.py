@@ -4,6 +4,7 @@ No-op against real AWS (blank SQS_ENDPOINT_URL) — production queues are create
 by IaC (sub-project E), not by init.
 """
 import asyncio
+import os
 import sys
 
 import aioboto3
@@ -33,8 +34,10 @@ async def main() -> int:
         "sqs",
         region_name=s.aws_region,
         endpoint_url=s.sqs_endpoint_url,
-        aws_access_key_id="local",
-        aws_secret_access_key="local",
+        # Respect env creds (matching enqueue_page's botocore chain); default to
+        # a dummy value so the local elasticmq path works with zero config.
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "local"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "local"),
     ) as sqs:
         try:
             resp = await sqs.create_queue(QueueName=queue_name, Attributes=attrs)
