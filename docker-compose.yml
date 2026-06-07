@@ -57,6 +57,15 @@ services:
     volumes:
       - neo4j_data:/data
 
+  elasticmq:
+    image: softwaremill/elasticmq-native:latest
+    container_name: docpipe-elasticmq
+    ports:
+      - "9324:9324"
+      - "9325:9325"
+    volumes:
+      - ./elasticmq.conf:/opt/elasticmq.conf:ro
+
 volumes:
   postgres_data:
   minio_data:

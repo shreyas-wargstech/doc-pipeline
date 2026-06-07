@@ -10,7 +10,7 @@ import asyncio
 import sys
 from collections.abc import Awaitable, Callable
 
-from scripts import init_minio, init_neo4j, init_postgres, init_qdrant
+from scripts import init_minio, init_neo4j, init_postgres, init_qdrant, init_sqs
 from shared.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
@@ -25,6 +25,7 @@ async def main() -> int:
         ("minio", init_minio.main),
         ("qdrant", init_qdrant.main),
         ("neo4j", init_neo4j.main),
+        ("sqs", init_sqs.main),
     ]
     for name, fn in steps:
         log.info("init.step.start", step=name)
