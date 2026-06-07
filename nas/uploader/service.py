@@ -66,8 +66,14 @@ async def upload_document(
         await s3.put_if_absent(page_key, buf.tobytes())
 
         triage = result.triage
-        content_type = triage.content_type.value if triage else "unknown"
-        language_hint = triage.script.value if triage else "unknown"
+        if triage is None:
+            # Only happens if a caller disables run_triage; log so it isn't a
+            # silent "unknown" during threshold calibration on real scans.
+            logger.warning("uploader.triage_none", page_num=idx)
+            content_type = language_hint = "unknown"
+        else:
+            content_type = triage.content_type.value
+            language_hint = triage.script.value
 
         pages.append(
             PageManifest(

@@ -75,6 +75,9 @@ async def test_upload_document_uploads_expected_keys(tmp_path, patched):
     ]
     # manifest is LAST
     assert keys[-1].endswith("manifest.json")
+    # page bodies are real PNG bytes (cv2.imencode ran for real)
+    page_bodies = [b for k, b in s3.puts if k.endswith(".png")]
+    assert page_bodies and all(b[:4] == b"\x89PNG" for b in page_bodies)
 
 
 async def test_upload_document_manifest_contents(tmp_path, patched):
