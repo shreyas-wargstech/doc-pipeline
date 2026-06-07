@@ -9,6 +9,7 @@ Run: `uv run pytest tests/nas/test_uploader_e2e.py -v -m integration`
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import aioboto3
@@ -17,6 +18,7 @@ import pytest
 from sqlalchemy import text
 
 from cloud.ingest.service import handle_manifest
+from cloud.ocr.router import OcrRouter
 from nas.uploader.service import upload_document
 from scripts.run_ocr_worker import drain_once
 from shared.config import get_settings
@@ -52,11 +54,9 @@ async def test_pdf_flows_to_raw_text(tmp_path):
         "sqs",
         region_name=s.aws_region,
         endpoint_url=s.sqs_endpoint_url or None,
-        aws_access_key_id="local",
-        aws_secret_access_key="local",
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "local"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "local"),
     ) as sqs:
-        from cloud.ocr.router import OcrRouter
-
         router = OcrRouter()
         total = 0
         for _ in range(3):
@@ -64,7 +64,7 @@ async def test_pdf_flows_to_raw_text(tmp_path):
             total += processed
             if processed == 0:
                 break
-    assert total >= 1  # at least the non-blank page processed
+    assert total == 1  # exactly the one non-blank page processed
 
     # 4. Assert raw_text landed for the non-blank page.
     async with session_scope() as db:
