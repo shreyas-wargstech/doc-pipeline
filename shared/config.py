@@ -57,6 +57,9 @@ class Settings(BaseSettings):
         "google/gemini-2.5-flash", alias="OPENROUTER_MODEL"
     )
 
+    # Structure stage
+    structure_max_chars: int = Field(6000, alias="STRUCTURE_MAX_CHARS")
+
 
 @lru_cache
 def get_settings() -> Settings:
