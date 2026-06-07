@@ -71,7 +71,10 @@ async def test_pdf_flows_to_raw_text(tmp_path):
         rows = (
             await db.execute(
                 text(
-                    "SELECT page_num, ocr_status, raw_text FROM pages "
+                    # OCR text is persisted under structured_json->'raw_text'
+                    # (save_ocr_result writes structured_json, not the raw_text col).
+                    "SELECT page_num, ocr_status, "
+                    "structured_json->>'raw_text' AS raw_text FROM pages "
                     "WHERE document_id = :d ORDER BY page_num"
                 ),
                 {"d": manifest.document_id},
