@@ -126,7 +126,14 @@ async def structure_document(
     session: AsyncSession,
     client: openai.OpenAI | None = None,
 ) -> None:
-    """Run the Structure stage on one document. Idempotent on document_id."""
+    """Run the Structure stage on one document. Idempotent on document_id.
+
+    All-or-nothing by design: the caller runs this inside one ``session_scope``,
+    so a transient ``StructureError`` from ``llm_extract`` mid-loop rolls the
+    whole document back (no half-written entities). Recovery = re-run the same
+    document_id (idempotent); the only cost is repeating already-done pages.
+    Per-page error tolerance is deferred to AWS wiring.
+    """
     doc_repo = DocumentRepository(session)
     page_repo = PageRepository(session)
 
