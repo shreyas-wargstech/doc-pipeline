@@ -21,6 +21,7 @@ from fastapi import BackgroundTasks, FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from cloud.dashboard import api as dashboard_api
 from cloud.dashboard import router as dashboard_router
 from cloud.ingest.service import handle_manifest
 from nas.manifest.models import Manifest
@@ -61,6 +62,7 @@ app = FastAPI(
 # Operations / control dashboard (DASH-1). Router first, then the static mount
 # at the final public path. See cloud/dashboard/.
 app.include_router(dashboard_router.router, prefix="/dashboard")
+app.include_router(dashboard_api.router, prefix="/api")
 app.mount(
     "/dashboard/static",
     StaticFiles(directory=str(dashboard_router.STATIC_DIR)),
