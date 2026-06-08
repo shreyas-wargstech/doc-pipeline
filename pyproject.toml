@@ -31,7 +31,6 @@ dependencies = [
     "Pillow>=10.2",
     "scikit-image>=0.22",
     # Cloud OCR
-    "google-cloud-vision>=3.7",
     "openai>=1.0",
     # Matching + NLP
     "rapidfuzz>=3.6",
@@ -76,6 +75,5 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
     "integration: requires running services (run with `make test-integration`)",
-    "gcv: requires Google Cloud Vision credentials (GOOGLE_APPLICATION_CREDENTIALS set)",
     "openrouter: requires an OpenRouter API key (OPENROUTER_API_KEY set)",
 ]

@@ -46,12 +46,7 @@ class Settings(BaseSettings):
     aws_region: str = Field("ap-south-1", alias="AWS_REGION")
     sqs_endpoint_url: str = Field("", alias="SQS_ENDPOINT_URL")
 
-    # Google Cloud Vision (Tier 2 OCR)
-    google_application_credentials: str | None = Field(
-        None, alias="GOOGLE_APPLICATION_CREDENTIALS"
-    )
-
-    # OpenRouter (Tier 3 OCR — Gemini VLM via OpenAI-compatible gateway)
+    # OpenRouter (cloud OCR tier — VLM via OpenAI-compatible gateway)
     openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(
         "https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"

@@ -1,6 +1,6 @@
 """Uniform OCR data models.
 
-Every tier (Tesseract, Vision, VLM) returns the SAME `OcrResult` so the
+Every tier (Tesseract, VLM) returns the SAME `OcrResult` so the
 router + confidence-net stay engine-agnostic. Confidence is always on the
 Tesseract 0-100 scale; cloud tiers must normalise their 0-1 scores up by *100
 before constructing words.
@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Tier = Literal["tesseract", "vision", "vlm"]
+Tier = Literal["tesseract", "vlm"]
 
 # bbox is (x, y, w, h) in source-image pixels.
 BBox = tuple[int, int, int, int]
