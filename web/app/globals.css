@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-background: #f8fafc;
+  --color-foreground: #1e3a8a;
+  --color-card: #ffffff;
+  --color-primary: #1e40af;
+  --color-on-primary: #ffffff;
+  --color-secondary: #3b82f6;
+  --color-accent: #d97706;
+  --color-muted: #e9eef6;
+  --color-muted-fg: #475569;
+  --color-border: #dbeafe;
+  --color-destructive: #dc2626;
+  --color-ring: #1e40af;
+  --color-ok: #15803d;
+  --color-warn: #b45309;
+  --color-danger: #dc2626;
+  --color-info: #4338ca;
+}
+.dark {
+  --color-background: #0b1220;
+  --color-foreground: #e2e8f0;
+  --color-card: #131c2e;
+  --color-primary: #3b82f6;
+  --color-on-primary: #0b1220;
+  --color-secondary: #60a5fa;
+  --color-accent: #f59e0b;
+  --color-muted: #1e293b;
+  --color-muted-fg: #94a3b8;
+  --color-border: #1e2a44;
+  --color-destructive: #f87171;
+  --color-ring: #60a5fa;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #a5b4fc;
+}
+* { border-color: var(--color-border); }
+body { background: var(--color-background); color: var(--color-foreground); }
+.tnum { font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
