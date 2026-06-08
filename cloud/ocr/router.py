@@ -128,7 +128,15 @@ class OcrRouter:
                     page_num=msg.page_num,
                     reason=str(exc),
                 )
-                break  # cannot escalate further; use `best` if we have one
+                # This tier isn't configured (missing creds) — skip it and try
+                # the next HIGHER tier. An unavailable T2 (Vision) must not block
+                # a configured T3 (Gemini). We only ever escalate, never fall
+                # back to a lower tier, so `best` (from any lower tier already
+                # run) is preserved and returned if everything above is also
+                # unavailable. Deliberately NO fall-back to Tesseract on a
+                # handwritten page — that would reintroduce the confident-garbage
+                # the proactive ladder exists to avoid.
+                continue
 
             result.low_conf_count = sum(
                 1 for w in result.words if w.conf < self._threshold
