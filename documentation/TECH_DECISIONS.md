@@ -216,6 +216,17 @@ Distance:    Cosine
 > The cascade was abandoned because Tesseract is bad at handwriting and can
 > emit *confident garbage* that slips the 70 gate — so a reactive net never
 > fires. We now **classify first, then route** to the right engine up front.
+>
+> **Revised 2026-06-09 — GCV removed, ladder collapsed to 2 tiers
+> `(tesseract, vlm)`.** Google Cloud Vision (T2) is dropped: its per-word
+> confidence + bounding boxes were the only thing distinguishing it from the
+> VLM tier, and nothing downstream consumes them (Structure reads `raw_text`).
+> The OpenRouter VLM (Gemini 2.5 Flash, formerly T3) is promoted to the sole
+> cloud tier, renamed model-agnostically to `vlm`. Result: one cloud credential
+> (`OPENROUTER_API_KEY`) covers all cloud OCR; the GCP service-account
+> dependency is gone. The confidence-net (70) survives on the meaningful
+> Tesseract→VLM hop. A two-VLM ladder escalating on a fixed conf prior carried
+> no signal, hence the collapse.
 
 ### Routing model
 
@@ -229,12 +240,12 @@ proactive router (catches typed pages Tesseract mangles).
 | Tier | Engine | Handles | Status |
 |---|---|---|---|
 | **T1** | Tesseract `eng+mar+hin` (`pytesseract`) | Typed / printed pages | ✅ done |
-| **T2** | Google Cloud Vision `DOCUMENT_TEXT_DETECTION` | Handwriting (English + Devanagari) | ✅ done |
-| **T3** | Gemini VLM via OpenRouter (`google/gemini-2.5-flash`) | Messy / Vision-flunk edge cases | ✅ done |
+| **T2** | VLM via OpenRouter (`google/gemini-2.5-flash`, tier `vlm`) | Handwriting (English + Devanagari) + messy scans + low-conf escalation | ✅ done |
 
-Escalation is by **difficulty (typed → handwritten → messy)**, not by language —
-one tool (GCV) covers handwritten-English *and* handwritten-Devanagari, so we
-don't fan out per script.
+Escalation is by **difficulty (typed → everything-else)**: typed pages start at
+Tesseract and escalate to the VLM if the 70-net fires; handwritten pages start
+directly at the VLM. The VLM is multilingual, so handwritten-English and
+handwritten-Devanagari go through the same call — no per-script fan-out.
 
 ### T1 — Tesseract (via `pytesseract`)
 
@@ -243,33 +254,32 @@ don't fan out per script.
 - `eng+mar+hin` language packs; handles Devanagari reasonably on *typed* text.
 - Open source, no API cost, runs locally on NAS / in Lambda.
 
-### T2 — Google Cloud Vision (`DOCUMENT_TEXT_DETECTION`)
+### T2 — VLM transcription (via OpenRouter) — `cloud/ocr/tiers/vlm.py`
 
-- **Vendor = Cloud Vision, not Document AI** — Vision's dense-text mode covers
-  handwritten English and handwritten Devanagari in one call.
-- Auth via `GOOGLE_APPLICATION_CREDENTIALS` → `Settings.google_application_credentials`;
-  absent creds degrade gracefully to `TierNotImplemented`.
-- Sync SDK (`google-cloud-vision>=3.7`) wrapped in `anyio.to_thread.run_sync`
-  (mirrors the TesseractTier pattern); word-level parsing, conf ×100.
-
-### T3 — Gemini VLM (via OpenRouter)
-
-- Last-resort tier for messy scans / pages the lower tiers flunk. VLM reads the
-  page image directly (no character segmentation).
+- The sole cloud tier (was T3 "Gemini VLM" before the 2026-06-09 collapse).
+  Reads the page image directly (no character segmentation); covers handwritten
+  English + Devanagari and messy scans in one multilingual call.
 - **Transport = OpenRouter**, reached with the `openai` SDK pointed at
   `OPENROUTER_BASE_URL` (OpenAI-compatible Chat Completions). The user runs on
   OpenRouter, so we go through it rather than Google AI Studio direct or Vertex
-  AI. Model id `google/gemini-2.5-flash` (OpenRouter-namespaced).
+  AI. Model id `google/gemini-2.5-flash` (OpenRouter-namespaced); tier name is
+  model-agnostic (`vlm`) so the model can be A/B-swapped without renaming.
 - Auth via `OPENROUTER_API_KEY` → `Settings.openrouter_api_key`; absent →
-  `TierNotImplemented` (graceful degradation). Image sent as a base64
-  `image_url` data-URL. Sync call offloaded via `anyio.to_thread.run_sync`.
+  `TierNotImplemented` (graceful degradation — typed-only pages still run on
+  Tesseract). Image sent as a base64 `image_url` data-URL. Sync call offloaded
+  via `anyio.to_thread.run_sync`.
+- VLMs emit no per-word confidence: words get a fixed `_CONF_PRIOR = 85.0`
+  (above the 70 net) + `bbox=(0,0,0,0)`. An unavailable VLM on a handwritten
+  page fails cleanly → `manual_review`; there is **no** fall-back to Tesseract
+  (that would reintroduce the confident-garbage the proactive ladder avoids).
 
 **Alternatives considered / rejected:**
 
 | Option | Why not |
 |---|---|
 | **AWS Textract** | **Rejected** — no Devanagari (only eng/spa/ger/fre/ita/por; handwriting English-only). |
-| **Qwen / Gemma local VLM** | **Superseded** — was the old reactive fallback; replaced by the GCV (T2) + Gemini (T3) tiers. |
+| **Qwen / Gemma local VLM** | **Superseded** — was the old reactive fallback; replaced by the Tesseract (T1) + OpenRouter VLM (T2) tiers. |
+| **Google Cloud Vision** (`DOCUMENT_TEXT_DETECTION`) | **Removed 2026-06-09** — was T2 for handwriting; dropped when the ladder collapsed to `(tesseract, vlm)`. Its per-word conf/bboxes were unused downstream, and it required a second cloud credential (GCP service account). The OpenRouter VLM covers handwritten Devanagari. |
 | PaddleOCR | Good multilingual support but heavier setup; T1+T2 cover the need. |
 | docTR | Strong on printed text; weaker on mixed-script Devanagari. |
 | EasyOCR | Weaker on dense multi-column layouts; slower than Tesseract. |
@@ -438,9 +448,8 @@ don't fan out per script.
 | torch / sentence-transformers as optional extras | Accepted for now (~2GB install) | Slow cold starts on Lambda if not containerised |
 | Pre-commit hooks (ruff + mypy) | Deferred | Code quality drift in fast-moving dev phase |
 | Heavy dep split | Low priority | Revisit before Lambda deployment |
-| Gemini VLM model tuning (T3 OCR + structure) | Resolved (model) / Pending (calibration) | T3 done via OpenRouter `google/gemini-2.5-flash` (§8). Cost/accuracy on real sample PDFs not yet benchmarked. Qwen/Gemma local VLM dropped. |
-| OpenRouter API key | Pending | T3 implemented but unexercised; OpenRouter integration test skipped until `OPENROUTER_API_KEY` set. |
-| Google Cloud Vision credentials / project | Pending | T2 implemented but unexercised; GCV integration test skipped until `GOOGLE_APPLICATION_CREDENTIALS` set. |
+| VLM model tuning (cloud OCR + structure) | Resolved (model) / Pending (calibration) | Done via OpenRouter `google/gemini-2.5-flash` (§8). Cost/accuracy on real sample PDFs not yet benchmarked. Qwen/Gemma local VLM dropped. |
+| OpenRouter API key | Pending | VLM tier implemented but unexercised; OpenRouter integration test skipped until `OPENROUTER_API_KEY` set. Now the *only* cloud-OCR credential (GCV removed 2026-06-09). |
 | Operations / control dashboard | **Planned — deferred** | Brainstormed 2026-06-06; tech locked (FastAPI + HTMX/Jinja), not yet built. 3-phase decomposition — see §19. DASH-2/3 each blocked on new plumbing (tier-tracking + cost events) / ground-truth data. |
 
 ---
@@ -474,7 +483,7 @@ the same uvicorn process; no separate toolchain.
 |---|---|---|
 | **DASH-1 — Operational dashboard** | Doc list w/ stage status; doc/page detail (inspect `raw_text`, `structured_json`, classification, S3 page image, reference match); trigger ingest (wrap `/pipeline/notify` → `handle_manifest()`); idempotent stage re-drive (re-classify, requeue OCR); match-rate aggregates; basic auth + new `audit_log` table. | Nothing — reads existing Postgres/S3 state. Ready to build. |
 | **DASH-2 — Cost & usage tracking** | Add `ocr_tier` col to `pages`; instrument the 3 OCR tiers + `cloud/classifier/llm.py` to emit token/cost per call → new `cost_events` table; cost-per-doc / per-tier / over-time views. | New schema + cross-cutting instrumentation. |
-| **DASH-3 — Accuracy eval lab** | Ground-truth store + eval runner: OCR accuracy vs truth, classification accuracy, on-demand T1-vs-T2-vs-T3 tier comparison on a page; results views. | Labeled ground-truth data (does not exist yet). |
+| **DASH-3 — Accuracy eval lab** | Ground-truth store + eval runner: OCR accuracy vs truth, classification accuracy, on-demand T1-vs-T2 tier comparison on a page; results views. | Labeled ground-truth data (does not exist yet). |
 
 ### Constraints discovered during brainstorm
 
