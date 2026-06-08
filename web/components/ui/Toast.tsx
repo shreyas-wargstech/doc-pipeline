@@ -1,11 +1,22 @@
 "use client";
 import { CheckCircle2, XCircle } from "lucide-react";
-import { useToast } from "@/app/providers";
+import { useToast, type Toast } from "@/app/providers";
 
 export function ToastViewport() {
   const { toasts } = useToast();
+  const ok = toasts.filter((t) => t.kind === "ok");
+  const err = toasts.filter((t) => t.kind === "error");
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-80 flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-80 flex-col gap-2">
+      <Region toasts={err} live="assertive" />
+      <Region toasts={ok} live="polite" />
+    </div>
+  );
+}
+
+function Region({ toasts, live }: { toasts: Toast[]; live: "polite" | "assertive" }) {
+  return (
+    <div aria-live={live} className="flex flex-col gap-2">
       {toasts.map((t) => (
         <div
           key={t.id}

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "./Button";
 
 export function ConfirmDialog({
@@ -15,11 +15,16 @@ export function ConfirmDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open) dialogRef.current?.focus();
+  }, [open]);
+
   if (!open) return null;
   return (
     <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden />
-      <div className="relative w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
+      <div ref={dialogRef} tabIndex={-1} className="relative w-full max-w-md rounded-lg border bg-card p-5 shadow-lg focus:outline-none">
         <h2 className="text-base font-semibold text-foreground">{title}</h2>
         {body && <p className="mt-2 text-sm text-muted-fg">{body}</p>}
         <div className="mt-5 flex justify-end gap-2">

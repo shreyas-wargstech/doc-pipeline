@@ -32,6 +32,8 @@ export function Table<T>({
               <tr
                 key={rowKey(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(row); } } : undefined}
                 className={`border-b last:border-0 transition-colors duration-150 hover:bg-muted/40 ${onRowClick ? "cursor-pointer" : ""}`}
               >
                 {columns.map((c) => (
