@@ -25,7 +25,7 @@ export interface PageRow {
   page_num: number;
   s3_key_image: string;
   page_type: string | null;
-  raw_text: string | null;
+  raw_text: string | null; // always null at runtime — OCR text lives in structured_json["raw_text"]; use PageDetailResponse.raw_text
   structured_json: Record<string, unknown> | null;
   confidence_score: number | null;
   language_detected: string | null;

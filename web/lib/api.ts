@@ -3,6 +3,7 @@ export class ApiError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; this.name = "ApiError"; }
 }
 
+// Browser-only safety net. Server components / edge routes have no window and instead receive the thrown ApiError; the Next middleware handles their redirects.
 function handle401(status: number) {
   if (status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
     window.location.assign("/login");
