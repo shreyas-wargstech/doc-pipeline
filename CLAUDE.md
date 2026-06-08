@@ -149,6 +149,14 @@ Key dashboard (DASH-1) facts (remember):
 - Auth dep uses `Annotated[HTTPBasicCredentials, Depends(_security)]` (ruff B008: `Depends(<instance>)` in a default is flagged; `Depends(<func>)` is not).
 - bcrypt pinned `<4` (passlib 1.7.4 incompatibility). Deferred minors (acceptable for internal tool): image-proxy 500-vs-404 on S3 miss, redundant per-route Depends on read views, bcrypt 72-byte truncation.
 
+Key dashboard API facts (Plan 1 of Next.js migration, 2026-06-08, remember):
+- `cloud/dashboard/api.py` = JSON `APIRouter` mounted at `/api` (13 routes: login/logout/me, documents, metrics, audit, doc+page detail, page image, ingest/requeue-ocr/reclassify, stream). **Reuses DASH-1 `queries.py`/`actions.py`/`audit.py` UNCHANGED** — same isolation (SELECT-only reads; actions re-drive idempotent entry points + write one audit row; actions never 500 → JSON `{ok,message}` HTTP 200). HTMX HTML dashboard (`router.py`/`templates/`/`static/`/`auth.py`) **still present + working** — deleted in Plan 2 on frontend cutover.
+- Auth = signed-cookie session (`cloud/dashboard/session.py`), replacing HTTP Basic for the SPA. `issue_session`/`read_session` = stdlib HMAC-SHA256 over `<b64(user:issued_ts)>.<sig>`; cookie `dash_session` httponly+samesite=lax, 8h `DEFAULT_MAX_AGE`. `verify_credentials` checks same `dashboard_users` bcrypt table (dummy-hash timing guard for unknown users). `require_session` dep → 401. Secret from `Settings.session_secret` (`SESSION_SECRET` env; dev default `dev-insecure-change-me` — MUST override in prod).
+- `login` returns a `JSONResponse(401)` directly (not `raise`) on bad creds — intentional: no `WWW-Authenticate` header, clean JSON body. Don't "fix" the `-> dict` return type (FastAPI passes Response objects through).
+- `documents` reads the `status` filter via `request.query_params.get("status")` (the name collides with imported FastAPI `status` module). `_to_dict` ORM serializer uses `col.name` (so it reads `metadata` not the `metadata_` attr — FIX for the DASH-1 `_ATTR_TO_SQL_COL` quirk; verified metadata.match round-trips).
+- SSE: `cloud/dashboard/sse.py::stream_document_changes` = SELECT-only poll-diff loop (default 2s `interval`), one `data:` frame per row whose `(status, match_status, ocr_done, ocr_total)` changed; cold `seen` map emits every row once on connect; heartbeat `: keepalive` every 7 quiet iters. `max_iterations` bounds it in tests. Endpoint `/api/stream` → `StreamingResponse(media_type="text/event-stream")`.
+- Plan/spec: `docs/superpowers/{plans/2026-06-08-nextjs-dashboard-backend-api.md, specs/2026-06-08-nextjs-dashboard-migration-design.md}`. Built subagent-driven on branch `feat/nextjs-dashboard`. **Plan 2 (web/ Next.js app + containerization + HTMX deletion) not yet written.**
+
 ## Default assumptions (override per task)
 
 - Files arrive in S3 / local upload, not email.
