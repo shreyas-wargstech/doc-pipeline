@@ -40,7 +40,7 @@ match:  ## Run the Match stage on one document. Usage: make match DOC=<document_
 	python -m scripts.run_match --document-id "$(DOC)"
 
 persist:  ## Run the Persist stage on one document. Usage: make persist DOC=<document_id>
-	uv run python -m scripts.run_persist --document-id $(DOC)
+	python -m scripts.run_persist --document-id "$(DOC)"
 
 test:  ## Run unit tests only
 	pytest -v -m "not integration"
