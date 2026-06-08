@@ -33,6 +33,7 @@ const config: Config = {
       },
     },
   },
+  safelist: ["text-foreground", "text-ok", "text-warn", "text-danger", "text-info"],
   plugins: [],
 };
 export default config;
