@@ -19,10 +19,8 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, Request, status
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from cloud.dashboard import api as dashboard_api
-from cloud.dashboard import router as dashboard_router
 from cloud.ingest.service import handle_manifest
 from nas.manifest.models import Manifest
 from shared.config import get_settings
@@ -59,15 +57,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Operations / control dashboard (DASH-1). Router first, then the static mount
-# at the final public path. See cloud/dashboard/.
-app.include_router(dashboard_router.router, prefix="/dashboard")
+# Operations / control dashboard — JSON API consumed by the Next.js app in
+# web/ (one origin via Next rewrites). The legacy HTMX dashboard + HTTP Basic
+# auth were removed in the Next.js cutover; FastAPI serves /api only.
 app.include_router(dashboard_api.router, prefix="/api")
-app.mount(
-    "/dashboard/static",
-    StaticFiles(directory=str(dashboard_router.STATIC_DIR)),
-    name="dashboard-static",
-)
 
 
 # ---------------------------------------------------------------------------
