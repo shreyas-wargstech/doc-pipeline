@@ -4,7 +4,7 @@ Proactive classify-first routing (APP_DOCUMENTATION §5.4):
   - NAS triage `content_type` picks the *starting* tier.
   - The confidence-net escalates one tier when `mean_conf` < threshold.
 
-Tier ladder (escalation order): tesseract → vision → gemini.
+Tier ladder (escalation order): tesseract → vlm.
 
 The router owns all I/O: it receives already-fetched image bytes from the
 consumer, runs the chosen tier(s), and persists the result to Postgres. Tiers
@@ -26,16 +26,15 @@ from cloud.ingest.models import OcrPageMessage
 from cloud.ingest.storage_db import OCRStatus, PageRepository
 from cloud.ocr.models import OcrResult, Tier
 from cloud.ocr.tiers.base import OcrTier, TierNotImplemented
-from cloud.ocr.tiers.gemini import GeminiTier
 from cloud.ocr.tiers.tesseract import TesseractTier
-from cloud.ocr.tiers.vision import VisionTier
+from cloud.ocr.tiers.vlm import VlmTier
 from shared.config import get_settings
 from shared.logging import get_logger
 
 log = get_logger(__name__)
 
 # Escalation order. Index = how hard the page is.
-_LADDER: tuple[Tier, ...] = ("tesseract", "vision", "gemini")
+_LADDER: tuple[Tier, ...] = ("tesseract", "vlm")
 
 # content_type (from triage) → starting tier index.
 _START: dict[str, int] = {
@@ -48,10 +47,10 @@ _START: dict[str, int] = {
 class _UnavailableTier:
     """Stand-in for a cloud tier whose engine isn't configured.
 
-    VisionTier/GeminiTier raise TierNotImplemented at construction when creds
-    are absent. Eagerly building every tier would then fail the whole router —
-    even for typed pages that only need Tesseract. This placeholder raises at
-    run() time instead, so the router's escalation `break` handles it.
+    VlmTier raises TierNotImplemented at construction when OPENROUTER_API_KEY
+    is absent. Eagerly building it would then fail the whole router — even for
+    typed pages that only need Tesseract. This placeholder raises at run() time
+    instead, so the router's escalation `continue` skips it gracefully.
     """
 
     def __init__(self, name: Tier, reason: str) -> None:
@@ -82,8 +81,7 @@ def _default_tiers() -> dict[Tier, OcrTier]:
     langs = getattr(settings, "ocr_langs", "eng+mar+hin")
     return {
         "tesseract": TesseractTier(langs=langs),
-        "vision": _build_tier("vision", VisionTier),
-        "gemini": _build_tier("gemini", GeminiTier),
+        "vlm": _build_tier("vlm", VlmTier),
     }
 
 

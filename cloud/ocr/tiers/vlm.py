@@ -1,17 +1,18 @@
-"""Tier 3 — Gemini VLM (via OpenRouter).
+"""Cloud tier — VLM transcription (via OpenRouter).
 
-Last-resort OCR for messy / hardest-handwriting pages the lower tiers flunk.
-Plain transcription only: the VLM returns verbatim text, which we split into
-words with a fixed confidence prior and zero bounding boxes — VLM pixel-bboxes
-are unreliable on the messy scans this tier handles, and the downstream
-Structure stage works off `raw_text`.
+The sole cloud OCR tier: handles handwriting and low-confidence escalation off
+Tesseract. Plain transcription only: the VLM returns verbatim text, which we
+split into words with a fixed confidence prior and zero bounding boxes — VLM
+pixel-bboxes are unreliable on the messy scans this tier handles, and the
+downstream Structure stage works off `raw_text`.
 
 Transport: OpenRouter's OpenAI-compatible Chat Completions API, reached with the
-`openai` SDK pointed at `OPENROUTER_BASE_URL`. The model is still Gemini (id
-`google/gemini-2.5-flash`) — OpenRouter is just the gateway. Auth via
+`openai` SDK pointed at `OPENROUTER_BASE_URL`. The model is Gemini 2.5 Flash (id
+`google/gemini-2.5-flash`) — OpenRouter is just the gateway; the tier name is
+model-agnostic so the model can be swapped without renaming. Auth via
 OPENROUTER_API_KEY; absent → TierNotImplemented so the router degrades
-gracefully (mirrors VisionTier). The sync SDK call is offloaded to
-anyio.to_thread.run_sync, identical to TesseractTier / VisionTier.
+gracefully. The sync SDK call is offloaded to anyio.to_thread.run_sync,
+identical to TesseractTier.
 """
 from __future__ import annotations
 
@@ -33,8 +34,8 @@ log = get_logger(__name__)
 # production path uses settings.openrouter_model — keep both in sync if changing.
 _DEFAULT_MODEL = "google/gemini-2.5-flash"
 
-# VLMs don't emit per-word confidence. Fixed prior, above the 70 net so T3
-# output is accepted; T3 is top-of-ladder so escalation is moot regardless.
+# VLMs don't emit per-word confidence. Fixed prior, above the 70 net so VLM
+# output is accepted; the VLM is top-of-ladder so escalation is moot regardless.
 _CONF_PRIOR = 85.0
 
 _PROMPT = (
@@ -46,8 +47,8 @@ _PROMPT = (
 )
 
 
-class GeminiTier:
-    name = "gemini"
+class VlmTier:
+    name = "vlm"
 
     def __init__(
         self,
@@ -84,7 +85,7 @@ class GeminiTier:
         )
         mean_conf = _CONF_PRIOR if words else 0.0
         log.info(
-            "gemini_done",
+            "vlm_done",
             document_id=document_id,
             page_num=page_num,
             words=len(words),
@@ -93,7 +94,7 @@ class GeminiTier:
         return OcrResult(
             document_id=document_id,
             page_num=page_num,
-            tier="gemini",
+            tier="vlm",
             words=words,
             raw_text=raw_text,
             mean_conf=mean_conf,

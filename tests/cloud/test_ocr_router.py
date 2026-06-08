@@ -75,12 +75,11 @@ def _msg(content_type="typed", language_hint="latin"):
     )
 
 
-def _router(t=None, v=None, g=None, threshold=70.0):
+def _router(t=None, vlm=None, threshold=70.0):
     return OcrRouter(
         tiers={
             "tesseract": t or FakeTier("tesseract"),
-            "vision": v or FakeTier("vision"),
-            "gemini": g or FakeTier("gemini"),
+            "vlm": vlm or FakeTier("vlm"),
         },
         threshold=threshold,
     )
@@ -89,37 +88,36 @@ def _router(t=None, v=None, g=None, threshold=70.0):
 # ── routing ────────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 async def test_typed_starts_tesseract_high_conf_done():
-    t, v = FakeTier("tesseract", mean_conf=95.0), FakeTier("vision")
-    router = _router(t=t, v=v)
+    t, vlm = FakeTier("tesseract", mean_conf=95.0), FakeTier("vlm")
+    router = _router(t=t, vlm=vlm)
     repo = FakeRepo()
     res = await router.process_page(_msg("typed"), b"img", repo)
 
     assert res.tier == "tesseract"
-    assert t.calls == 1 and v.calls == 0  # no escalation
+    assert t.calls == 1 and vlm.calls == 0  # no escalation
     assert repo.saved[0]["ocr_status"] == OCRStatus.DONE
     assert repo.saved[0]["structured_json"]["entities"] == []
     assert repo.saved[0]["structured_json"]["ocr_confidence"] == 95.0
 
 
 @pytest.mark.anyio
-async def test_low_conf_escalates_one_tier():
+async def test_low_conf_escalates_to_vlm():
     t = FakeTier("tesseract", mean_conf=40.0)
-    v = FakeTier("vision", mean_conf=88.0)
-    router = _router(t=t, v=v)
+    vlm = FakeTier("vlm", mean_conf=88.0)
+    router = _router(t=t, vlm=vlm)
     res = await router.route(_msg("typed"), b"img")
 
-    assert t.calls == 1 and v.calls == 1
-    assert res.tier == "vision" and res.mean_conf == 88.0
+    assert t.calls == 1 and vlm.calls == 1
+    assert res.tier == "vlm" and res.mean_conf == 88.0
 
 
 @pytest.mark.anyio
-async def test_low_conf_top_tiers_unavailable_keeps_best():
-    """Low-conf tesseract tries to escalate; if EVERY higher tier is
-    unavailable, the best (tesseract) result is kept, not failed."""
+async def test_low_conf_vlm_unavailable_keeps_best():
+    """Low-conf tesseract tries to escalate; if the VLM is unavailable, the
+    best (tesseract) result is kept, not failed."""
     t = FakeTier("tesseract", mean_conf=40.0)
-    v = FakeTier("vision", raises=True)
-    g = FakeTier("gemini", raises=True)
-    router = _router(t=t, v=v, g=g)
+    vlm = FakeTier("vlm", raises=True)
+    router = _router(t=t, vlm=vlm)
     repo = FakeRepo()
     res = await router.process_page(_msg("typed"), b"img", repo)
 
@@ -129,45 +127,28 @@ async def test_low_conf_top_tiers_unavailable_keeps_best():
 
 
 @pytest.mark.anyio
-async def test_low_conf_skips_unavailable_middle_tier_to_gemini():
-    """A low-conf page whose next tier (Vision) is unavailable escalates PAST
-    it to the next configured tier (Gemini) — not just to 'best'."""
-    t = FakeTier("tesseract", mean_conf=40.0)
-    v = FakeTier("vision", raises=True)
-    g = FakeTier("gemini", mean_conf=92.0)
-    router = _router(t=t, v=v, g=g)
-    res = await router.route(_msg("typed"), b"img")
-
-    assert t.calls == 1 and v.calls == 1 and g.calls == 1
-    assert res.tier == "gemini" and res.mean_conf == 92.0
-
-
-@pytest.mark.anyio
-async def test_handwritten_vision_unavailable_escalates_to_gemini():
-    """Unavailable START tier (Vision/no creds) must NOT dead-end the page —
-    the ladder escalates to the next configured tier (Gemini/T3)."""
+async def test_handwritten_starts_vlm_direct():
+    """A handwritten page starts at the VLM (index 1), skipping Tesseract."""
     t = FakeTier("tesseract")
-    v = FakeTier("vision", raises=True)  # unavailable (no creds)
-    g = FakeTier("gemini", mean_conf=90.0)
-    router = _router(t=t, v=v, g=g)
+    vlm = FakeTier("vlm", mean_conf=90.0)
+    router = _router(t=t, vlm=vlm)
     repo = FakeRepo()
     res = await router.process_page(_msg("handwritten"), b"img", repo)
 
-    assert res is not None and res.tier == "gemini"
-    assert v.calls == 1 and g.calls == 1
+    assert res is not None and res.tier == "vlm"
+    assert vlm.calls == 1
     assert t.calls == 0  # never falls BACK to Tesseract on a handwritten page
     assert repo.saved[0]["ocr_status"] == OCRStatus.DONE
 
 
 @pytest.mark.anyio
-async def test_handwritten_all_cloud_unavailable_fails_no_t1_fallback():
-    """Every tier from the start point up is unavailable → page fails cleanly.
-    It does NOT fall back to Tesseract (avoids confident-garbage on handwriting,
-    per the proactive-routing design)."""
+async def test_handwritten_vlm_unavailable_fails_no_t1_fallback():
+    """VLM unavailable on a handwritten page → fails cleanly. Does NOT fall
+    back to Tesseract (avoids confident-garbage on handwriting, per the
+    proactive-routing design)."""
     t = FakeTier("tesseract")
-    v = FakeTier("vision", raises=True)
-    g = FakeTier("gemini", raises=True)
-    router = _router(t=t, v=v, g=g)
+    vlm = FakeTier("vlm", raises=True)
+    router = _router(t=t, vlm=vlm)
     repo = FakeRepo()
     res = await router.process_page(_msg("handwritten"), b"img", repo)
 
@@ -218,14 +199,13 @@ async def test_tesseract_parses_dict_filters_negative_conf(monkeypatch):
 
 
 # ── _default_tiers hardening ─────────────────────────────────────────────
-def test_default_tiers_tolerates_unconfigured_cloud_tiers(monkeypatch):
-    """If VisionTier/GeminiTier raise TierNotImplemented at construction,
-    _default_tiers substitutes _UnavailableTier instead of propagating."""
+def test_default_tiers_tolerates_unconfigured_cloud_tier(monkeypatch):
+    """If VlmTier raises TierNotImplemented at construction, _default_tiers
+    substitutes _UnavailableTier instead of propagating."""
     def boom():
         raise TierNotImplemented("not configured")
 
-    monkeypatch.setattr(router_mod, "VisionTier", boom)
-    monkeypatch.setattr(router_mod, "GeminiTier", boom)
+    monkeypatch.setattr(router_mod, "VlmTier", boom)
     monkeypatch.setattr(
         router_mod, "TesseractTier", lambda langs="x": FakeTier("tesseract")
     )
@@ -236,13 +216,12 @@ def test_default_tiers_tolerates_unconfigured_cloud_tiers(monkeypatch):
     tiers = router_mod._default_tiers()
 
     assert tiers["tesseract"].name == "tesseract"
-    assert isinstance(tiers["vision"], router_mod._UnavailableTier)
-    assert isinstance(tiers["gemini"], router_mod._UnavailableTier)
+    assert isinstance(tiers["vlm"], router_mod._UnavailableTier)
 
 
 @pytest.mark.anyio
 async def test_unavailable_tier_raises_at_run():
     """_UnavailableTier raises TierNotImplemented when run (so route() skips it)."""
-    t = router_mod._UnavailableTier("vision", "no creds")
+    t = router_mod._UnavailableTier("vlm", "no creds")
     with pytest.raises(TierNotImplemented, match="no creds"):
         await t.run(b"img", document_id="d", page_num=1)
