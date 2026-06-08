@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -24,6 +24,7 @@ from cloud.dashboard.session import (
     require_session,
     verify_credentials,
 )
+from cloud.ingest.storage_db import DocumentRepository, PageRepository
 from shared.db import session_scope
 from shared.logging import get_logger
 
@@ -74,3 +75,86 @@ async def logout(response: Response, _user: str = Depends(require_session)) -> d
 @router.get("/me")
 async def me(user: str = Depends(require_session)) -> dict[str, str]:
     return {"user": user}
+
+
+# --- read endpoints --------------------------------------------------------
+
+def _to_dict(obj: Any) -> dict[str, Any]:
+    """Serialize an ORM row to a JSON-safe dict (str() for non-trivial types)."""
+    out: dict[str, Any] = {}
+    for col in obj.__table__.columns:
+        val = getattr(obj, col.name)
+        _primitives = (str, int, float, bool, type(None), dict, list)
+        out[col.name] = val if isinstance(val, _primitives) else str(val)
+    return out
+
+
+@router.get("/documents")
+async def documents(
+    request: Request,
+    category: str | None = None,
+    status_: str | None = None,
+    match_status: str | None = None,
+    search: str | None = None,
+    offset: int = 0,
+    _user: str = Depends(require_session),
+) -> dict[str, Any]:
+    # query param is `status` on the wire; aliased to status_ to avoid shadowing
+    status_val = request.query_params.get("status")
+    filters = {"category": category, "status": status_val,
+               "match_status": match_status, "search": search}
+    async with session_scope() as session:
+        docs = await queries.list_documents(session, **filters,
+                                            limit=_PAGE_SIZE, offset=offset)
+        total = await queries.count_documents(session, **filters)
+    return {"documents": docs, "total": total, "offset": offset, "limit": _PAGE_SIZE}
+
+
+@router.get("/metrics")
+async def metrics(_user: str = Depends(require_session)) -> dict[str, Any]:
+    async with session_scope() as session:
+        sc = await queries.status_counts(session)
+        mc = await queries.match_status_counts(session)
+    return {"status_counts": sc, "match_counts": mc}
+
+
+@router.get("/audit")
+async def audit_view(
+    username: str | None = None,
+    document_id: str | None = None,
+    action: str | None = None,
+    _user: str = Depends(require_session),
+) -> dict[str, Any]:
+    async with session_scope() as session:
+        rows = await audit.list_audit(session, username=username,
+                                      document_id=document_id, action=action)
+    return {"rows": rows}
+
+
+@router.get("/documents/{document_id}")
+async def doc_detail(document_id: str, _user: str = Depends(require_session)) -> dict[str, Any]:
+    async with session_scope() as session:
+        doc = await DocumentRepository(session).get(document_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        pages = await PageRepository(session).list_for_document(document_id)
+        doc_d = _to_dict(doc)
+        pages_d = [_to_dict(p) for p in pages]
+    ocr_done = sum(1 for p in pages if p.ocr_status == "done")
+    structured_done = sum(1 for p in pages if p.structured_json is not None)
+    return {"doc": doc_d, "pages": pages_d,
+            "ocr_done": ocr_done, "structured_done": structured_done}
+
+
+@router.get("/documents/{document_id}/pages/{page_num}")
+async def page_detail(
+    document_id: str, page_num: int, _user: str = Depends(require_session)
+) -> dict[str, Any]:
+    async with session_scope() as session:
+        page = await PageRepository(session).get(document_id, page_num)
+        if page is None:
+            raise HTTPException(status_code=404, detail="page not found")
+        page_d = _to_dict(page)
+    sj = page.structured_json
+    raw_text = sj.get("raw_text") if isinstance(sj, dict) else None
+    return {"page": page_d, "structured_json": sj, "raw_text": raw_text}
