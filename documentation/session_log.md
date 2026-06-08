@@ -353,3 +353,13 @@
 - Review follow-ups left as Minor (non-blocking): silent structure_max_chars truncation (add warn log); reg_no LLM hint can outrank "no value" (match stage owns reconciliation, TEXT col); cross-module test gaps (mid-loop LLM-raise path, structured_json non-entity-key round-trip).
 - Open (carry-over): the 2 DEFERRED OCR issues (triage over-classifies handwritten; router dead-ends on unavailable start tier) — user still wants detailed discussion; GCV creds + OPENROUTER_API_KEY wiring; uncalibrated thresholds.
 - Next step: implement match stage (documents practitioner block → reference_data join on registration_no) OR cloud/persist/ (Qdrant + Neo4j). Structure DONE 2026-06-08.
+
+## 2026-06-08 — cloud/match/ stage BUILT (pipeline sub-project C; on feat/match-stage, NOT yet merged)
+- Existing spec (`docs/superpowers/specs/2026-06-08-match-stage-design.md`) + plan (`docs/superpowers/plans/2026-06-08-match-stage.md`) → subagent-driven exec. 7 tasks. Branch `feat/match-stage` (commits d9e34fc→a9760ad).
+- Built `cloud/match/`: `models.py` (dataclasses + `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` constants + `parse_registration_no` TEXT→int), `fuzzy.py` (pure rapidfuzz `token_sort_ratio`, max over full_name/name_change), `reference.py` (`ReferenceRepository`: exact reg_no + dob-gated candidate reads off `fields_norm`), `service.py` (`match_document`). Plus `DocumentRepository.update_metadata` (JSONB `||` merge), `scripts/run_match.py` + `make match DOC=<id>`.
+- Decision ladder: non-practitioner→not_applicable (no metadata.match); practitioner→exact reg_no→matched(exact); else fuzzy fallback gated on doc.dob (None→unmatched, no 92K scan); ≥90 matched / [75,90) manual_review / <75 unmatched. Writes match_status + reference_data_id + metadata.match provenance. Does NOT touch document.status. Idempotent.
+- **28 match unit tests green (10 models + 8 fuzzy + 10 service). Full suite 174 passed, 22 deselected. ruff clean.**
+- Notes: Task 3 (reference.py + update_metadata) was already present uncommitted verbatim from plan — verified + fixed one E302 nit. Task 4 impl deviation: `update_metadata(..., patch=...)` keyword (plan's own tests assert call_args kwargs) — correct.
+- CAVEAT: gated integration test (`tests/cloud/test_match_integration.py`, 3 tests) committed + collects, but NOT run live — Docker down. Run `make up` then `uv run pytest -m integration tests/cloud/test_match_integration.py` to confirm.
+- Open (carry-over): merge feat/match-stage to main (pending); run gated integration test; uncalibrated fuzzy thresholds (no labeled pairs); 2 DEFERRED OCR issues; GCV creds + OPENROUTER_API_KEY wiring.
+- Next step: implement `cloud/persist/` (Qdrant + Neo4j). Match DONE 2026-06-08.
