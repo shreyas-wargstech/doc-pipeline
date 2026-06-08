@@ -104,9 +104,11 @@ async def test_handle_manifest_practitioner_enqueues_all_pages(
     assert {m.page_num for m in msgs} == {1, 2}
     assert all(m.document_category == "practitioner" for m in msgs)
 
-    # Pages set to QUEUED
+    # Pages set to QUEUED — but ONLY from PENDING (non-clobber guard). Because
+    # enqueue happens before this write (locked decision), a fast worker can
+    # already have marked a page DONE; this write must not downgrade it back.
     mock_page_repo.bulk_update_ocr_status.assert_any_call(
-        manifest.document_id, [1, 2], OCRStatus.QUEUED
+        manifest.document_id, [1, 2], OCRStatus.QUEUED, only_from=[OCRStatus.PENDING]
     )
 
 

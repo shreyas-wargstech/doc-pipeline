@@ -582,3 +582,54 @@ I001 Import block is un-sorted or un-formatted
 **Rule:** When a step can be skipped because a *resource* is unavailable (creds/config), use `continue` to try alternatives — reserve `break` for "nothing further can possibly help." A test that asserts a degraded/failed outcome may be encoding a *limitation* (stub not built), not a *requirement* — revisit it when the limitation is lifted.
 
 ---
+
+## 2026-06-09 — OCR status race + Docker build-context bloat (found in real-bundle smoke)
+
+### FIX-029 · ingest bulk `QUEUED` write clobbers a page a fast worker already marked `done`
+
+**Symptom:**
+Real-bundle smoke: 13 non-blank pages enqueued + all 13 OCR'd (`vlm_done`/`ocr_persisted`),
+but `pages` showed `done=12, queued=1`. Page 1 had `structured_json.raw_text` present yet
+`ocr_status='queued'`; structure + persist then skipped it (12 vectors, not 13).
+
+**Root cause:**
+`handle_manifest` enqueues pages to SQS **before** the final bulk status write
+(`bulk_update_ocr_status(..., QUEUED)`) — a locked decision ("enqueue before final DB
+write"). A worker already long-polling can dequeue->OCR->mark `done` a page in the window
+between its enqueue and that bulk write. The unconditional `UPDATE ... SET ocr_status='queued'`
+then downgraded the already-`done` page back to `queued`. Timing-confirmed: page 1 `done` at
+:33:56.9, ingest bulk `queued` at :33:58.0; pages processed after :58 survived.
+
+**Fix:**
+Made the QUEUED transition non-clobbering instead of reordering (keeps the locked
+enqueue-before-write). Added `only_from: list[str] | None` to
+`PageRepository.bulk_update_ocr_status` -> appends `AND ocr_status = ANY(:only_from)`.
+`handle_manifest` now calls it with `only_from=[OCRStatus.PENDING]`, so a page already
+`done`/`failed` is left untouched.
+
+**Files:** `cloud/ingest/storage_db.py`, `cloud/ingest/service.py`, `tests/cloud/test_ingest_service.py`
+
+**Rule:** Any status write that runs *after* work is dispatched to an async consumer must be
+a guarded/conditional transition (`only_from` the pre-dispatch state), never an unconditional
+SET — otherwise it races the consumer and downgrades terminal states. "Enqueue before DB
+write" only works if that DB write cannot move a row backwards.
+
+### FIX-029b · `docker compose up` hangs shipping a 400MB+ build context (missing .dockerignore)
+
+**Symptom:** `make up` (= `docker compose up -d`, no service list → also builds `api`+`web`)
+appeared to hang; logs showed `web internal load build context transferring context: 417MB`.
+
+**Root cause:** No `.dockerignore` at repo root (api context = `.`) or in `web/`. The api
+build shipped `.git`/`.venv`/`web/node_modules`; the web build shipped host `node_modules`
+(Windows binaries, also a correctness hazard since the image regenerates them via `npm ci`).
+
+**Fix:** Added `.dockerignore` (root: excludes `.git`/`.venv`/`web/`/caches/`.env`) and
+`web/.dockerignore` (excludes `node_modules`/`.next`). Context drops to KB.
+
+**Files:** `.dockerignore`, `web/.dockerignore`
+
+**Rule:** Every Docker build `context:` needs a `.dockerignore`. For a monorepo where one
+service's context is the repo root, always exclude `.git`, the local virtualenv, and other
+services' `node_modules`/build dirs. (Separate papercut: `make up` builds app images because
+the recipe is a bare `docker compose up -d` with no service list — scope it to infra, or give
+`api`/`web` a compose `profiles:`.)
