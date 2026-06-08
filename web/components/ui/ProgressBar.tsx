@@ -5,6 +5,7 @@ export function ProgressBar({ done, total }: { done: number; total: number }) {
     <div className="flex items-center gap-2">
       <div
         role="progressbar"
+        aria-label={`OCR ${clampedDone} of ${total} pages`}
         aria-valuemin={0}
         aria-valuemax={total}
         aria-valuenow={clampedDone}

@@ -15,9 +15,9 @@
   --color-border: 219 234 254;
   --color-destructive: 220 38 38;
   --color-ring: 30 64 175;
-  --color-ok: 21 128 61;
-  --color-warn: 180 83 9;
-  --color-danger: 220 38 38;
+  --color-ok: 15 96 48;
+  --color-warn: 146 64 10;
+  --color-danger: 185 28 28;
   --color-info: 67 56 202;
 }
 .dark {
