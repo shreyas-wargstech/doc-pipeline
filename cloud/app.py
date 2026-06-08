@@ -17,10 +17,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any
 
-import structlog
 from fastapi import BackgroundTasks, FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
+from cloud.dashboard import router as dashboard_router
 from cloud.ingest.service import handle_manifest
 from nas.manifest.models import Manifest
 from shared.config import get_settings
@@ -55,6 +56,15 @@ app = FastAPI(
     description="Local dev trigger for the cloud ingest pipeline.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Operations / control dashboard (DASH-1). Router first, then the static mount
+# at the final public path. See cloud/dashboard/.
+app.include_router(dashboard_router.router, prefix="/dashboard")
+app.mount(
+    "/dashboard/static",
+    StaticFiles(directory=str(dashboard_router.STATIC_DIR)),
+    name="dashboard-static",
 )
 
 

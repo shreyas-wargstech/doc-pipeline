@@ -199,3 +199,31 @@ CREATE TRIGGER set_pages_updated_at
 CREATE TRIGGER set_reference_data_updated_at
     BEFORE UPDATE ON reference_data
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+-- -----------------------------------------------------------------------------
+-- dashboard_users: credentials for the operations dashboard (HTTP Basic).
+-- Seeded via scripts/add_dashboard_user.py. password_hash = bcrypt.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dashboard_users (
+    username      TEXT        PRIMARY KEY,
+    password_hash TEXT        NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -----------------------------------------------------------------------------
+-- audit_log: one row per dashboard CONTROL action (read views not audited).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          BIGSERIAL   PRIMARY KEY,
+    ts          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    username    TEXT        NOT NULL,
+    action      TEXT        NOT NULL,          -- ingest | requeue_ocr | reclassify
+    document_id TEXT,                          -- nullable
+    params      JSONB       NOT NULL DEFAULT '{}'::jsonb,
+    result      TEXT        NOT NULL CHECK (result IN ('ok', 'error')),
+    detail      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_document_id ON audit_log (document_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_username    ON audit_log (username);
+CREATE INDEX IF NOT EXISTS idx_audit_log_ts          ON audit_log (ts DESC);

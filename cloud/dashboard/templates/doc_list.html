@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Documents{% endblock %}
+{% block content %}
+<h1>Documents</h1>
+<form method="get" action="/dashboard/" class="filters">
+  <input type="text" name="search" value="{{ filters.search or '' }}" placeholder="reg no / filename">
+  <input type="text" name="category" value="{{ filters.category or '' }}" placeholder="category">
+  <input type="text" name="status" value="{{ filters.status or '' }}" placeholder="status">
+  <input type="text" name="match_status" value="{{ filters.match_status or '' }}" placeholder="match_status">
+  <button type="submit">Filter</button>
+</form>
+<p>{{ total }} document(s)</p>
+<table>
+  <thead><tr>
+    <th>Document</th><th>Category</th><th>Type</th><th>Status</th>
+    <th>Match</th><th>OCR</th><th>Updated</th>
+  </tr></thead>
+  <tbody>
+  {% for d in documents %}
+    <tr>
+      <td><a href="/dashboard/doc/{{ d.document_id }}">{{ d.document_id[:12] }}…</a><br>
+          <small>{{ d.original_filename }}</small></td>
+      <td>{{ d.document_category }}</td>
+      <td>{{ d.document_type or '—' }}</td>
+      <td>{{ d.status }}</td>
+      <td>{{ d.match_status or '—' }}</td>
+      <td>{{ d.ocr_done }}/{{ d.ocr_total }}</td>
+      <td>{{ d.updated_at }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7">No documents.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="pager">
+  {% if offset > 0 %}<a href="/dashboard/?offset={{ [offset - limit, 0]|max }}{% if filter_qs %}&{{ filter_qs }}{% endif %}">Prev</a>{% endif %}
+  {% if offset + limit < total %}<a href="/dashboard/?offset={{ offset + limit }}{% if filter_qs %}&{{ filter_qs }}{% endif %}">Next</a>{% endif %}
+</div>
+{% endblock %}

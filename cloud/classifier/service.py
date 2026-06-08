@@ -152,14 +152,19 @@ class ClassifierService:
     def __init__(self, s3_client=None):
         self._s3 = s3_client  # injected for testability
 
-    async def classify(self, manifest: Manifest) -> ClassificationResult:
+    async def classify(
+        self, manifest: Manifest, *, trust_manifest_hint: bool = True
+    ) -> ClassificationResult:
         bound_log = log.bind(
             document_id=manifest.document_id,
             page_count=len(manifest.pages),
         )
 
-        # 1. Manifest hint
-        hint = _from_manifest_hint(manifest)
+        # 1. Manifest hint. The hint path only echoes the NAS category and never
+        # derives document_type (it returns None), so callers that need a real
+        # content-based classification (e.g. the dashboard "Re-classify" control)
+        # pass trust_manifest_hint=False to force the cover-text path below.
+        hint = _from_manifest_hint(manifest) if trust_manifest_hint else None
         if hint is not None:
             return hint
 

@@ -71,9 +71,9 @@ docs/     INTEGRATION.md
 - `match_status` = `matched|unmatched|not_applicable|manual_review`. NULL = not-yet-matched; match stage owns the column.
 - SQS = one message per page; enqueue before final DB write; FIFO dedup key `<document_id>:<page_num>`.
 
-## Current state (as of 2026-06-06)
+## Current state (as of 2026-06-07)
 
-Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + stub LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + **Tier 1 Tesseract (done) + Tier 2 GCV VisionTier (done) + Tier 3 Gemini GeminiTier (done)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **64 unit tests green + 2 integration tests (gcv + gemini, skipped until creds/key)**.
+Done: full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + LLM), SQS producer, NAS triage + 7-step preprocess pass, reference data loader, PageManifest triage fields wired, `cloud/ocr/router.py` + **Tier 1 Tesseract + Tier 2 GCV + Tier 3 Gemini (all done)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **DASH-1 operational dashboard (`cloud/dashboard/`, PR #1)**, **117 unit tests green, 3 skipped (gcv/gemini/integration until creds/key)**.
 
 Key VisionTier facts (remember):
 - `_bbox` guards against empty vertices → returns `(0, 0, 0, 0)` — real GCV can return no bounding box on noisy scans.
@@ -131,6 +131,14 @@ Key Match facts (2026-06-08, remember):
 - Writes `match_status` + `reference_data_id` via `update_fields`, plus a `metadata.match` provenance block (method/score/candidate_registration_no/matched_on/band) via new `DocumentRepository.update_metadata(document_id, patch)` — JSONB shallow-merge (`metadata = metadata || :patch::jsonb`) so classifier/structure keys survive. `not_applicable` writes NO metadata block. Does NOT touch `document.status` (persist/final stage owns lifecycle). Idempotent: re-run overwrites same columns + block.
 - Candidate names read pre-lowercased from `reference_data.fields_norm->>'full_name'/'name_change'` (DRY — reuses load_reference_data normalization). `MatchError(PipelineError)` in `shared/exceptions.py`.
 - Run: `make match DOC=<document_id>` (`scripts/run_match.py`) inside `session_scope()`. 28 match unit tests green (10 models + 8 fuzzy + 10 service), +3 gated integration (real Postgres). Auto-trigger after structure deferred to AWS.
+
+Key dashboard (DASH-1) facts (remember):
+- `cloud/dashboard/` (auth, audit, queries, actions, router, templates/, static/) mounted on `cloud/app.py` at `/dashboard`; FastAPI+HTMX/Jinja, HTTP Basic auth. Spec/plan under `docs/superpowers/{specs,plans}/2026-06-06-pipeline-dashboard-dash1*`. Built via PR #1.
+- Isolation (locked): `queries.py` = SELECT-only (no write-repo imports); `actions.py` only re-drives existing idempotent entry points (`handle_manifest`, `enqueue_page`, `ClassifierService`, repo `update_fields`/`bulk_update_ocr_status`) — never writes a stage's tables itself. Every control action writes one `audit_log` row (ok/error) and returns an HTMX toast (HTTP 200, never 500).
+- New additive tables: `dashboard_users` (username PK + bcrypt hash; seed via `python -m scripts.add_dashboard_user <user>`), `audit_log` (result CHECK in ('ok','error'); `username` is an immutable actor snapshot — intentionally NO FK). `document_type` added to `_DOCUMENT_UPDATE_WHITELIST`.
+- `ClassifierService.classify(manifest, *, trust_manifest_hint=True)`: default echoes NAS category hint with `document_type=None`; **reclassify passes `trust_manifest_hint=False`** to force the cover-text path (else it nulls a good document_type). Ingest keeps the default.
+- Auth dep uses `Annotated[HTTPBasicCredentials, Depends(_security)]` (ruff B008: `Depends(<instance>)` in a default is flagged; `Depends(<func>)` is not).
+- bcrypt pinned `<4` (passlib 1.7.4 incompatibility). Deferred minors (acceptable for internal tool): image-proxy 500-vs-404 on S3 miss, redundant per-route Depends on read views, bcrypt 72-byte truncation.
 
 ## Default assumptions (override per task)
 

@@ -169,6 +169,7 @@ class DocumentRepository:
     _DOCUMENT_UPDATE_WHITELIST: frozenset[str] = frozenset(
         {
             "document_category",
+            "document_type",
             "match_status",
             "status",
             "registration_no",

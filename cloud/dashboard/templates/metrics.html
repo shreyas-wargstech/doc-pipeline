@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Metrics{% endblock %}
+{% block content %}
+<h1>Metrics</h1>
+<h2>Document status</h2>
+<table><tbody>
+{% for k, v in status_counts.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+</tbody></table>
+<h2>Match status</h2>
+<table><tbody>
+{% for k, v in match_counts.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}
