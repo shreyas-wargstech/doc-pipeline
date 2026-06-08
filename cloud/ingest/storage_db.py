@@ -460,31 +460,46 @@ class PageRepository:
         document_id: str,
         page_nums: list[int],
         ocr_status: str,
+        only_from: list[str] | None = None,
     ) -> None:
         """
         Set ocr_status for a list of pages in a single query.
 
         Uses Postgres ANY(:array) so the round-trips stay constant regardless
         of page count.
+
+        `only_from` restricts the transition to pages whose *current* ocr_status
+        is in the given set — a guard against clobbering. The OCR enqueue happens
+        before this write (locked decision), so a fast worker can already have
+        moved a page PENDING→DONE; passing `only_from=[OCRStatus.PENDING]` for
+        the QUEUED transition prevents downgrading that page back to QUEUED.
         """
         if not page_nums:
             return
         if ocr_status not in OCRStatus.ALL:
             raise PersistError(f"bulk_update_ocr_status: invalid status {ocr_status!r}")
+        if only_from is not None:
+            invalid = set(only_from) - OCRStatus.ALL
+            if invalid:
+                raise PersistError(
+                    f"bulk_update_ocr_status: invalid only_from {sorted(invalid)!r}"
+                )
 
-        stmt = text(
+        sql = (
             "UPDATE pages "
             "SET ocr_status = :ocr_status, updated_at = now() "
             "WHERE document_id = :document_id AND page_num = ANY(:page_nums)"
         )
-        await self.session.execute(
-            stmt,
-            {
-                "ocr_status": ocr_status,
-                "document_id": document_id,
-                "page_nums": page_nums,
-            },
-        )
+        params: dict[str, object] = {
+            "ocr_status": ocr_status,
+            "document_id": document_id,
+            "page_nums": page_nums,
+        }
+        if only_from is not None:
+            sql += " AND ocr_status = ANY(:only_from)"
+            params["only_from"] = list(only_from)
+
+        await self.session.execute(text(sql), params)
         logger.info(
             "pages_ocr_status_bulk_updated",
             document_id=document_id,

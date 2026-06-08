@@ -1,0 +1,29 @@
+# Build context for the `api` image (cloud/Dockerfile, context = repo root).
+# Exclude everything the Python/cloud build does not need — this is what
+# bloats the context and slows `docker compose build`.
+
+# VCS + local virtualenv
+.git/
+.venv/
+
+# The web app has its own build (web/Dockerfile); never ship it into the api image
+web/
+node_modules/
+
+# Python caches / artifacts
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Secrets + local env (api reads .env at runtime via compose env_file, not build)
+.env
+.env.*
+
+# Docs / tests not needed in the runtime image
+docs/
+documentation/
+tests/
+*.md

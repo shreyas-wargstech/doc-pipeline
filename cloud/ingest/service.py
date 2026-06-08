@@ -147,10 +147,14 @@ async def handle_manifest(manifest: Manifest) -> None:
                 manifest.document_id, blank_page_nums, OCRStatus.SKIPPED
             )
         if enqueued_msgs:
+            # only_from=PENDING: enqueue (above) happens before this write, so a
+            # fast OCR worker may already have marked a page DONE/FAILED. Guard
+            # against downgrading those back to QUEUED (race fixed 2026-06-09).
             await page_repo.bulk_update_ocr_status(
                 manifest.document_id,
                 [m.page_num for m in enqueued_msgs],
                 OCRStatus.QUEUED,
+                only_from=[OCRStatus.PENDING],
             )
 
     logger.info(

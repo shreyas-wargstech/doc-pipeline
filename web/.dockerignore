@@ -1,0 +1,17 @@
+# Build context for the `web` image (web/Dockerfile, context = ./web).
+# node_modules + .next are the 400MB+ bloat AND a correctness hazard: the build
+# regenerates them inside alpine (npm ci), so shipping host copies (Windows
+# binaries / stale build) would clobber the clean ones.
+
+node_modules/
+.next/
+out/
+
+.git/
+Dockerfile
+.dockerignore
+
+npm-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+.env*.local
