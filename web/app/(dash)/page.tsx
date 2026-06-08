@@ -25,7 +25,7 @@ export default function DocumentsHome() {
         <KpiCard label="Total" value={Object.values(sc).reduce((a, b) => a + b, 0)} />
         <KpiCard label="Processing" value={sc["processing"] ?? 0} tone="warn" />
         <KpiCard label="Matched" value={mc["matched"] ?? 0} tone="ok" />
-        <KpiCard label="Manual review" value={(sc["manual_review"] ?? 0) + (mc["manual_review"] ?? 0)} tone="info" />
+        <KpiCard label="Manual review" value={sc["manual_review"] ?? 0} tone="info" />
       </div>
 
       <Filters value={filters} onChange={setFilters} />

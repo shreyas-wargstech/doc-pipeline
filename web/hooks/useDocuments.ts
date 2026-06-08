@@ -1,10 +1,14 @@
 "use client";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
-import type { DocumentsResponse } from "@/lib/types";
+import type { Category, DocStatus, DocumentsResponse, MatchStatus } from "@/lib/types";
 
 export interface DocFilters {
-  category?: string; status?: string; match_status?: string; search?: string; offset?: number;
+  category?: Category;
+  status?: DocStatus;
+  match_status?: NonNullable<MatchStatus>;
+  search?: string;
+  offset?: number;
 }
 
 export function buildQuery(f: DocFilters): string {

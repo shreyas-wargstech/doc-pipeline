@@ -1,9 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Filters } from "@/components/Filters";
 
 describe("Filters", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("emits the selected status filter", async () => {
     const onChange = vi.fn();
     render(<Filters value={{}} onChange={onChange} />);
@@ -11,10 +13,15 @@ describe("Filters", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ status: "processed" }));
   });
 
-  it("emits search text", async () => {
+  it("emits debounced search text", async () => {
     const onChange = vi.fn();
     render(<Filters value={{}} onChange={onChange} />);
-    await userEvent.type(screen.getByPlaceholderText(/reg.*filename/i), "3");
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ search: "3" }));
+    await userEvent.type(screen.getByPlaceholderText(/reg.*filename/i), "349");
+    // Not yet fired (debounce is 300ms, real timers — just check it hasn't fired synchronously)
+    // Wait for debounce to fire
+    await vi.waitFor(
+      () => expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ search: "349" })),
+      { timeout: 1000 }
+    );
   });
 });

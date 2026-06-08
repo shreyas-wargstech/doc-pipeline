@@ -1,6 +1,8 @@
 import { Card } from "@/components/ui/Card";
 
-export function KpiCard({ label, value, tone = "foreground" }: { label: string; value: number | string; tone?: string }) {
+type Tone = "foreground" | "ok" | "warn" | "danger" | "info";
+
+export function KpiCard({ label, value, tone = "foreground" }: { label: string; value: number | string; tone?: Tone }) {
   return (
     <Card className="flex flex-col gap-1">
       <span className="text-xs uppercase tracking-wide text-muted-fg">{label}</span>
