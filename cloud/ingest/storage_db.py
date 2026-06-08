@@ -15,10 +15,9 @@ are nullable; the `metadata` JSONB column absorbs category-specific data.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from typing import Any
-
-import json
 
 from sqlalchemy import (
     Date,
@@ -32,7 +31,8 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -307,6 +307,30 @@ class DocumentRepository:
             document_id=document_id,
             fields=sorted(kwargs),
         )
+
+    async def update_metadata(self, document_id: str, patch: dict[str, Any]) -> None:
+        """Shallow-merge a patch into the documents.metadata JSONB.
+
+        Uses Postgres `||` so existing top-level keys (e.g. classifier/structure
+        payload) survive; only the keys in `patch` are set/overwritten.
+        Idempotent — re-running overwrites the same top-level keys.
+        """
+        if not patch:
+            return
+        stmt = text(
+            "UPDATE documents "
+            "SET metadata = metadata || CAST(:patch AS jsonb), updated_at = now() "
+            "WHERE document_id = :document_id"
+        )
+        await self.session.execute(
+            stmt, {"document_id": document_id, "patch": json.dumps(patch)}
+        )
+        logger.info(
+            "document_metadata_updated",
+            document_id=document_id,
+            keys=sorted(patch),
+        )
+
 
 class PageRepository:
     """Async repository for pages. Idempotent on (document_id, page_num)."""

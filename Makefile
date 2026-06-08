@@ -1,4 +1,4 @@
-.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure
+.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure match
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?##"}{printf "%-18s %s\n", $$1, $$2}'
@@ -35,6 +35,9 @@ upload:  ## Upload a PDF end-to-end. Usage: make upload PDF=path [CATEGORY=pract
 
 structure:  ## Run the Structure stage on one document. Usage: make structure DOC=<document_id>
 	python -m scripts.run_structure --document-id "$(DOC)"
+
+match:  ## Run the Match stage on one document. Usage: make match DOC=<document_id>
+	python -m scripts.run_match --document-id "$(DOC)"
 
 test:  ## Run unit tests only
 	pytest -v -m "not integration"

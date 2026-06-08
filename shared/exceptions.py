@@ -47,3 +47,7 @@ class StructureError(PipelineError):
 
 class PersistError(PipelineError):
     """Failure persisting to Qdrant, Neo4j, or Postgres."""
+
+
+class MatchError(PipelineError):
+    """Reference-data matching failure (lookup or scoring)."""
