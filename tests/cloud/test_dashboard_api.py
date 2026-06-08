@@ -119,3 +119,82 @@ async def test_doc_detail_404_when_missing(client: AsyncClient, as_user):
         async with client as c:
             resp = await c.get(f"/api/documents/{'a' * 64}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_doc_detail_returns_doc_pages_and_counts(client: AsyncClient, as_user):
+    # Build real ORM instances so _to_dict runs for real (regression guard for the
+    # metadata_ -> "metadata" column-rename serialization bug).
+    from cloud.ingest.storage_db import Document, Page
+    doc = Document(
+        document_id="a" * 64,
+        document_category="practitioner",
+        original_filename="test.pdf",
+        s3_key_pdf="documents/" + "a" * 64 + "/original.pdf",
+        page_count=2,
+        status="processed",
+    )
+    # set the renamed metadata attribute to a real dict
+    doc.metadata_ = {"match": {"method": "exact"}}
+    p1 = Page(
+        page_id="a" * 64 + ":1",
+        document_id="a" * 64,
+        page_num=1,
+        s3_key_image="documents/" + "a" * 64 + "/pages/page_001.png",
+        ocr_status="done",
+        structured_json={"raw_text": "hi"},
+    )
+    p2 = Page(
+        page_id="a" * 64 + ":2",
+        document_id="a" * 64,
+        page_num=2,
+        s3_key_image="documents/" + "a" * 64 + "/pages/page_002.png",
+        ocr_status="pending",
+        structured_json=None,
+    )
+    drepo = AsyncMock()
+    drepo.get = AsyncMock(return_value=doc)
+    prepo = AsyncMock()
+    prepo.list_for_document = AsyncMock(return_value=[p1, p2])
+    with patch("cloud.dashboard.api.DocumentRepository", return_value=drepo), \
+         patch("cloud.dashboard.api.PageRepository", return_value=prepo):
+        async with client as c:
+            resp = await c.get(f"/api/documents/{'a' * 64}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ocr_done"] == 1
+    assert body["structured_done"] == 1
+    # the real metadata JSONB must survive — NOT the literal "MetaData()" string
+    assert body["doc"]["metadata"] == {"match": {"method": "exact"}}
+
+
+@pytest.mark.asyncio
+async def test_page_detail_returns_raw_text(client: AsyncClient, as_user):
+    from cloud.ingest.storage_db import Page
+    page = Page(
+        page_id="a" * 64 + ":1",
+        document_id="a" * 64,
+        page_num=1,
+        s3_key_image="documents/" + "a" * 64 + "/pages/page_001.png",
+        ocr_status="done",
+        structured_json={"raw_text": "hello world"},
+    )
+    prepo = AsyncMock()
+    prepo.get = AsyncMock(return_value=page)
+    with patch("cloud.dashboard.api.PageRepository", return_value=prepo):
+        async with client as c:
+            resp = await c.get(f"/api/documents/{'a' * 64}/pages/1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["raw_text"] == "hello world"
+    assert body["structured_json"] == {"raw_text": "hello world"}
+
+
+@pytest.mark.asyncio
+async def test_page_detail_404_when_missing(client: AsyncClient, as_user):
+    prepo = AsyncMock()
+    prepo.get = AsyncMock(return_value=None)
+    with patch("cloud.dashboard.api.PageRepository", return_value=prepo):
+        async with client as c:
+            resp = await c.get(f"/api/documents/{'a' * 64}/pages/9")
+    assert resp.status_code == 404

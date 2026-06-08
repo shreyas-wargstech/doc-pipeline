@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import inspect as sa_inspect
 
 from cloud.dashboard import actions, audit, queries
 from cloud.dashboard.session import (
@@ -33,6 +34,8 @@ log = get_logger(__name__)
 router = APIRouter()
 
 _PAGE_SIZE = 50
+
+_PRIMITIVES = (str, int, float, bool, type(None), dict, list)
 
 
 class LoginBody(BaseModel):
@@ -80,28 +83,29 @@ async def me(user: str = Depends(require_session)) -> dict[str, str]:
 # --- read endpoints --------------------------------------------------------
 
 def _to_dict(obj: Any) -> dict[str, Any]:
-    """Serialize an ORM row to a JSON-safe dict (str() for non-trivial types)."""
+    """Serialize an ORM row to a JSON-safe dict keyed by SQL column name.
+
+    Reads via the mapper's column attributes so renamed columns (e.g. the
+    Document `metadata` column maps to the `metadata_` attribute) serialize
+    their real value, not the class-level SQLAlchemy MetaData object.
+    """
     out: dict[str, Any] = {}
-    for col in obj.__table__.columns:
-        val = getattr(obj, col.name)
-        _primitives = (str, int, float, bool, type(None), dict, list)
-        out[col.name] = val if isinstance(val, _primitives) else str(val)
+    for attr in sa_inspect(obj).mapper.column_attrs:
+        val = getattr(obj, attr.key)
+        out[attr.columns[0].name] = val if isinstance(val, _PRIMITIVES) else str(val)
     return out
 
 
 @router.get("/documents")
 async def documents(
-    request: Request,
     category: str | None = None,
-    status_: str | None = None,
+    status: str | None = None,
     match_status: str | None = None,
     search: str | None = None,
     offset: int = 0,
     _user: str = Depends(require_session),
 ) -> dict[str, Any]:
-    # query param is `status` on the wire; aliased to status_ to avoid shadowing
-    status_val = request.query_params.get("status")
-    filters = {"category": category, "status": status_val,
+    filters = {"category": category, "status": status,
                "match_status": match_status, "search": search}
     async with session_scope() as session:
         docs = await queries.list_documents(session, **filters,
