@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect
 
-from cloud.dashboard import actions, audit, queries
+from cloud.dashboard import actions, audit, queries, sse
 from cloud.dashboard.session import (
     COOKIE_NAME,
     DEFAULT_MAX_AGE,
@@ -220,6 +220,17 @@ async def action_requeue(
         await _audit(username=user, action="requeue_ocr", document_id=document_id,
                      params={"page_nums": page_nums}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Requeue failed: {exc}"}
+
+
+# --- SSE live status -------------------------------------------------------
+
+@router.get("/stream")
+async def stream(_user: str = Depends(require_session)) -> StreamingResponse:
+    return StreamingResponse(
+        sse.stream_document_changes(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/documents/{document_id}/reclassify")
