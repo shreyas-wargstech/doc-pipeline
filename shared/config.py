@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     # Structure stage
     structure_max_chars: int = Field(6000, alias="STRUCTURE_MAX_CHARS")
 
+    # Dashboard session auth (signed cookie)
+    session_secret: str = Field(
+        "dev-insecure-change-me", alias="SESSION_SECRET"
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

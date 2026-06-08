@@ -1,4 +1,4 @@
-.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure match persist
+.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure match persist serve web-dev web-build web-up
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?##"}{printf "%-18s %s\n", $$1, $$2}'
@@ -26,6 +26,15 @@ init:  ## Initialize all services (idempotent: bucket, collection, constraints)
 
 serve:  ## Run the cloud pipeline API (local dev)
 	uvicorn cloud.app:app --reload --host 0.0.0.0 --port 8000
+
+web-dev:  ## Run the Next.js dashboard dev server (proxies /api to :8000)
+	cd web && npm run dev
+
+web-build:  ## Production build of the Next.js dashboard
+	cd web && npm run build
+
+web-up:  ## Build + start api + web containers (one origin on :3000)
+	docker compose up --build api web
 
 ocr-worker:  ## Drain the local OCR queue (elasticmq) — run alongside the pipeline
 	python -m scripts.run_ocr_worker
