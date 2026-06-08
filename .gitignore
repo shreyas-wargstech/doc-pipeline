@@ -40,3 +40,4 @@ data/
 # Build
 dist/
 build/
+.superpowers/
