@@ -7,9 +7,11 @@ export function useMe() {
 }
 
 export function useLogin() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (creds: { username: string; password: string }) =>
       apiPost<{ user: string }>("/api/login", creds),
+    onSuccess: (data) => qc.setQueryData(["me"], data),
   });
 }
 
@@ -18,5 +20,6 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => apiPost<{ ok: boolean }>("/api/logout"),
     onSuccess: () => { qc.clear(); window.location.assign("/login"); },
+    onError: () => { qc.clear(); window.location.assign("/login"); },
   });
 }
