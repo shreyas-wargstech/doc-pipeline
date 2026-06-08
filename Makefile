@@ -1,4 +1,4 @@
-.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure match
+.PHONY: help install up down down-clean logs db-shell init test test-integration lint format clean ocr-worker upload structure match persist
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?##"}{printf "%-18s %s\n", $$1, $$2}'
@@ -38,6 +38,9 @@ structure:  ## Run the Structure stage on one document. Usage: make structure DO
 
 match:  ## Run the Match stage on one document. Usage: make match DOC=<document_id>
 	python -m scripts.run_match --document-id "$(DOC)"
+
+persist:  ## Run the Persist stage on one document. Usage: make persist DOC=<document_id>
+	uv run python -m scripts.run_persist --document-id $(DOC)
 
 test:  ## Run unit tests only
 	pytest -v -m "not integration"
