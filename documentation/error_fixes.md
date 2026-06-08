@@ -564,3 +564,21 @@ I001 Import block is un-sorted or un-formatted
 **Rule:** Never put an inline `# comment` after a value/blank in `.env` (pydantic-settings keeps it as the value). After any PATH change, use a NEW shell (or patch `$env:Path` in-session) — open shells keep stale PATH. Tesseract **language** packs (`hin`,`mar`) live at the tessdata repo root, not `script/`; OSD needs `osd.traineddata`. tesseract `eng+mar+hin` is all-or-nothing — a missing pack fails the whole call.
 
 ---
+
+## 2026-06-08 — OCR router escalation gap (deferred Issue 2 from 2026-06-07 smoke test)
+
+### FIX-028 · unavailable START tier dead-ends the page instead of escalating
+
+**Symptom:** First real 15-page bundle OCR'd **0 pages**. Every page triaged `content_type=handwritten` → router started at T2 GCV (unconfigured) → `ocr_failed`, with NO escalation to T3 (Gemini/OpenRouter, configured). All non-blank pages failed even though a working higher tier existed.
+
+**Root cause:** `cloud/ocr/router.py::route()` — the `except TierNotImplemented` handler did `break`, terminating the *entire* ladder loop. The comment ("cannot escalate further") encoded a stale assumption from when tiers above were unbuilt stubs. Now `TierNotImplemented` only ever comes from `_UnavailableTier` (missing creds) — a per-tier config state, independent across tiers (Gemini configured while Vision isn't). `break` therefore let an unconfigured *middle* tier block a configured *higher* one, leaving `best=None`.
+
+**Fix:** `break` → `continue`. Skip the unavailable tier and try the next higher one. `best` is only assigned on a successful run, so any lower-tier result already obtained is preserved and returned if everything above is also unavailable. Deliberately did NOT add a fall-back to a *lower* tier — routing a handwritten page back to Tesseract reintroduces the confident-garbage the proactive ladder exists to avoid; an all-cloud-unavailable handwritten page fails cleanly → manual_review.
+
+**Tests:** rewrote the two tests that encoded the buggy behavior (`test_handwritten_hits_vision_stub_failed`, `test_low_conf_but_next_tier_stub_keeps_best` — both written when Gemini was also a stub) → 4 tests covering: escalate-past-unavailable-middle-tier (typed + handwritten), keep-best-when-all-higher-unavailable, fail-cleanly-no-T1-fallback. 12 router unit tests green; 176 unit total; ruff clean.
+
+**Files:** `cloud/ocr/router.py`, `tests/cloud/test_ocr_router.py`
+
+**Rule:** When a step can be skipped because a *resource* is unavailable (creds/config), use `continue` to try alternatives — reserve `break` for "nothing further can possibly help." A test that asserts a degraded/failed outcome may be encoding a *limitation* (stub not built), not a *requirement* — revisit it when the limitation is lifted.
+
+---
