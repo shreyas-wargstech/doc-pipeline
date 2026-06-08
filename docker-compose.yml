@@ -66,6 +66,39 @@ services:
     volumes:
       - ./elasticmq.conf:/opt/elasticmq.conf:ro
 
+  api:
+    build:
+      context: .
+      dockerfile: cloud/Dockerfile
+    env_file: .env
+    environment:
+      # Override to the compose service hostnames + the actual postgres creds
+      # (postgres container is pipeline/pipeline @ db doc_pipeline — see the
+      # postgres service above; NOT the docpipeline/postgres in the plan draft).
+      DATABASE_URL: postgresql+asyncpg://pipeline:pipeline@postgres:5432/doc_pipeline
+      S3_ENDPOINT_URL: http://minio:9000
+      QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+      SQS_ENDPOINT_URL: http://elasticmq:9324
+      # .env's queue URL points at localhost:9324 — unreachable inside the
+      # network; re-point the host at the elasticmq service.
+      SQS_OCR_QUEUE_URL: http://elasticmq:9324/000000000000/ocr-queue.fifo
+    ports:
+      - "8000:8000"
+    depends_on: [postgres, minio, qdrant, neo4j, elasticmq]
+    # uv-managed venv → invoke via `uv run` (bare uvicorn isn't on PATH).
+    command: uv run uvicorn cloud.app:app --host 0.0.0.0 --port 8000
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      API_ORIGIN: http://api:8000
+    ports:
+      - "3000:3000"
+    depends_on: [api]
+
 volumes:
   postgres_data:
   minio_data:
