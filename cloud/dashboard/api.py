@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect
 
@@ -26,8 +27,10 @@ from cloud.dashboard.session import (
     verify_credentials,
 )
 from cloud.ingest.storage_db import DocumentRepository, PageRepository
+from shared.config import get_settings
 from shared.db import session_scope
 from shared.logging import get_logger
+from shared.storage_s3 import get_s3_client
 
 log = get_logger(__name__)
 
@@ -162,3 +165,75 @@ async def page_detail(
     sj = page.structured_json
     raw_text = sj.get("raw_text") if isinstance(sj, dict) else None
     return {"page": page_d, "structured_json": sj, "raw_text": raw_text}
+
+
+# --- page image proxy ------------------------------------------------------
+
+@router.get("/documents/{document_id}/pages/{page_num}/image")
+async def page_image(
+    document_id: str, page_num: int, _user: str = Depends(require_session)
+):
+    async with session_scope() as session:
+        page = await PageRepository(session).get(document_id, page_num)
+    if page is None:
+        raise HTTPException(status_code=404, detail="page not found")
+    bucket = get_settings().s3_bucket
+    async with get_s3_client() as s3:
+        obj = await s3.get_object(Bucket=bucket, Key=page.s3_key_image)
+        async with obj["Body"] as stream:
+            data = await stream.read()
+    return RawResponse(content=data, media_type="image/png")
+
+
+# --- control actions (never 500 — JSON {ok,message}) -----------------------
+
+class RequeueBody(BaseModel):
+    page_nums: list[int] | None = None
+
+
+@router.post("/documents/{document_id}/ingest")
+async def action_ingest(document_id: str, user: str = Depends(require_session)) -> dict[str, Any]:
+    try:
+        await actions.reingest(document_id)
+        await _audit(username=user, action="ingest", document_id=document_id,
+                     params={}, result="ok", detail=None)
+        return {"ok": True, "message": "Ingest re-run started."}
+    except Exception as exc:  # noqa: BLE001 — surface as JSON, audit the failure
+        log.exception("api_ingest_failed", document_id=document_id)
+        await _audit(username=user, action="ingest", document_id=document_id,
+                     params={}, result="error", detail=str(exc))
+        return {"ok": False, "message": f"Ingest failed: {exc}"}
+
+
+@router.post("/documents/{document_id}/requeue-ocr")
+async def action_requeue(
+    document_id: str, body: RequeueBody | None = None, user: str = Depends(require_session)
+) -> dict[str, Any]:
+    page_nums = body.page_nums if body else None
+    try:
+        n = await actions.requeue_ocr(document_id, page_nums=page_nums)
+        await _audit(username=user, action="requeue_ocr", document_id=document_id,
+                     params={"page_nums": page_nums}, result="ok", detail=f"{n} pages")
+        return {"ok": True, "message": f"Requeued {n} page(s) for OCR."}
+    except Exception as exc:  # noqa: BLE001
+        log.exception("api_requeue_failed", document_id=document_id)
+        await _audit(username=user, action="requeue_ocr", document_id=document_id,
+                     params={"page_nums": page_nums}, result="error", detail=str(exc))
+        return {"ok": False, "message": f"Requeue failed: {exc}"}
+
+
+@router.post("/documents/{document_id}/reclassify")
+async def action_reclassify(
+    document_id: str, user: str = Depends(require_session)
+) -> dict[str, Any]:
+    try:
+        res = await actions.reclassify(document_id)
+        await _audit(username=user, action="reclassify", document_id=document_id,
+                     params={}, result="ok", detail=str(res))
+        return {"ok": True,
+                "message": f"Re-classified as {res['document_category']}/{res['document_type']}."}
+    except Exception as exc:  # noqa: BLE001
+        log.exception("api_reclassify_failed", document_id=document_id)
+        await _audit(username=user, action="reclassify", document_id=document_id,
+                     params={}, result="error", detail=str(exc))
+        return {"ok": False, "message": f"Re-classify failed: {exc}"}

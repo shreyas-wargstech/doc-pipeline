@@ -198,3 +198,52 @@ async def test_page_detail_404_when_missing(client: AsyncClient, as_user):
         async with client as c:
             resp = await c.get(f"/api/documents/{'a' * 64}/pages/9")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_ingest_action_ok(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.actions.reingest", new=AsyncMock(return_value={})), \
+         patch("cloud.dashboard.api._audit", new=AsyncMock()):
+        async with client as c:
+            resp = await c.post(f"/api/documents/{'a' * 64}/ingest")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True and "started" in body["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ingest_action_failure_is_200_with_ok_false(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.actions.reingest",
+               new=AsyncMock(side_effect=RuntimeError("s3 down"))), \
+         patch("cloud.dashboard.api._audit", new=AsyncMock()) as aud:
+        async with client as c:
+            resp = await c.post(f"/api/documents/{'a' * 64}/ingest")
+    assert resp.status_code == 200          # never 500
+    body = resp.json()
+    assert body["ok"] is False and "s3 down" in body["message"]
+    assert aud.await_args.kwargs["result"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_requeue_ocr_parses_page_nums(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.actions.requeue_ocr",
+               new=AsyncMock(return_value=2)) as rq, \
+         patch("cloud.dashboard.api._audit", new=AsyncMock()):
+        async with client as c:
+            resp = await c.post(f"/api/documents/{'a' * 64}/requeue-ocr",
+                                json={"page_nums": [1, 2]})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert rq.await_args.kwargs["page_nums"] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_reclassify_action_ok(client: AsyncClient, as_user):
+    res = {"document_category": "practitioner", "document_type": "app_cover"}
+    with patch("cloud.dashboard.api.actions.reclassify", new=AsyncMock(return_value=res)), \
+         patch("cloud.dashboard.api._audit", new=AsyncMock()):
+        async with client as c:
+            resp = await c.post(f"/api/documents/{'a' * 64}/reclassify")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert "practitioner" in resp.json()["message"]
