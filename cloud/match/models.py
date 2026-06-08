@@ -15,6 +15,7 @@ FUZZY_MATCH_HIGH = 90.0  # >= → matched
 FUZZY_REVIEW_LOW = 75.0  # [LOW, HIGH) → manual_review; < LOW → unmatched
 
 MatchMethod = Literal["exact", "fuzzy"]
+MatchStatus = Literal["matched", "unmatched", "not_applicable", "manual_review"]
 
 
 @dataclass(frozen=True)
@@ -38,15 +39,14 @@ class ReferenceCandidate:
 
 @dataclass(frozen=True)
 class MatchResult:
-    """Outcome of matching one document. match_status is one of
-    matched | unmatched | not_applicable | manual_review."""
+    """Outcome of matching one document."""
 
-    match_status: str
+    match_status: MatchStatus
     reference_data_id: int | None
     method: MatchMethod | None
     score: float | None
     candidate_registration_no: str | None
-    matched_on: str | None  # "registration_no" | "name+dob" | None
+    matched_on: Literal["registration_no", "name+dob"] | None
 
 
 def parse_registration_no(value: str | None) -> int | None:
