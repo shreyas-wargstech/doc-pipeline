@@ -7,7 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from shared.config import get_settings
-from shared.neo4j_client import ensure_constraints, session_scope as neo4j_session
+from shared.neo4j_client import ensure_constraints
+from shared.neo4j_client import session_scope as neo4j_session
 from shared.qdrant_client import VECTOR_SIZE, ensure_collection, get_qdrant
 from shared.storage_s3 import S3Storage, get_s3_client
 
@@ -72,5 +73,12 @@ async def test_neo4j_constraints_present() -> None:
     async with neo4j_session() as sess:
         result = await sess.run("SHOW CONSTRAINTS YIELD name RETURN name")
         names = [rec["name"] async for rec in result]
-    expected = {"document_id_unique", "page_id_unique", "person_natural_key"}
+    expected = {
+        "document_id_unique",
+        "page_id_unique",
+        "person_registration_no_unique",
+        "organization_name_unique",
+        "vendor_name_unique",
+        "reference_record_reg_no_unique",
+    }
     assert expected.issubset(set(names))

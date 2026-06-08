@@ -3,10 +3,13 @@
 Graph schema (locked, per project spec):
 
 Nodes (natural keys):
-- Document  : document_id
-- Page      : page_id  (= '<document_id>:<page_num>')
-- Person    : (name, dob)   -- composite, one node per real person
-- Entity    : (type, value) -- generic, indexed (not unique)
+- Document        : document_id
+- Page            : page_id  (= '<document_id>:<page_num>')
+- Person          : registration_no   -- canonical practitioner key
+- Entity          : (type, value)     -- generic, indexed (not unique)
+- Organization    : name
+- Vendor          : name
+- ReferenceRecord : registration_no   -- matched Excel row
 
 Relationships:
 - (Document)-[:HAS_PAGE]->(Page)
@@ -32,8 +35,21 @@ CONSTRAINTS: list[str] = [
     "FOR (d:Document) REQUIRE d.document_id IS UNIQUE",
     "CREATE CONSTRAINT page_id_unique IF NOT EXISTS "
     "FOR (p:Page) REQUIRE p.page_id IS UNIQUE",
-    "CREATE CONSTRAINT person_natural_key IF NOT EXISTS "
-    "FOR (p:Person) REQUIRE (p.name, p.dob) IS UNIQUE",
+    "CREATE CONSTRAINT person_registration_no_unique IF NOT EXISTS "
+    "FOR (p:Person) REQUIRE p.registration_no IS UNIQUE",
+    "CREATE CONSTRAINT organization_name_unique IF NOT EXISTS "
+    "FOR (o:Organization) REQUIRE o.name IS UNIQUE",
+    "CREATE CONSTRAINT vendor_name_unique IF NOT EXISTS "
+    "FOR (v:Vendor) REQUIRE v.name IS UNIQUE",
+    "CREATE CONSTRAINT reference_record_reg_no_unique IF NOT EXISTS "
+    "FOR (r:ReferenceRecord) REQUIRE r.registration_no IS UNIQUE",
+]
+
+# Schema migrations — constraints to remove before (re)applying CONSTRAINTS.
+# Person was previously keyed on the (name, dob) composite; the locked key is
+# now registration_no.
+DROP_CONSTRAINTS: list[str] = [
+    "DROP CONSTRAINT person_natural_key IF EXISTS",
 ]
 
 INDEXES: list[str] = [
@@ -60,13 +76,17 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 
 
 async def ensure_constraints() -> None:
-    """Apply uniqueness constraints + indexes. Idempotent (IF NOT EXISTS)."""
+    """Drop superseded constraints, then apply current constraints + indexes.
+    Idempotent (IF EXISTS / IF NOT EXISTS)."""
     try:
         async with session_scope() as sess:
+            for cypher in DROP_CONSTRAINTS:
+                await sess.run(cypher)
             for cypher in CONSTRAINTS + INDEXES:
                 await sess.run(cypher)
         log.info(
             "neo4j.constraints.applied",
+            dropped=len(DROP_CONSTRAINTS),
             constraints=len(CONSTRAINTS),
             indexes=len(INDEXES),
         )
