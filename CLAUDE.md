@@ -62,8 +62,8 @@ docs/     INTEGRATION.md
 - Embedding model: `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, Cosine). Locked — changing = full re-embed.
 - Qdrant collection `document_pages`, 384-dim, Cosine.
 - Neo4j: `Document.document_id` UNIQUE, `Page.page_id` UNIQUE, Person merges on `registration_no`; index `(Entity.type, Entity.value)`. Rels: `HAS_PAGE`, `MENTIONS`, `BELONGS_TO`, `MATCHES`. All writes MERGE.
-- OCR = PROACTIVE classify-first routing (not reactive cascade). Tiers: T1 Tesseract `eng+mar+hin` (typed) → T2 Google Cloud Vision DOCUMENT_TEXT_DETECTION (handwriting, eng+devanagari) → T3 Gemini VLM via OpenRouter (messy). Confidence-net (70) retained as safety net.
-- T3 transport = OpenRouter (OpenAI-compatible `openai` SDK), model `google/gemini-2.5-flash`. REJECTED: Google AI Studio direct + Vertex AI (user is on OpenRouter).
+- OCR = PROACTIVE classify-first routing (not reactive cascade). Tiers (2): T1 Tesseract `eng+mar+hin` (typed) → T2 VLM transcription via OpenRouter (handwriting + low-conf escalation). Confidence-net (70) retained — meaningful on the Tesseract→VLM hop (Tesseract emits real per-word conf). REMOVED 2026-06-09: Google Cloud Vision T2 — collapsed to a single OpenRouter cloud tier, killed the GCP credential (GCV's per-word conf/bboxes were unused downstream; Structure reads `raw_text`).
+- VLM tier transport = OpenRouter (OpenAI-compatible `openai` SDK), model `google/gemini-2.5-flash` (model-agnostic tier name `vlm`, so the model can be swapped without renaming). REJECTED: Google AI Studio direct + Vertex AI (user is on OpenRouter).
 - REJECTED: AWS Textract (no Devanagari). LangChain/LangGraph (SQS/Lambda already orchestrate; flows too short). Old Qwen/Gemma local fallback (superseded by tier model).
 - `app_no` = BIGINT (overflows INT32). TEXT date cols store ISO `YYYY-MM-DD`; only `cr_dt` is TIMESTAMPTZ (datetime objects).
 - Reference data: per-chunk transactions + idempotent `ON CONFLICT` (single-txn wrapping caused full rollback on partial fail).
@@ -75,12 +75,6 @@ docs/     INTEGRATION.md
 
 Done: full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), full scaffold, all 4 services live, schema, `storage_db.py` (Document/Page repos), classifier (rules + service + LLM), SQS producer, NAS triage + 7-step preprocess pass + uploader, reference data loader, `cloud/ocr/router.py` + **Tier 1 Tesseract + Tier 2 GCV + Tier 3 Gemini (all done)**, FastAPI `cloud/app.py` with `/pipeline/notify`, **dashboard JSON `/api` (Plan 1) + Next.js `web/` SPA (Plan 2, DONE 2026-06-09) — HTMX dashboard deleted**. Backend **238 unit tests green** (26 integration deselected, need Docker); **web 23 tests green + tsc/build clean**.
 
-Key VisionTier facts (remember):
-- `_bbox` guards against empty vertices → returns `(0, 0, 0, 0)` — real GCV can return no bounding box on noisy scans.
-- Error check uses `response.error.code` (int, 0=OK), not `.message` — GCV can return non-zero code with empty message.
-- `_make_response` mock helper in tests hardcodes `error.code = 0` — tests that want to trigger OCRError must build mocks manually.
-- `GOOGLE_APPLICATION_CREDENTIALS` env var → `Settings.google_application_credentials` — absent = `TierNotImplemented` (graceful degradation).
-
 Key storage_db facts (bitten twice — remember):
 - `DocumentRepository.upsert()` stores metadata under key `"metadata_"` (not `"metadata"`) in `.values()` to avoid SQLAlchemy's internal `MetaData` conflict; `_ATTR_TO_SQL_COL` map translates it back to `"metadata"` for `.excluded` access.
 - All three ORM `pg_insert().returning()` calls use `execution_options={"populate_existing": True}` — without this, re-upsert on same PK returns stale identity-map object.
@@ -88,15 +82,16 @@ Key storage_db facts (bitten twice — remember):
 
 FastAPI app: `cloud/app.py`. Run with `make serve` (uvicorn on :8000). `/pipeline/notify` returns 202 immediately; `handle_manifest()` runs in background task.
 
-Key GeminiTier facts (T3, remember):
-- Plain-transcription output: VLM returns verbatim text → split to words with FIXED `_CONF_PRIOR = 85.0` + `bbox=(0,0,0,0)` (VLM pixel-bboxes unreliable on messy scans; downstream Structure uses `raw_text`). 85 is above the 70 net so T3 output is accepted (T3 = top-of-ladder anyway).
+Key VLM tier facts (sole cloud tier — `cloud/ocr/tiers/vlm.py::VlmTier`, `name="vlm"`, remember):
+- It is index 1 of the 2-tier ladder `(tesseract, vlm)` — the start tier for `handwritten` pages and the escalation target for low-conf typed pages. Top-of-ladder, so it's never escalated past.
+- Plain-transcription output: VLM returns verbatim text → split to words with FIXED `_CONF_PRIOR = 85.0` + `bbox=(0,0,0,0)` (VLM pixel-bboxes unreliable on messy scans; downstream Structure uses `raw_text`). 85 is above the 70 net so VLM output is accepted.
 - Transport = **OpenRouter** (OpenAI-compatible), NOT google-genai/Vertex. Auth: `OPENROUTER_API_KEY` → `Settings.openrouter_api_key`; absent = `TierNotImplemented`. Base url `Settings.openrouter_base_url` (default `https://openrouter.ai/api/v1`). Model = `Settings.openrouter_model` (default `google/gemini-2.5-flash`, OpenRouter-namespaced); injected-client/test path uses module `_DEFAULT_MODEL` (keep both in sync).
-- SDK = `openai` (`OpenAI(base_url=..., api_key=...)`): `client.chat.completions.create(model, temperature=0.0, messages=[{role:user, content:[{type:text,text:_PROMPT},{type:image_url,image_url:{url:"data:image/png;base64,..."}}]}])`; `response.choices[0].message.content or ""`; `openai.OpenAIError` → `OCRError`. Image sent as base64 data-URL. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier/VisionTier).
-- Router: `_default_tiers()` wraps cloud-tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if creds/key absent, so `OcrRouter()` builds for typed-only pages. Fixed a latent Vision build bug too.
+- SDK = `openai` (`OpenAI(base_url=..., api_key=...)`): `client.chat.completions.create(model, temperature=0.0, messages=[{role:user, content:[{type:text,text:_PROMPT},{type:image_url,image_url:{url:"data:image/png;base64,..."}}]}])`; `response.choices[0].message.content or ""`; `openai.OpenAIError` → `OCRError`. Image sent as base64 data-URL. Sync call offloaded via `anyio.to_thread.run_sync` (mirrors TesseractTier).
+- Router: `_default_tiers()` wraps the `vlm` tier construction in `_build_tier` → substitutes `_UnavailableTier` (raises `TierNotImplemented` at run(), not build) if `OPENROUTER_API_KEY` absent, so `OcrRouter()` builds for typed-only pages. Unavailable VLM on a handwritten page → fails cleanly → manual_review (NO Tesseract fall-back, by design).
 
 Key NAS uploader facts (2026-06-07, remember):
 - `nas/uploader/service.py::upload_document(pdf_path, *, category, s3=None, dpi=300, config=None) -> Manifest` — pure: render (`render.py`, PyMuPDF→BGR) → `preprocess_page(img, PreprocessConfig(threshold=False))` (grayscale, no binarize; triage still runs) → blank check → `put_if_absent` original.pdf + pages/page_NNN.png → manifest.json LAST. `document_id = hash_bytes(pdf)`.
-- Uploaded page PNG = **grayscale, NOT thresholded** (Tesseract self-binarizes; protects GCV/Gemini handwriting). Triage maps: `content_type.value`→PageManifest.content_type, `script.value`→language_hint.
+- Uploaded page PNG = **grayscale, NOT thresholded** (Tesseract self-binarizes; protects VLM handwriting). Triage maps: `content_type.value`→PageManifest.content_type, `script.value`→language_hint.
 - Blank detection = `triage.is_blank_page` (conservative: `count_text_components < min_components(=5)`, margin band + glyph-size filter; stains filtered; errors → not-blank). `page_type="blank"` → ingest skips OCR.
 - Category hint = CLI arg (`scripts/upload_pdf.py --category`, default `practitioner`); avoids `other`→skip-OCR trap (classifier trusts NAS hint).
 - Trigger = `scripts/upload_pdf.py --trigger {direct|http}`: direct = in-process `handle_manifest`; http = POST `/pipeline/notify`.
