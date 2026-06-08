@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Qdrant
     qdrant_url: str = Field(..., alias="QDRANT_URL")
     qdrant_collection: str = Field("document_pages", alias="QDRANT_COLLECTION")
+    embedding_model: str = Field(
+        "paraphrase-multilingual-MiniLM-L12-v2", alias="EMBEDDING_MODEL"
+    )
 
     # Neo4j
     neo4j_uri: str = Field(..., alias="NEO4J_URI")
