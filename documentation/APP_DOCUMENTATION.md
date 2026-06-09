@@ -1,6 +1,6 @@
 # Document Intelligence Pipeline — Full Application Documentation
 
-> **Version:** 1.0 · **Last updated:** 2026-05-17 · **Status:** Active development
+> **Version:** 2.0 · **Last updated:** 2026-06-10 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→retrieve); validated on a real 13-page bundle. `main` local-only, ahead of origin.
 
 ---
 
@@ -14,10 +14,12 @@
    - 5.1 Ingest
    - 5.2 Split
    - 5.3 Preprocess
-   - 5.4 OCR
-   - 5.5 Confidence Handling
-   - 5.6 Structure
-   - 5.7 Persist
+   - 5.4 Classify
+   - 5.5 OCR (proactive tier routing + identity-scoped transcription)
+   - 5.6 Confidence Handling
+   - 5.7 Structure
+   - 5.8 Match
+   - 5.9 Persist
 6. [Data Contracts](#6-data-contracts)
    - 6.1 Manifest
    - 6.2 Postgres Schema
@@ -30,9 +32,10 @@
 11. [Configuration & Environment](#11-configuration--environment)
 12. [Testing Strategy](#12-testing-strategy)
 13. [Makefile Targets](#13-makefile-targets)
-14. [Retrieval Design](#14-retrieval-design)
-15. [Production Migration Path](#15-production-migration-path)
-16. [Open Items & Known Gaps](#16-open-items--known-gaps)
+14. [Retrieval Design (lean ownership propagation)](#14-retrieval-design)
+15. [Operations Dashboard (Next.js + FastAPI JSON API)](#15-operations-dashboard)
+16. [Production Migration Path](#16-production-migration-path)
+17. [Open Items & Known Gaps](#17-open-items--known-gaps)
 
 ---
 
@@ -61,55 +64,69 @@ root/
 ├── shared/                         # Code used by both NAS + Cloud
 │   ├── config.py                   # pydantic-settings: all env vars
 │   ├── hashing.py                  # Streaming SHA-256 (document_id)
-│   ├── storage_s3.py               # Async S3/MinIO client, put_if_absent
+│   ├── storage_s3.py               # Async S3/MinIO client, put_if_absent, get_s3_client()
 │   ├── logging.py                  # structlog JSON/console setup
-│   ├── exceptions.py               # Stage-specific exception hierarchy
-│   ├── db.py                       # Async SQLAlchemy engine + session_scope
+│   ├── exceptions.py               # Stage-specific exception hierarchy (PipelineError tree)
+│   ├── db.py                       # Async SQLAlchemy engine + session_scope + dispose_engine
 │   ├── qdrant_client.py            # get_qdrant(), ensure_collection()
 │   └── neo4j_client.py             # get_driver(), session_scope(), ensure_constraints()
 │
 ├── nas/                            # Runs on the local NAS box
-│   ├── preprocess/                 # Image preprocessing (OpenCV, Pillow)
+│   ├── preprocess/                 # Image preprocessing (OpenCV) + triage.py
+│   │   ├── pipeline.py             # 7-step preprocess pass (toggleable)
+│   │   └── triage.py               # compute_features / classify_features (content_type), OSD, blank detect
 │   ├── manifest/
-│   │   └── models.py               # Manifest + PageManifest pydantic v2 models
-│   └── uploader/                   # S3 upload agent + HTTP notify shim
+│   │   └── models.py               # Manifest + PageManifest pydantic v2 models + Literal aliases
+│   └── uploader/                   # render.py (PyMuPDF→PNG) + service.py (S3 upload + trigger)
 │
 ├── cloud/                          # Runs on AWS (EC2 or Lambda)
+│   ├── app.py                      # FastAPI: /health, /pipeline/notify, /retrieve, /api/* (dashboard)
 │   ├── ingest/
 │   │   ├── service.py              # handle_manifest() entry point
-│   │   └── storage_db.py           # DocumentRepository + PageRepository
-│   ├── classifier/                 # (TBD) doc category + routing
-│   ├── ocr/                        # Tesseract + fallback
-│   ├── structure/                  # Layout analysis + entity extraction
-│   └── persist/                    # Qdrant + Neo4j + S3 writes
+│   │   ├── storage_db.py           # DocumentRepository + PageRepository
+│   │   ├── models.py               # OcrPageMessage
+│   │   └── sqs.py                  # enqueue_page() (aioboto3, FIFO-aware)
+│   ├── classifier/                 # rules.py (keyword/regex) + llm.py (OpenRouter fallback) + service.py
+│   ├── ocr/                        # router.py (proactive tier routing) + tiers/{tesseract,vlm}.py
+│   │   ├── page_type.py            # keyword page-typer + VLM-classify escalation (lean retrieval)
+│   │   └── consumer.py             # SQS/Lambda record handler → process_page
+│   ├── structure/                  # regex_extract.py + llm.py + service.py (identity-page entity extraction)
+│   ├── match/                      # fuzzy.py + reference.py + service.py (verified-exact match)
+│   ├── persist/                    # summary.py + embeddings.py + qdrant_writer.py + graph.py + service.py
+│   ├── retrieval/                  # service.py — find_pages(owner × page_type)
+│   ├── eval/                       # content_type.py — pure threshold-sweep scoring (DASH-3)
+│   └── dashboard/                  # api.py (JSON /api/*) + session.py (signed-cookie auth) + sse.py
+│                                   #   + queries.py + actions.py + audit.py + eval_queries.py
+│
+├── web/                            # Next.js dashboard SPA (replaces HTMX) — documents/detail/metrics/audit/eval
 │
 ├── scripts/
-│   ├── init_postgres.py
-│   ├── init_minio.py
-│   ├── init_qdrant.py
-│   ├── init_neo4j.py
-│   ├── init_all.py
-│   └── load_reference_data.py      # (TBD) Excel → reference_data bulk load
+│   ├── init_{postgres,minio,qdrant,neo4j,sqs,all}.py
+│   ├── load_reference_data.py      # Excel → reference_data bulk load (92,389 rows loaded)
+│   ├── apply_migration_001.py      # app_no INTEGER → BIGINT
+│   ├── apply_eval_table.py         # idempotent eval_content_type table apply
+│   ├── upload_pdf.py               # NAS uploader CLI
+│   ├── run_ocr_worker.py           # drains elasticmq → process_page
+│   ├── run_structure.py / run_match.py / run_persist.py   # per-document stage runners
+│   └── add_dashboard_user.py       # seed a dashboard login (bcrypt)
 │
-├── tests/
-│   ├── conftest.py
-│   ├── shared/
-│   │   ├── test_hashing.py
-│   │   └── test_integration.py     # @pytest.mark.integration (4 services)
-│   ├── nas/
-│   └── cloud/
-│       └── test_storage_db.py
+├── tests/                          # shared/ nas/ cloud/ — integration gated behind -m integration
 │
 ├── docs/
-│   └── INTEGRATION.md              # Service deep-dive + troubleshooting
+│   ├── INTEGRATION.md              # Service deep-dive + troubleshooting
+│   └── superpowers/{specs,plans}/  # per-stage design specs + execution plans
 │
 ├── documentation/                  # ← You are here
 │   ├── APP_DOCUMENTATION.md
-│   └── TECH_DECISIONS.md
+│   ├── TECH_DECISIONS.md
+│   ├── session_log.md              # per-session durable detail (ground truth after code/tests)
+│   └── error_fixes.md              # FIX-001..033 — symptom/root-cause/fix/rule
 │
 ├── db/
-│   └── schema.sql                  # Postgres DDL (authoritative)
-├── docker-compose.yml
+│   ├── schema.sql                  # Postgres DDL (authoritative)
+│   └── migrations/                 # 001_app_no_bigint.sql
+├── docker-compose.yml              # postgres, minio, qdrant, neo4j, elasticmq, api, web
+├── elasticmq.conf                  # local SQS (FIFO queue)
 ├── pyproject.toml
 ├── Makefile
 ├── .env.example
@@ -135,18 +152,24 @@ root/
 │                                                                 │
 │  handle_manifest()                                              │
 │      │                                                          │
-│      ├─► Classify document bundle (practitioner | letter | …)  │
+│      ├─► Classify bundle (practitioner | letter | …)           │
+│      │     rules-first keyword/regex → OpenRouter LLM fallback │
 │      │                                                          │
-│      ├─► For each page:                                         │
-│      │       OCR (Tesseract eng+mar+hin)                        │
-│      │         └─► Low confidence? → LLM fallback              │
-│      │       Structure: layout blocks → entity extraction       │
-│      │       Embed page text → Qdrant upsert                   │
+│      ├─► For each page (proactive tier routing):               │
+│      │       identity page (cover/form): Tesseract→VLM ladder  │
+│      │       every other page: Tesseract-only (keyword typer)  │
+│      │         └─► VLM-classify (label only) if kw conf < .5   │
 │      │                                                          │
-│      ├─► Match practitioner docs against reference_data         │
-│      │       (fuzzy match on RegistrationNo / name+dob)        │
+│      ├─► Structure (identity pages only):                       │
+│      │       regex pre-pass + OpenRouter LLM → entities,       │
+│      │       page_type, practitioner identity rollup           │
 │      │                                                          │
-│      └─► Persist: Postgres + Qdrant + Neo4j                    │
+│      ├─► Match practitioner docs vs reference_data (92K rows)   │
+│      │       VERIFIED-EXACT: reg_no hit + name(+dob) check;    │
+│      │       conflict → dob-fuzzy recover → else manual_review │
+│      │                                                          │
+│      └─► Persist: Postgres status + Qdrant (identity pages)    │
+│                   + Neo4j (MERGE)                              │
 │                                                                 │
 └───────────────────────────────────────┬─────────────────────────┘
                                         │
@@ -154,16 +177,21 @@ root/
           ▼                             ▼                        ▼
        Postgres                      Qdrant                   Neo4j
    (metadata + match            (384-dim semantic          (graph: Document
-    status + JSONB)              embeddings, page           → Page → Person
-                                  + entity level)           → Entity)
+    status + JSONB —             embeddings — IDENTITY      → Page → Person
+    retrieval backbone)          PAGES ONLY, light backup)  → Entity → ReferenceRecord)
 ```
+
+> **Retrieval is structured, not semantic-first (revised 2026-06-10).** A practitioner
+> bundle is one person's packet: resolve the owner once from the identity pages, propagate
+> by bundle context, then retrieve `owner × page_type` over Postgres (gated to verified
+> owners). Qdrant is a light semantic backup over identity-page text only. See §14.
 
 ### Trigger Flow (dev vs prod)
 
 | Environment | Trigger |
 |---|---|
-| **Dev** | `HTTP POST /pipeline/notify` from NAS uploader after manifest upload |
-| **Prod** | S3 `s3:ObjectCreated` on `manifest.json` → SQS → Lambda → `handle_manifest()` |
+| **Dev** | `HTTP POST /pipeline/notify` from NAS uploader after manifest upload (uploader CLI `--trigger direct|http`). Local SQS = real **elasticmq**; OCR worker drains it via `scripts/run_ocr_worker.py`. |
+| **Prod** | S3 `s3:ObjectCreated` on `manifest.json` → SQS → Lambda → `handle_manifest()` (auto-trigger chaining structure→match→persist still TODO — see §17). |
 
 ---
 
@@ -197,10 +225,27 @@ S3_BUCKET=documents
 AWS_ACCESS_KEY_ID=minioadmin
 AWS_SECRET_ACCESS_KEY=minioadmin
 QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=document_pages
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
+
+# SQS (local = elasticmq). Keep blank vars truly blank — NO inline comments (FIX-027).
+SQS_OCR_QUEUE_URL=http://localhost:9324/000000000000/ocr-pages.fifo
+AWS_REGION=us-east-1
+SQS_ENDPOINT_URL=http://localhost:9324
+
+# Cloud OCR / LLM — OpenRouter is the SOLE cloud credential (GCV removed 2026-06-09)
+OPENROUTER_API_KEY=                 # absent → VLM/LLM stages degrade gracefully
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=google/gemini-2.5-flash
+
+# Dashboard
+SESSION_SECRET=                     # HMAC signing key for signed-cookie auth
 ```
+
+> Local run also needs **tesseract on PATH** with `eng+mar+hin`+`osd` traineddata (language
+> packs live at the tessdata repo ROOT, not `/script` — FIX-027).
 
 ---
 
@@ -255,38 +300,61 @@ NEO4J_PASSWORD=password
 
 ---
 
-### 5.4 OCR
+### 5.4 Classify
 
-**Responsibility:** Extract text + per-word confidence + bounding boxes from each page image.
+**Responsibility:** Determine `document_category` (practitioner | letter | receipt | record | other) + sub-type, and set routing flags.
 
-**Primary:** Tesseract via `pytesseract.image_to_data(output_type=DICT)`
-- Language pack: `eng+mar+hin`
+**Entry point:** `cloud/classifier/service.py → classify(manifest, *, trust_manifest_hint=True)`
 
-**Fallback (low-confidence pages):** Qwen / Gemma VLM (local on NAS during dev; Lambda-hosted in prod)
+**3-path logic:**
+1. **Manifest hint** — if the NAS set a category and `trust_manifest_hint` (confidence 0.85). (Dashboard re-classify passes `False` to force the cover-text path.)
+2. **Rules engine** (`rules.py`) — weighted keyword/regex over cover text (PyMuPDF text layer first, Tesseract OCR of page 1 as fallback). Below `MIN_SCORE_THRESHOLD` → LLM.
+3. **LLM fallback** (`llm.py`, OpenRouter, same creds as the VLM tier) — JSON category + sub-type; parse failure → graceful `("other", None, 0.4)`; absent key → `ClassifierError`.
 
-**Output per word:**
-```json
-{ "text": "Ashish", "conf": 87.3, "bbox": [x, y, w, h], "page_num": 1 }
-```
+**Routing:** all real categories → full OCR pipeline; `other` → skip OCR, flag `manual_review` immediately.
 
 ---
 
-### 5.5 Confidence Handling
+### 5.5 OCR — Proactive Tier Routing + Identity-Scoped Transcription
+
+**Responsibility:** Get each page *findable*. Under the lean-retrieval design (§14) that means: full text only where the owner identity lives; a page-type label everywhere else.
+
+**Routing model** (`cloud/ocr/router.py`): triage labels each page `content_type` (typed|handwritten|unknown). The router picks a **starting tier** by difficulty and escalates on failure / low confidence.
+
+| Tier | Engine | Handles |
+|---|---|---|
+| **T1** | Tesseract `eng+mar+hin` (`pytesseract.image_to_data`) | typed/printed pages; per-word conf + bbox feed the 70-net |
+| **T2** | VLM via OpenRouter (`google/gemini-2.5-flash`, tier name `vlm`) | handwriting (English + Devanagari) + messy scans + low-conf escalation |
+
+> GCV (old T2) removed 2026-06-09 — ladder collapsed to `(tesseract, vlm)`; OpenRouter is the sole cloud OCR credential. Old reactive Qwen/Gemma cascade abandoned (Tesseract emits *confident garbage* that slips the gate).
+
+**Identity-scoped transcription (lean retrieval, 2026-06-10):**
+- **Identity pages** (coarse `page_type` `cover`/`form`) get the full Tesseract→VLM ladder (real transcription).
+- **Every other page** is **Tesseract-only** (no paid VLM transcription). Its fine `page_type` is assigned by a cheap keyword typer (`cloud/ocr/page_type.py`), escalating to a VLM **classify** call (a single label, NOT a transcription) only when keyword confidence < 0.5.
+- Cuts a 13-page bundle from ~26 paid LLM calls to ~4–6.
+
+**VLM tier notes** (`cloud/ocr/tiers/vlm.py`): no per-word confidence — words get a fixed `_CONF_PRIOR = 85.0` (above the 70 net) + `bbox=(0,0,0,0)`. An unavailable VLM on a handwritten page fails cleanly → `manual_review` (NO fall-back to Tesseract, by design). Unavailable START tier **escalates** (`continue`, not `break` — FIX-028).
+
+**Status race guard (FIX-029):** ingest's bulk `QUEUED` write runs *after* SQS enqueue, so it is a guarded transition (`only_from=[PENDING]`) — never downgrades a page a fast worker already marked `done`.
+
+---
+
+### 5.6 Confidence Handling
 
 **Threshold:** 70 (default; configurable via `OCR_CONFIDENCE_THRESHOLD`)
 
-**For tokens below threshold:**
-1. Fuzzy-match surrounding extracted context against `reference_data` table using `rapidfuzz`.
-2. If match found → substitute value, tag `source: augmented`.
-3. If no match → flag token for `manual_review` queue; set page `match_status = manual_review`.
+Retained as a **safety net** under the proactive router: a tier's page-average confidence below 70 escalates to the next OCR tier (catches typed pages Tesseract mangles). Token-level fuzzy substitution against `reference_data` is handled downstream by the Match stage (§5.8), not in OCR.
 
 ---
 
-### 5.6 Structure
+### 5.7 Structure
 
-**Responsibility:** Convert per-page OCR `raw_text` into structured entities,
-refine each page's `page_type`, and roll up the document-level practitioner
-identity.
+**Responsibility:** Convert OCR `raw_text` into structured entities, refine
+`page_type`, and roll up the document-level practitioner identity.
+
+> **Lean retrieval (2026-06-10):** entity extraction runs on **identity pages
+> only** (`cover`/`form`/`app_cover`/`application_form`) — the pages that carry
+> name/reg/dob. A practitioner doc that resolves no identity → `manual_review`.
 
 **Method (hybrid):**
 1. **Regex pre-pass** (`cloud/structure/regex_extract.py`) — deterministic,
@@ -312,28 +380,46 @@ Entities carry **no bbox** — extraction works off `raw_text`. Token bboxes
 remain available in `structured_json["words"]` (T1/T2) if a future highlight
 feature needs them.
 
-**Trigger:** `scripts/run_structure.py --document-id X` (per-document; rollup
-needs every page OCR'd). Auto-trigger on OCR-complete is deferred to AWS wiring.
+**Trigger:** `make structure DOC=<id>` (per-document; rollup needs every page
+OCR'd). Runs inside `session_scope()`, idempotent, all-or-nothing atomic (transient
+LLM error mid-doc rolls back → recover by re-run). Auto-trigger deferred to AWS wiring.
 
 ---
 
-### 5.7 Persist
+### 5.8 Match
 
-**Qdrant:**
-- Collection: `document_pages` | Vector: 384-dim Cosine | Model: `paraphrase-multilingual-MiniLM-L12-v2`
-- Upsert at page level + entity level.
-- Payload: `document_id`, `page_num`, `entity_types`, key entity values.
+**Responsibility:** Resolve + **verify** the practitioner owner against the ~92K-row `reference_data` registry; own the `match_status` column.
 
-**Neo4j:**
-- All writes via `MERGE` (idempotent).
-- Node types: `Document`, `Page`, `Person`, `Entity`, `Organization` (TBD), `Vendor` (TBD).
-- Relationships: `HAS_PAGE`, `MENTIONS`, `BELONGS_TO`, `MATCHES`.
-- `Person` merge key: `registration_no` (not name+dob).
+**Entry point:** `cloud/match/service.py → match_document` (`make match DOC=<id>`).
+
+**Decision ladder:**
+- Non-practitioner → `not_applicable`.
+- Practitioner → exact `registration_no` hit, then **VERIFIED-EXACT** (FIX-033): accept the number only after a name (+dob) cross-check. The form's number can be a *provisional* number colliding with a different holder's *permanent* `registration_no`.
+- Identity conflict → recover via **dob-gated fuzzy** (rapidfuzz `token_sort_ratio`, max over name fields): ≥`FUZZY_MATCH_HIGH`(90) → `matched`; [75,90) → `manual_review`; <75 → `unmatched`. No dob → `unmatched` (no full 92K scan).
+
+Writes `match_status` + `reference_data_id` + `metadata.match` provenance (`matched_on` includes `registration_no+name`). Does NOT touch `document.status`. Idempotent.
+
+> **Trade-off:** a *correct* exact reg_no hit on a doc that OCR'd no name AND no dob now degrades to `manual_review` — the deliberate cost of eliminating silent wrong-person matches. Fuzzy thresholds UNCALIBRATED (no labeled pairs yet).
+
+---
+
+### 5.9 Persist
+
+**Entry point:** `cloud/persist/service.py → persist_document` (`make persist DOC=<id>`). Idempotent on `document_id`.
+
+**Qdrant** (`qdrant_writer.py`):
+- Collection: `document_pages` | Vector: 384-dim Cosine | Model: `paraphrase-multilingual-MiniLM-L12-v2`.
+- One vector per **identity page only** (text-bearing: `ocr_status=done` AND non-empty `structured_json["raw_text"]`) — not every page (§14). Point id = `uuid5(NAMESPACE_URL, page_id)` → re-run upserts the same point.
+- Vector text = deterministic per-page summary (`summary.py`): `page_type` + grouped/deduped entities + first 512 chars raw_text (front-loaded for the embedder's ~256-tok truncation; NO LLM).
+
+**Neo4j** (`graph.py`) — all writes via `MERGE` (idempotent):
+- `Document-[:HAS_PAGE]->Page-[:MENTIONS]->mention`; `Person` (on `registration_no`) `-[:BELONGS_TO]->Document`; matched → `ReferenceRecord` via `[:MATCHES]`. `Page` carries `page_type`.
 - Constraints: `Document.document_id` UNIQUE, `Page.page_id` UNIQUE, `(Person.registration_no)` UNIQUE; index on `(Entity.type, Entity.value)`.
 
 **Postgres:**
-- Update `documents.match_status` to `matched` / `manual_review` / `unmatched`.
-- Store `reference_data_id` FK when practitioner is matched.
+- Promote `documents.status='processed'` (NEVER downgrades `failed`; **preserves** `manual_review` — propagation gate). Match stage already owns `match_status` + `reference_data_id`.
+
+**Txn model:** Postgres read+status in the caller's `session_scope`; Qdrant + Neo4j can't share it — each independently idempotent, the status flip is the completion signal.
 
 **S3:**
 - Original PDF archived at `documents/<doc_id>/original.pdf`.
@@ -420,6 +506,8 @@ Collection: document_pages
 Vector size: 384
 Distance: Cosine
 Model: paraphrase-multilingual-MiniLM-L12-v2
+Embeds: IDENTITY PAGES ONLY (app_cover/application_form) — light semantic
+        backup; primary retrieval is structured owner × page_type (§14).
 
 Payload fields:
   document_id    (keyword)
@@ -443,9 +531,9 @@ Nodes
 
 Relationships
   (:Document)-[:HAS_PAGE]->(:Page)
-  (:Page)-[:MENTIONS]->(:Entity)
-  (:Person)-[:BELONGS_TO]->(:Document)
-  (:Person)-[:MATCHES]->(:ReferenceData)  ← logical; ref data lives in Postgres
+  (:Page)-[:MENTIONS]->(:Entity)          ← persist MERGEs mention nodes off structured_json entities
+  (:Person)-[:BELONGS_TO]->(:Document)    ← Person merges on registration_no
+  (:Person)-[:MATCHES]->(:ReferenceRecord) ← only when match_status='matched'; ref data lives in Postgres
 ```
 
 ---
@@ -485,11 +573,14 @@ manifest received
             └─► persist
 ```
 
-**Stage modules (cloud/):**
-- `classifier/` — document category detection (rules-first + LLM fallback) ← **TBD**
-- `ocr/` — Tesseract wrapper + LLM fallback ← **TBD**
-- `structure/` — layout + NER ← **TBD**
-- `persist/` — Qdrant + Neo4j + Postgres writers ← **TBD**
+**Stage modules (cloud/) — all built:**
+- `classifier/` — rules-first + OpenRouter LLM fallback ✅
+- `ocr/` — proactive router + `tiers/{tesseract,vlm}` + `page_type.py` + consumer ✅
+- `structure/` — regex + LLM entity extraction (identity pages) ✅
+- `match/` — verified-exact registry match ✅
+- `persist/` — Qdrant + Neo4j + Postgres writers ✅
+- `retrieval/` — `find_pages(owner × page_type)` ✅
+- `dashboard/` — JSON `/api/*` for the Next.js SPA ✅
 
 ---
 
@@ -518,10 +609,11 @@ All scripts in `scripts/` are **idempotent** and safe to re-run.
 | `init_minio.py` | Creates `documents` bucket if absent |
 | `init_qdrant.py` | Creates `document_pages` collection if absent (384-dim Cosine) |
 | `init_neo4j.py` | Applies 3 UNIQUE constraints + 1 composite index |
-| `init_all.py` | Runs all 4 in order; non-zero exit on any failure |
-| `load_reference_data.py` | Bulk-loads Excel → `reference_data` table ← **TBD** |
+| `init_sqs.py` | Creates the local elasticmq FIFO queue (`ocr-pages.fifo`) |
+| `init_all.py` | Runs all in order; non-zero exit on any failure |
+| `load_reference_data.py` | Bulk-loads Excel → `reference_data` (92,389 rows loaded; per-chunk tx, `ON CONFLICT` resume) ✅ |
 
-Run order: Postgres → MinIO → Qdrant → Neo4j.
+Run order: Postgres → MinIO → Qdrant → Neo4j → SQS.
 
 ---
 
@@ -576,43 +668,78 @@ make test-integration    # integration (requires make up + make init)
 | `make format` | `ruff format .` |
 | `make db-shell` | `psql` into Postgres container |
 | `make minio-init` | MinIO bucket setup only |
+| `make serve` | uvicorn on :8000 (`/pipeline/notify`, `/retrieve`, `/api/*`) |
+| `make upload` | NAS uploader CLI (PDF → S3 + trigger ingest) |
+| `make ocr-worker` | Drain elasticmq → `process_page` |
+| `make structure DOC=<id>` | Run structure stage for one document |
+| `make match DOC=<id>` | Run match stage for one document |
+| `make persist DOC=<id>` | Run persist stage for one document |
+| `make web-dev` / `web-build` / `web-up` | Next.js dashboard dev / build / container |
 
 ---
 
-## 14. Retrieval Design
+## 14. Retrieval Design — Lean Ownership Propagation
 
-Query: *"documents of Ashish, DOB 26 Feb 1996"*
+> **Decided 2026-06-09, shipped 2026-06-10** (`feat/lean-ownership-retrieval`). Full
+> rationale in TECH_DECISIONS §20. This replaces the original "embed every page →
+> Neo4j filter → Qdrant re-rank" flow.
 
+**The query:** *"the Aadhaar document of Niraj Chopda (+ optional registration number)"* → return the page(s)/PDF.
+
+**The insight:** a practitioner bundle is **one person's** packet. The owner identity (name + permanent `RegistrationNo`) lives on 1–2 **identity pages**. Resolve the owner **once**, propagate it to every page by bundle context. To make an Aadhaar page *findable* we don't need its verbatim text — only (a) what kind of page it is (`page_type`) and (b) whose bundle it belongs to (owner). So retrieval reduces to a **structured filter**, not a vector search.
+
+**Flow** (`cloud/retrieval/service.py → find_pages`, `GET /retrieve`):
 ```
-1. Parse query
-   → structured: { name: "Ashish", dob: "1996-02-26" }
-   → semantic intent: "find practitioner documents"
+1. Resolve person:
+     exact registration_no  → documents row
+     else fuzzy name (rapidfuzz over the SMALL matched-doc set)
 
-2. Neo4j filter
-   MATCH (p:Person)-[:BELONGS_TO]->(d:Document)
-   WHERE p.registration_no IN <candidates from name+dob lookup>
-   RETURN d.document_id
+2. Filter (verified-owner gate):
+     SELECT pages WHERE document.owner = <person>
+       AND document.match_status = 'matched'     -- verified owners only
+       AND pages.page_type = <requested type>
 
-3. Qdrant re-rank
-   Search within candidate document_id set
-   Query vector = embed("Ashish 26 Feb 1996 practitioner")
-   Filter: { document_id: { $in: [<neo4j results>] } }
-
-4. Return
-   Ranked documents + highlighted matching entities
+3. Return: page image S3 key + parent PDF S3 key
 ```
 
-Every storage decision (what gets embedded, what becomes a node, what payload is kept) is made to support this flow without reprocessing.
+**Verified-owner gate:** only a `match_status='matched'` document is trusted as a propagation source (Persist preserves `manual_review`, never promotes it). This is what makes "propagate the owner to every page" safe.
+
+**Scope + trade-offs (locked in brainstorm):**
+
+| Decision | Choice | Why |
+|---|---|---|
+| By-person scope | **Practitioner bundles only** | Single-owner, so propagation covers 100%. Govt letters/record books are multi-owner — out of scope here. |
+| Qdrant kept? | **Yes — identity-page text only** | Light semantic backup for unanticipated queries on applicant data (college, qualification, year). The example query needs no vectors. |
+| Deep content *inside* a cert/letter page | **Not extracted** | Explicit cost trade-off: queries hinging on free-text buried in a non-identity page are not served. Accepted for the cost/latency win. |
+
+**Cost win:** restricting VLM transcription + structure-LLM to the 1–2 identity pages cuts a 13-page bundle from ~26 paid LLM calls to ~4–6 (**≈75–80% reduction**). Tesseract is local/free, so non-identity pages still get cheap text for typing.
 
 ---
 
-## 15. Production Migration Path
+## 15. Operations Dashboard
+
+A web dashboard to **monitor + control** the pipeline. **Next.js SPA** (`web/`) over a **FastAPI JSON API** (`cloud/dashboard/api.py`, `/api/*`), mounted on `cloud/app.py`. (Replaced the original DASH-1 HTMX/Jinja UI, cut over 2026-06-09.)
+
+| Area | Detail |
+|---|---|
+| **Auth** | Signed-cookie sessions (stdlib HMAC over `SESSION_SECRET`); credentials in `dashboard_users` (bcrypt). Seed via `scripts/add_dashboard_user.py`. |
+| **Monitor** | Document list w/ stage status; doc/page detail (inspect `raw_text`, `structured_json`, classification, S3 page image, reference match); match-rate KPIs + metric bars; `audit_log` view w/ filters; live status via SSE (SELECT-only poll-diff). |
+| **Control** | Trigger ingest (wraps `/pipeline/notify`); idempotent stage re-drive (re-classify, requeue OCR). Control actions write one `audit_log` row and **never 500** (return an HTMX/JSON toast). |
+| **Isolation** | `queries.py` SELECT-only; `actions.py` only re-drives existing entry points. |
+| **Eval lab (DASH-3)** | `/eval` route: enrol uploaded pages → label typed/handwritten → score + threshold sweep (`cloud/eval/content_type.py`, pure arithmetic over stored CV features). NEVER auto-writes thresholds — operator hand-applies the recommendation to triage defaults. Built to UNBLOCK the "triage over-classifies handwritten" calibration (no blind threshold edits). |
+
+DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation → `cost_events`) is still future.
+
+---
+
+## 16. Production Migration Path
 
 | Component | Dev | Prod |
 |---|---|---|
 | Blob storage | MinIO (local) | AWS S3 |
 | Pipeline trigger | HTTP POST shim | S3 event → SQS → Lambda |
-| OCR LLM fallback | Local Qwen/Gemma | Lambda-hosted |
+| Local queue | elasticmq (Docker) | AWS SQS (FIFO) |
+| Cloud OCR (VLM tier) | OpenRouter (`google/gemini-2.5-flash`) | OpenRouter (same) — single `OPENROUTER_API_KEY` |
 | Postgres | Docker container | RDS (Aurora Postgres) |
 | Qdrant | Docker container | Qdrant Cloud or EC2 |
 | Neo4j | Docker (APOC) | Neo4j AuraDB or EC2 |
@@ -620,22 +747,23 @@ Every storage decision (what gets embedded, what becomes a node, what payload is
 
 ---
 
-## 16. Open Items & Known Gaps
+## 17. Open Items & Known Gaps
+
+> Pipeline is complete end-to-end and validated on a real 13-page bundle (all 4
+> datastores clean). The table below is what remains, not what's missing in the core flow.
 
 | Item | Priority | Notes |
 |---|---|---|
-| Schema explicit ack | High | `make down-clean && make up && make init` needed to apply latest DDL |
-| `scripts/init_postgres.py` verify update | High | Must check new column names from schema rewrite |
-| `init_qdrant.py` model name update | Medium | Change to `paraphrase-multilingual-MiniLM-L12-v2` |
-| `scripts/load_reference_data.py` | High | Excel → `reference_data` bulk load not yet built |
-| `cloud/classifier/` | High | Doc category detection (rules-first + LLM fallback) |
-| `cloud/ocr/` | High | Tesseract wrapper + fallback |
-| `cloud/structure/` | High | Layout analysis + NER |
-| `cloud/persist/` | High | Qdrant + Neo4j + Postgres writers |
-| Neo4j `Organization` + `Vendor` nodes | Medium | Needed for letter/receipt pipelines |
-| Blank page skip logic | Medium | Pixel-variance threshold value TBD |
-| Heavy dep split (torch/sentence-transformers) | Low | Currently ~2GB install; consider optional extras |
-| Pre-commit hooks | Low | Deferred |
-| Ops/control dashboard — DASH-1 (operational) | Planned | FastAPI + HTMX/Jinja in new `cloud/dashboard/` pkg. Monitor + control (doc/stage status, inspect outputs, trigger ingest, idempotent stage re-drive, match-rate) + basic auth + `audit_log` table. Ready to build (reads existing state). See TECH_DECISIONS §19. |
-| Ops/control dashboard — DASH-2 (cost tracking) | Planned | Add `ocr_tier` to `pages`; instrument OCR tiers + `classifier/llm.py` → new `cost_events` table; cost views. Blocked on that plumbing. TECH_DECISIONS §19. |
-| Ops/control dashboard — DASH-3 (accuracy eval lab) | Planned | Ground-truth store + eval runner (OCR/classification accuracy, T1/T2/T3 tier comparison). Blocked on ground-truth data. TECH_DECISIONS §19. |
+| **AWS auto-trigger wiring** | High | Structure→Match→Persist chaining (Lambda-per-stage+SQS vs Step Functions UNDECIDED); Lambda container images for Tesseract/OpenCV/PyMuPDF; Terraform vs SAM/CDK. The next pipeline milestone. |
+| **Triage calibration** (over-classifies `handwritten`) | High | Thresholds (`height_cv .35`/`stroke_cv .45`) uncalibrated on real scans. Eval lab (DASH-3) is BUILT to unblock it — operator enrols+labels real scans → reads recommended thresholds → hand-applies to triage defaults. De-risked (over-classify only escalates to VLM, not fatal). |
+| **Match fuzzy thresholds** uncalibrated | Medium | `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` — no labeled pairs yet. |
+| Wire `OPENROUTER_API_KEY` | Medium | The sole cloud-OCR credential. Set it to exercise the skipped openrouter integration test. |
+| Manual dashboard smoke | Medium | Not yet run end-to-end: needs `make up` + `make serve` + `make web-dev` + seeded user (`scripts/add_dashboard_user.py`). |
+| Push `main` to origin | Low | `main` is local-only, ahead of origin by many commits (user's choice). |
+| DASH-2 (cost/usage tracking) | Planned | Add `ocr_tier` to `pages`; instrument OCR tiers + `classifier/llm.py` → `cost_events` table; cost views. Blocked on that plumbing. TECH_DECISIONS §19. |
+| Multi-owner by-person retrieval (letters/record books) | Low | Out of current scope (single-owner practitioner bundles only); a heavier per-mention path if ever needed. §14. |
+| Neo4j `Organization` + `Vendor` nodes | Low | For letter/receipt pipelines. |
+| Heavy dep split (torch/sentence-transformers) | Low | ~2GB install; revisit before Lambda packaging. |
+| Pre-commit hooks; residual ruff debt in classifier/ingest/ocr/nas | Low | Deferred (pre-existing, out of scope of recent stages). |
+
+**Done since v1.0** (was TBD, now built): `load_reference_data` (92K rows), `cloud/{classifier,ocr,structure,match,persist,retrieval}/`, NAS uploader + local elasticmq end-to-end, schema (`queued` status, `app_no` BIGINT, `eval_content_type` table), Next.js dashboard + JSON API + eval lab.
