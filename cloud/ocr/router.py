@@ -28,6 +28,7 @@ from cloud.ocr.models import OcrResult, Tier
 from cloud.ocr.tiers.base import OcrTier, TierNotImplemented
 from cloud.ocr.tiers.tesseract import TesseractTier
 from cloud.ocr.tiers.vlm import VlmTier
+from cloud.ocr.page_type import PAGE_TYPE_CONF_NET, VlmPageTyper, classify_page_type
 from shared.config import get_settings
 from shared.logging import get_logger
 
@@ -103,6 +104,7 @@ class OcrRouter:
         tiers: dict[Tier, OcrTier] | None = None,
         *,
         threshold: float | None = None,
+        page_typer: object | None = None,
     ) -> None:
         self._tiers = tiers or _default_tiers()
         if threshold is None:
@@ -110,6 +112,15 @@ class OcrRouter:
                 getattr(get_settings(), "ocr_confidence_threshold", 70)
             )
         self._threshold = threshold
+        # VLM page-type classifier for non-identity pages the keyword typer can't
+        # place. None when OpenRouter isn't configured (degrades to keyword-only).
+        if page_typer is None:
+            try:
+                page_typer = VlmPageTyper()
+            except TierNotImplemented as exc:
+                log.warning("page_typer_unconfigured", reason=str(exc))
+                page_typer = None
+        self._page_typer = page_typer
 
     def _start_index(self, content_type: str) -> int:
         return _START.get(content_type, 0)
@@ -164,15 +175,34 @@ class OcrRouter:
 
         return best
 
+    async def _resolve_page_type(
+        self, msg: OcrPageMessage, image: bytes, result: OcrResult | None
+    ) -> str | None:
+        """Fine page_type for a NON-identity page. None for identity pages
+        (the Structure stage types those). Keyword-first, VLM-classify on a
+        low-confidence/ambiguous keyword result."""
+        if is_identity_page(msg.page_type):
+            return None
+        raw_text = result.raw_text if result is not None else ""
+        ptype, conf = classify_page_type(raw_text)
+        if conf < PAGE_TYPE_CONF_NET and self._page_typer is not None:
+            try:
+                ptype = await self._page_typer.classify(image)
+            except TierNotImplemented as exc:
+                log.warning("page_typer_unavailable", page_id=msg.document_id,
+                            reason=str(exc))
+        return ptype
+
     async def process_page(
         self,
         msg: OcrPageMessage,
         image: bytes,
         page_repo: PageRepository,
     ) -> OcrResult | None:
-        """Route + persist. Idempotent: writes are keyed on page_id."""
+        """Route + page-type + persist. Idempotent: writes are keyed on page_id."""
         page_id = f"{msg.document_id}:{msg.page_num}"
         result = await self.route(msg, image)
+        page_type = await self._resolve_page_type(msg, image, result)
 
         if result is None or result.is_empty:
             await page_repo.save_ocr_result(
@@ -180,8 +210,10 @@ class OcrRouter:
                 structured_json=None,
                 ocr_status=OCRStatus.FAILED,
                 language_detected=msg.language_hint,
+                page_type=page_type,
             )
-            log.warning("ocr_failed", page_id=page_id, content_type=msg.content_type)
+            log.warning("ocr_failed", page_id=page_id, content_type=msg.content_type,
+                        page_type=page_type)
             return result
 
         await page_repo.save_ocr_result(
@@ -189,6 +221,7 @@ class OcrRouter:
             structured_json=result.to_structured_json(),
             ocr_status=OCRStatus.DONE,
             language_detected=result.language_detected,
+            page_type=page_type,
         )
         log.info(
             "ocr_persisted",
@@ -196,5 +229,6 @@ class OcrRouter:
             tier=result.tier,
             mean_conf=round(result.mean_conf, 2),
             low_conf_count=result.low_conf_count,
+            page_type=page_type,
         )
         return result
