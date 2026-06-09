@@ -25,6 +25,7 @@
 17. [Thresholds Reference](#17-thresholds-reference)
 18. [Deferred / Pending Decisions](#18-deferred--pending-decisions)
 19. [Operations / Control Dashboard (planned)](#19-operations--control-dashboard-planned)
+20. [Retrieval Strategy — Lean Ownership Propagation](#20-retrieval-strategy--lean-ownership-propagation)
 
 ---
 
@@ -157,6 +158,8 @@ Distance:    Cosine
 
 **Why Cosine distance:** Semantic similarity for text is about direction of the embedding vector (topic alignment), not magnitude. Cosine normalises out document length effects.
 
+**What gets embedded (revised 2026-06-10):** only **identity pages** (`app_cover`/`application_form`), not every page. Primary retrieval is structured (`owner × page_type` in Postgres, §20); Qdrant is the light semantic backup over the applicant-data text that anchors a bundle. Non-identity pages (Aadhaar, certs, receipts) are never transcribed, so there is no per-page text to embed — by design (§20).
+
 ---
 
 ## 6. Graph Database
@@ -227,6 +230,14 @@ Distance:    Cosine
 > dependency is gone. The confidence-net (70) survives on the meaningful
 > Tesseract→VLM hop. A two-VLM ladder escalating on a fixed conf prior carried
 > no signal, hence the collapse.
+>
+> **Revised 2026-06-10 — identity-scoped transcription (lean retrieval).**
+> Only **identity pages** (coarse `page_type` `cover`/`form`) now get the full
+> Tesseract→VLM ladder. Every other page is **Tesseract-only** (no paid VLM
+> transcription); its fine `page_type` is assigned by a cheap keyword typer
+> (`cloud/ocr/page_type.py`) that escalates to a VLM **classify** call (a single
+> label, NOT a transcription) only when keyword confidence < 0.5. Rationale +
+> the full retrieval rethink it serves are in **§20**.
 
 ### Routing model
 
@@ -493,3 +504,66 @@ the same uvicorn process; no separate toolchain.
 - **No ground-truth store** yet.
 - `cloud/structure/` + `cloud/persist/` are **empty stubs** → "per-stage status"
   shows those stages as not-yet-implemented until built.
+
+---
+
+## 20. Retrieval Strategy — Lean Ownership Propagation
+
+> **Decided 2026-06-09 (brainstorm), shipped 2026-06-10**
+> (`feat/lean-ownership-retrieval`, merged → main).
+> Spec: `docs/superpowers/specs/2026-06-09-lean-ownership-propagation-retrieval-design.md`.
+> Plan: `docs/superpowers/plans/2026-06-09-lean-ownership-propagation-retrieval.md`.
+
+### The shift
+
+This system is ultimately a **document-retrieval** system: the admin asks *"the
+Aadhaar document of Niraj Chopda (+ optional registration number)"* and expects
+the page(s)/PDF back. The original pipeline transcribed **every page** (Tesseract
+→ VLM) and ran **per-page LLM entity extraction** on all of them — up to ~26 paid
+LLM calls for a 13-page bundle.
+
+We pivoted to **ownership propagation**: a practitioner bundle is **one person's**
+application packet. The owner identity (name + permanent `RegistrationNo`) lives
+on the **identity pages** (`cover`/`form` → refined to `app_cover`/
+`application_form`), 1–2 pages per bundle. Resolve the owner **once** from those
+pages, then **propagate** it to every page by bundle context. To make an Aadhaar
+page *findable* we do not need its verbatim text — we need (a) what kind of page
+it is and (b) whose bundle it belongs to.
+
+Retrieval therefore reduces to a **structured filter**: `owner × page_type` over
+Postgres, gated to verified owners (`documents.match_status='matched'`).
+
+### Why we did it
+
+| Driver | Detail |
+|---|---|
+| **Cost** | VLM (OpenRouter) transcription + structure-LLM are the paid calls. Restricting both to the 1–2 identity pages cuts a 13-page bundle from ~26 paid LLM calls to ~4–6 (**≈75–80% reduction**). Tesseract is local/free, so non-identity pages still get cheap text for typing. |
+| **Latency** | Proportional drop on the per-page hot path — fewer network round-trips to the VLM. |
+| **It's enough for the query** | "Aadhaar of <person>" is answerable as `owner × page_type` with zero transcription of the Aadhaar page. The owner is the join; the page_type is the filter. |
+| **Accuracy** | Reserving the VLM for the identity pages that actually carry the name/reg/dob focuses spend where extraction correctness matters. |
+
+### Design pieces
+
+1. **Per-page routing (OCR).** Identity pages → full Tesseract→VLM ladder + structure-LLM extraction. Non-identity pages → Tesseract-only; a keyword page-typer (`cloud/ocr/page_type.py`) assigns the fine `page_type`, escalating to a cheap VLM **classify** call (label, not transcription) when keyword confidence < 0.5. (§8 revision 2026-06-10.)
+2. **Owner resolution + verification (Match).** The owner is resolved from the identity pages and **verified-exact**: an exact `registration_no` hit against the 92K registry is accepted only after a name(+dob) cross-check. This closed a real **FALSE-MATCH** bug — the application form's number can be a *provisional* number that collides with a *different* person's permanent `registration_no` in the registry (the registry is keyed on the permanent number). Identity disagreement → recover the correct person via dob-fuzzy, else `manual_review`. See `error_fixes.md` FIX-033. **Trade-off:** a correct exact hit on a doc that OCR'd no name AND no dob now degrades to `manual_review` (under-extracted docs need a human) — accepted to eliminate silent wrong-person matches.
+3. **Propagation gate (Persist + Retrieval).** Only a **verified** owner is trusted: retrieval requires `match_status='matched'`, and Persist preserves a `manual_review` status (never promotes it to `processed`). Qdrant embeds identity-page text only (§5); Neo4j `Page` nodes carry `page_type`.
+4. **Retrieval (`cloud/retrieval/service.py`, `GET /retrieve`).** Resolve person by exact `registration_no` or fuzzy name (rapidfuzz over the small matched-doc set), then filter `pages.page_type` under the verified-owner gate; return the page image S3 key + parent PDF S3 key.
+
+### Scope + what we gave up (locked in brainstorm)
+
+| Decision | Choice | Why |
+|---|---|---|
+| By-person retrieval scope | **Practitioner bundles only** | They are single-owner, so ownership propagation covers 100% of by-person retrieval. Govt letters + record books are multi-owner — out of by-person scope here (a later, heavier per-mention path if needed). |
+| Page typing for non-identity pages | **Free Tesseract keywords + VLM-classify escalation** | Reuses the existing T1→T2 confidence-ladder shape; $0 for clean pages, one cheap label call for hard ones. (Calibration of the keyword map + 0.5 net is a TODO via the eval lab.) |
+| Datastores | **Postgres backbone + light Qdrant** | The example query is a pure structured filter. Qdrant kept (identity-text only) because "we don't know what the admin will query" — covers unforeseen queries on applicant data (college, qualification, place, year). |
+| Deep content *inside* a cert/letter page | **Not extracted** | The explicit cost trade-off: queries that hinge on free-text buried in a non-identity page are not served. Accepted for the cost/latency win. |
+
+### Alternatives considered / rejected
+
+| Option | Why not |
+|---|---|
+| Transcribe every page + embed all page text (original) | The cost/latency the pivot exists to remove; most of that text is never queried. |
+| VLM-classify every page for its type | Robust but pays an API call on every page; the free keyword typer handles clean pages, escalation handles the rest. |
+| Visual-only page typing (no OCR) | Truly $0 but brittle across document variety (SSC vs HSC marksheets look alike) and needs training/calibration. |
+| Drop Qdrant entirely (pure structured) | Tempting (the example query needs no vectors), but rejected to keep a semantic backup for unanticipated queries on applicant data. |
+| Trust the exact `registration_no` match without identity check (original) | The FALSE-MATCH bug — provisional/permanent number-space collisions silently mis-attribute a whole bundle. |

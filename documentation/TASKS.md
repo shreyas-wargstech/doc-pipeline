@@ -1,6 +1,6 @@
 # TASKS — Document Intelligence Pipeline
 
-> Remaining + future work. Source: `session_log.md` open threads + CLAUDE.md "Active threads"/"Current state" (as of 2026-06-09).
+> Remaining + future work. Source: `session_log.md` open threads + CLAUDE.md "Active threads"/"Current state" (as of 2026-06-10).
 > Status legend: `[ ]` open · `[~]` in progress / partially done · `[x]` done (kept for context).
 > Append/check items here; durable per-stage detail stays in `session_log.md` + code. `make test` = ground truth.
 
@@ -8,18 +8,19 @@
 
 ## P0 — Open bugs (correctness)
 
-- [ ] **FALSE-MATCH bug** — exact `registration_no` match has NO name/dob cross-check, so a doc with reg N matches whoever holds N in the registry even if names differ (seen: reg 47896 → wrong person). **Action:** brainstorm design fix (add name/dob guard on exact-reg path). Deferred by user 2026-06-09. Files: `cloud/match/service.py`, `cloud/match/reference.py`.
+- [x] **FALSE-MATCH bug — FIXED 2026-06-10** (`feat/lean-ownership-retrieval`, merged → main; FIX-033). Exact `registration_no` match used to have NO name/dob cross-check (seen: reg 47896 → wrong person; the form's "Provisional No" collided with a different holder's permanent reg). **Fix:** verified-exact — accept the number only when name(+dob) agrees; identity conflict → recover via dob-fuzzy, else `manual_review`. `find_by_registration_no` now returns name+dob; `matched_on` gains `registration_no+name`. **Known trade-off:** a correct exact hit on a doc that OCR'd no name AND no dob now degrades to `manual_review` (see FIX-033). Files: `cloud/match/{models,reference,service}.py`.
 
 ## P1 — Calibration (needs labeled data, unblock-then-apply)
 
 - [~] **Triage over-classifies `handwritten`** — `HeuristicContentTypeDetector` thresholds (height_cv .35 / stroke_cv .45 / height_weight .5) uncalibrated on real scans → almost nothing routes to free T1 Tesseract. De-risked (router escalates to VLM, FIX-028) so *costly* not *fatal*. **To CLOSE:** content-type eval lab is BUILT → operator enrols real scans at `/eval` → labels → reads recommended thresholds → hand-applies to triage defaults (lab NEVER auto-writes). Files: `nas/preprocess/triage.py` (defaults), `cloud/eval/content_type.py` (sweep).
-- [ ] **Match fuzzy thresholds uncalibrated** — `FUZZY_MATCH_HIGH=90` / `FUZZY_REVIEW_LOW=75` set blind (no labeled pairs yet). **Action:** build labeled match-pair set → tune. Files: `cloud/match/models.py`.
+- [ ] **Match fuzzy thresholds uncalibrated** — `FUZZY_MATCH_HIGH=90` / `FUZZY_REVIEW_LOW=75` set blind (no labeled pairs yet). Now consumed on TWO paths: dob-fuzzy fallback AND the verified-exact name cross-check (FIX-033), so calibration matters more. **Action:** build labeled match-pair set → tune. Files: `cloud/match/models.py`.
+- [ ] **Page-typer keyword rules + conf-net uncalibrated** — `cloud/ocr/page_type.py` `_KEYWORD_RULES` + `PAGE_TYPE_CONF_NET=0.5` are a starting point (some broad keywords flagged: `internship`, `challan`). Non-identity pages typed below the net escalate to a VLM-classify call. **To CLOSE:** label real non-identity scans → tune the keyword map + net via the content-type eval lab. Over-typing only costs a cheap classify call, not fatal. Files: `cloud/ocr/page_type.py`.
 - [ ] **Triage/preprocess params uncalibrated** — denoise h=10, projection step 0.5°, Sauvola win 25, blank `min_components=5`. Tune on real scans. Files: `nas/preprocess/pipeline.py`, `nas/preprocess/triage.py`.
 
 ## P1 — Git / integration hygiene
 
 - [ ] **Push `main` to origin** — local-only, ahead of origin by 30+ commits (user's choice to hold). Confirm before pushing.
-- [ ] **Verify branch merges** — `feat/content-type-eval-lab` + `feat/ocr-vlm-migration` + `fix/ingest-ocr-race-and-dockerignore` land state (git log shows eval-lab merged; confirm the rest are in `main`, no dangling branches).
+- [ ] **Verify branch merges** — `feat/content-type-eval-lab` + `feat/ocr-vlm-migration` + `fix/ingest-ocr-race-and-dockerignore` land state (git log shows eval-lab merged; confirm the rest are in `main`, no dangling branches). `feat/lean-ownership-retrieval` merged 2026-06-10 (`--no-ff`, branch deleted).
 - [ ] **Wire `OPENROUTER_API_KEY`** (sole cloud-OCR credential) → run the skipped `openrouter` integration test.
 - [ ] **Run full gated integration suite with Docker up** — `make up` → `uv run pytest -m integration` (26 deselected when Docker down; confirm no regressions).
 - [ ] **Manual dashboard smoke** — `make up` + `make serve` + `make web-dev` + seed user (`python -m scripts.add_dashboard_user`); click through documents/detail/metrics/audit/eval. NOT yet run.
@@ -53,6 +54,12 @@
 
 ## Done (recent stages — context only)
 
+- [x] **Lean ownership-propagation retrieval** (`feat/lean-ownership-retrieval`, merged → main 2026-06-10; spec + plan under `docs/superpowers/`). Practitioner docs retrievable by `owner × page_type` WITHOUT transcribing every page. See TECH_DECISIONS §20.
+  - [x] Match: verified-exact name(+dob) cross-check → FALSE-MATCH fix (FIX-033).
+  - [x] OCR: only identity pages (`cover`/`form`) get the paid VLM ladder; others Tesseract-only + keyword page-typer (`cloud/ocr/page_type.py`) escalating to a cheap VLM-classify call; router persists `page_type`.
+  - [x] Structure: entity extraction on identity pages only; practitioner with no resolved identity → `manual_review`.
+  - [x] Persist: embeds **identity pages only** into Qdrant; Neo4j `Page` carries `page_type`; preserves `manual_review` status.
+  - [x] Retrieval: `cloud/retrieval/service.py find_pages(owner × page_type)` + `GET /retrieve` (verified owners only, `match_status='matched'`). By-person scope = practitioner bundles only.
 - [x] Full pipeline end-to-end: ingest → classify → OCR → structure → match → persist (all merged to main).
 - [x] OCR ladder collapsed to 2 tiers: T1 Tesseract → T2 VLM (OpenRouter / `google/gemini-2.5-flash`); GCV T2 removed.
 - [x] FastAPI `cloud/app.py` (`/api/*`) + Next.js `web/` SPA dashboard (HTMX cut over).
