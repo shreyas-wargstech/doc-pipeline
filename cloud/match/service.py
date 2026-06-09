@@ -135,6 +135,9 @@ async def match_document(
     conflict_method = "exact" if exact_conflict else None
     conflict_on = "registration_no+name" if exact_conflict else None
 
+    # On exact_conflict, method/matched_on stay "exact"/"registration_no+name" as
+    # provenance (the exact path hit a row but identity failed) even though
+    # reference_data_id is None — signals "needs review", not a clean match.
     if doc.dob is None:
         result = MatchResult(
             match_status=conflict_floor, reference_data_id=None,

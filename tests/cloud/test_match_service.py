@@ -84,7 +84,6 @@ async def test_exact_reg_no_hit_verified_by_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_exact_hit_dob_agrees_partial_name_matches(monkeypatch):
-    import datetime
     # token_sort_ratio("nidhi toshniwal","nidhi sanjay toshniwal") = 81.08 → in [75,90)
     # but dob agrees, so condition (dob_agrees and nscore >= FUZZY_REVIEW_LOW) holds → matched.
     doc = _doc(reg_no="34903", name="nidhi toshniwal", dob=datetime.date(1995, 2, 27))
@@ -106,7 +105,6 @@ async def test_exact_hit_identity_conflict_recovers_via_fuzzy(monkeypatch):
     """The 47896 case: form's number hits a DIFFERENT person in the registry.
     Name disagrees → do NOT accept; fall through to dob-fuzzy and recover the
     correct person."""
-    import datetime
     doc = _doc(reg_no="47896", name="nidhi toshniwal", dob=datetime.date(1995, 2, 27))
     doc_repo, ref_repo = _wire(
         monkeypatch,
@@ -140,6 +138,8 @@ async def test_exact_hit_identity_conflict_no_recovery_is_manual_review(monkeypa
     result = await match_document("d", session=MagicMock())
     assert result.match_status == "manual_review"
     assert result.reference_data_id is None
+    assert result.method == "exact"        # provenance: exact lookup hit but identity failed
+    assert result.matched_on == "registration_no+name"
     ref_repo.find_by_dob.assert_not_awaited()  # no dob to recover with
 
 
