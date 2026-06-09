@@ -12,6 +12,9 @@ up:  ## Start local services (postgres, minio, qdrant, neo4j)
 down:  ## Stop local services (keep data volumes)
 	docker compose down
 
+status: ## Show status of local services
+	docker compose ps
+
 down-clean:  ## Stop local services AND wipe all data volumes
 	docker compose down -v
 

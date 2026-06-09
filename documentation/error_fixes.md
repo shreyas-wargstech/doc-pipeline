@@ -633,3 +633,48 @@ service's context is the repo root, always exclude `.git`, the local virtualenv,
 services' `node_modules`/build dirs. (Separate papercut: `make up` builds app images because
 the recipe is a bare `docker compose up -d` with no service list — scope it to infra, or give
 `api`/`web` a compose `profiles:`.)
+
+---
+
+## 2026-06-09 — content-type eval lab (DASH-3)
+
+### FIX-030 · fresh-DB CREATE TRIGGER placed before the trigger function it calls
+
+**Symptom:** On a clean `make down-clean && make up`, docker-entrypoint applying `db/schema.sql`
+would fail at the `eval_content_type` trigger: `function trigger_set_updated_at() does not exist`.
+The live-DB idempotent apply script worked (function already existed), masking it.
+
+**Root cause:** The new `set_eval_content_type_updated_at` trigger was authored next to its own
+table near the top of `schema.sql`, but the `trigger_set_updated_at()` function it references is
+defined lower in the file. Postgres resolves the function at `CREATE TRIGGER` time, so on a fresh
+DB the statement ran before the function existed. (Aside: the real function is
+`trigger_set_updated_at()`, NOT `set_updated_at()` — verify the actual name in schema.sql.)
+
+**Fix:** Moved the `CREATE TRIGGER` to sit with the other `updated_at` triggers AFTER the
+function definition, and added a matching `DROP TRIGGER IF EXISTS`.
+
+**Files:** `db/schema.sql`
+
+**Rule:** In a single authoritative DDL file, every object must appear AFTER everything it
+references at creation time (functions before triggers, tables before FKs). The idempotent
+live-DB apply script can hide this because the dependency already exists there — fresh-DB boot
+from `schema.sql` is the real test. Co-locate new triggers with the existing ones, never beside
+their table.
+
+### FIX-031 · /eval/score response duplicated confusion counts at root AND under `confusion`
+
+**Symptom:** The score endpoint returned `{precision, recall, ..., tp, fp, tn, fn, confusion:{tp,fp,tn,fn}}`
+— the four counts appeared twice. The frontend `EvalScore` type only declares them under
+`confusion`, so the root copies were dead weight and a drift hazard.
+
+**Root cause:** The route spread the confusion-matrix dataclass at the top level and also nested
+it, instead of nesting only.
+
+**Fix:** Emit counts ONLY under `confusion`; root holds the derived metrics
+(`precision/recall/accuracy/f1/n`). Test asserts `body["confusion"] == {...}` and `"tp" not in body`.
+
+**Files:** `cloud/dashboard/api.py`, `tests/cloud/test_eval_api.py`
+
+**Rule:** Pick ONE location for each field in an API response and keep the test guarding the
+absence of the duplicate. Counts (matrix) and derived metrics are different shapes — nest the
+raw counts, keep scalars flat; don't mirror.

@@ -73,7 +73,7 @@ docs/     INTEGRATION.md
 
 ## Current state (as of 2026-06-09)
 
-Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), all merged to main; FastAPI `cloud/app.py` + Next.js `web/` SPA dashboard. **Validated on a real 13-page bundle 2026-06-09** (all 4 datastores clean, 13/13 pages through the `vlm` tier). Backend **226 unit green** (integration deselected, need Docker); web 23 green + tsc/build clean. `main` is local-only, ahead of origin (not pushed, user's choice).
+Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), all merged to main; FastAPI `cloud/app.py` + Next.js `web/` SPA dashboard. **Validated on a real 13-page bundle 2026-06-09** (all 4 datastores clean, 13/13 pages through the `vlm` tier). DASH-3 **content-type eval lab built** on `feat/content-type-eval-lab` (not yet merged). Backend **250 unit green** (integration deselected, need Docker); web **28 green** + tsc/build clean. `main` is local-only, ahead of origin (not pushed, user's choice).
 
 > Per-stage durable detail (gotchas, signatures, txn models) lives in **`session_log.md`** (`Key X facts` were migrated there) and the **code**. This file keeps only cross-cutting facts + active threads. Treat `make test` as ground truth.
 
@@ -86,7 +86,7 @@ Cross-cutting facts (bitten — remember):
 
 Active threads:
 - **FALSE-MATCH bug (open, deferred by user 2026-06-09):** exact `registration_no` match has no name/dob cross-check, so a doc with reg N matches whoever holds N in the registry even if names differ (seen: reg 47896 → wrong person). Design fix deferred — brainstorm next.
-- **Triage over-classifies `handwritten` (open, deferred 2026-06-08):** `HeuristicContentTypeDetector` thresholds (height_cv .35 / stroke_cv .45) uncalibrated; real-scan punctuation + Devanagari shirorekha inflate `height_cv`. Now only *costly* (escalates to VLM) not fatal, since FIX-028. Needs labeled scans / DASH-3 eval lab — no blind threshold edits.
+- **Triage over-classifies `handwritten` (calibration UNBLOCKED 2026-06-09):** `HeuristicContentTypeDetector` thresholds (height_cv .35 / stroke_cv .45) still uncalibrated, but the DASH-3 **content-type eval lab is now BUILT** (`feat/content-type-eval-lab`, not yet merged) — label real scans at `/eval`, score, sweep → recommended thresholds. Triage split: `compute_features` (CV) + `classify_features` (decision); `cloud/eval/content_type.py` does the pure sweep; `eval_content_type` table persists labels+features. Lab NEVER auto-writes thresholds — operator hand-applies the recommendation to triage defaults. To CLOSE: merge branch → enrol+label → apply. Over-classification only *costly* (escalates to VLM) not fatal since FIX-028.
 - Match fuzzy thresholds `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` UNCALIBRATED (no labeled pairs yet).
 - AWS auto-trigger wiring (Structure→Match→Persist chain) — next pipeline milestone.
 - Manual dashboard smoke NOT yet run (needs `make up` + `make serve` + `make web-dev` + seeded user via `python -m scripts.add_dashboard_user`).
