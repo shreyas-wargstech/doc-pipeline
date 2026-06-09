@@ -30,10 +30,21 @@ function advance(state: EvalState): number {
   return Math.min(state.cursor + 1, Math.max(state.pages.length - 1, 0));
 }
 
+function samePageSet(a: EvalPage[], b: EvalPage[]): boolean {
+  return a.length === b.length && a.every((p, i) => p.page_id === b[i].page_id);
+}
+
 export function evalReducer(state: EvalState, action: EvalAction): EvalState {
   switch (action.type) {
-    case "load":
-      return { pages: action.pages, cursor: 0 };
+    case "load": {
+      // A background refetch (e.g. after labeling) hands us the SAME page set with
+      // fresh server data. Replace the data but keep the cursor where it is — only a
+      // genuinely new set (enrolling another document) restarts at page 1.
+      const cursor = samePageSet(state.pages, action.pages)
+        ? Math.min(state.cursor, Math.max(action.pages.length - 1, 0))
+        : 0;
+      return { pages: action.pages, cursor };
+    }
     case "label": {
       const pages = state.pages.map((p) =>
         p.page_id === action.page_id ? { ...p, label: action.label } : p,
