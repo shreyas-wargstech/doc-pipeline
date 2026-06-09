@@ -23,6 +23,7 @@ class GraphMention:
 class GraphPage:
     page_id: str
     mentions: list[GraphMention]
+    page_type: str | None = None
 
 
 @dataclass
@@ -75,9 +76,11 @@ async def write_document_graph(
             await session.run(
                 "MERGE (d:Document {document_id: $document_id}) "
                 "MERGE (p:Page {page_id: $page_id}) "
+                "SET p.page_type = $page_type "
                 "MERGE (d)-[:HAS_PAGE]->(p)",
                 document_id=doc.document_id,
                 page_id=page.page_id,
+                page_type=page.page_type,
             )
             for m in page.mentions:
                 await _merge_mention(session, page.page_id, m)
