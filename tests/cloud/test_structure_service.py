@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from cloud.structure import service as structure_service
 from cloud.structure.models import Entity
 from cloud.structure.service import (
     merge_entities,
@@ -164,3 +165,59 @@ async def test_structure_document_missing_doc_raises(monkeypatch):
     monkeypatch.setattr("cloud.structure.service.DocumentRepository", lambda s: doc_repo)
     with pytest.raises(StructureError, match="document not found"):
         await structure_document("missing", session=MagicMock(), client=MagicMock())
+
+
+# ---- identity-page filter + no-identity manual_review ----------------------
+
+def _page2(num, page_type, raw_text, ocr_status="done"):
+    return SimpleNamespace(
+        page_num=num, page_type=page_type, ocr_status=ocr_status,
+        structured_json={"raw_text": raw_text},
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_identity_page_skips_llm(monkeypatch):
+    doc = SimpleNamespace(document_category="practitioner")
+    doc_repo = MagicMock()
+    doc_repo.get = AsyncMock(return_value=doc)
+    doc_repo.update_fields = AsyncMock()
+    page_repo = MagicMock()
+    page_repo.list_for_document = AsyncMock(return_value=[
+        _page2(1, "aadhaar", "Government of India AADHAAR"),
+        _page2(2, "app_cover", "Applicant Name: Nidhi Toshniwal"),
+    ])
+    page_repo.update_structured = AsyncMock()
+    monkeypatch.setattr(structure_service, "DocumentRepository", lambda s: doc_repo)
+    monkeypatch.setattr(structure_service, "PageRepository", lambda s: page_repo)
+
+    called_with = []
+    async def fake_llm(raw_text, **kw):
+        called_with.append(kw["page_type"])
+        return "app_cover", [], {"name": "Nidhi Toshniwal", "registration_no": "34903"}
+    monkeypatch.setattr(structure_service, "llm_extract", fake_llm)
+
+    await structure_service.structure_document("d", session=MagicMock())
+
+    assert called_with == ["app_cover"]            # aadhaar page skipped
+    page_repo.update_structured.assert_awaited_once()  # only the identity page
+
+
+@pytest.mark.asyncio
+async def test_practitioner_no_identity_is_manual_review(monkeypatch):
+    doc = SimpleNamespace(document_category="practitioner")
+    doc_repo = MagicMock()
+    doc_repo.get = AsyncMock(return_value=doc)
+    doc_repo.update_fields = AsyncMock()
+    page_repo = MagicMock()
+    page_repo.list_for_document = AsyncMock(return_value=[
+        _page2(1, "aadhaar", "Government of India AADHAAR"),
+    ])
+    page_repo.update_structured = AsyncMock()
+    monkeypatch.setattr(structure_service, "DocumentRepository", lambda s: doc_repo)
+    monkeypatch.setattr(structure_service, "PageRepository", lambda s: page_repo)
+
+    await structure_service.structure_document("d", session=MagicMock())
+
+    _, kw = doc_repo.update_fields.call_args
+    assert kw["status"] == "manual_review"
