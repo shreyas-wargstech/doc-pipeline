@@ -48,9 +48,11 @@ _START: dict[str, int] = {
 # page is capped at Tesseract (no paid VLM transcription) — its page_type is
 # assigned by the keyword page-typer instead.
 _IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"cover", "form"})
+_TESSERACT_IDX: int = _LADDER.index("tesseract")  # cap index for non-identity pages
 
 
 def is_identity_page(page_type: str) -> bool:
+    """True if page_type carries the practitioner identity block (coarse manifest label)."""
     return page_type in _IDENTITY_PAGE_TYPES
 
 
@@ -114,11 +116,13 @@ class OcrRouter:
 
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
         """Run the tier ladder. Identity pages use the full ladder; non-identity
-        pages are capped at Tesseract (no VLM transcription). Returns the
-        accepted result, or None if no tier produced one."""
+        pages are capped at Tesseract — always START at Tesseract (even when
+        content_type=handwritten) and never escalate to the paid VLM tier.
+        Escalation only — never falls back to a lower tier. Returns the accepted
+        result, or None if no tier produced one."""
         identity = is_identity_page(msg.page_type)
         start = self._start_index(msg.content_type) if identity else 0
-        end = len(_LADDER) if identity else 1  # 1 == Tesseract only
+        end = len(_LADDER) if identity else _TESSERACT_IDX + 1  # non-identity: Tesseract only
         best: OcrResult | None = None
 
         for idx in range(start, end):
