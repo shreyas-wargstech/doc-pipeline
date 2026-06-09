@@ -19,7 +19,7 @@ from sqlalchemy import text
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from shared.db import get_engine          # noqa: E402
+from shared.db import get_engine  # noqa: E402
 from shared.logging import configure_logging  # noqa: E402
 
 log = structlog.get_logger()
