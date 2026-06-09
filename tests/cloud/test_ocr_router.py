@@ -225,3 +225,44 @@ async def test_unavailable_tier_raises_at_run():
     t = router_mod._UnavailableTier("vlm", "no creds")
     with pytest.raises(TierNotImplemented, match="no creds"):
         await t.run(b"img", document_id="d", page_num=1)
+
+
+# ── identity-page capping ────────────────────────────────────────────────
+def _msg_type(page_type, content_type="typed"):
+    from cloud.ingest.models import OcrPageMessage
+    return OcrPageMessage(
+        document_id="doc1", page_num=2,
+        s3_key="documents/doc1/pages/page_002.png",
+        document_category="practitioner",
+        page_type=page_type, content_type=content_type, language_hint="latin",
+    )
+
+
+@pytest.mark.anyio
+async def test_non_identity_lowconf_does_not_escalate_to_vlm():
+    t = FakeTier("tesseract", mean_conf=20.0)
+    vlm = FakeTier("vlm", mean_conf=95.0)
+    router = _router(t=t, vlm=vlm)
+    res = await router.route(_msg_type("certificate"), b"img")
+    assert t.calls == 1 and vlm.calls == 0  # capped at tesseract
+    assert res.tier == "tesseract"
+
+
+@pytest.mark.anyio
+async def test_non_identity_handwritten_starts_tesseract_not_vlm():
+    t = FakeTier("tesseract", mean_conf=30.0)
+    vlm = FakeTier("vlm", mean_conf=95.0)
+    router = _router(t=t, vlm=vlm)
+    res = await router.route(_msg_type("certificate", "handwritten"), b"img")
+    assert t.calls == 1 and vlm.calls == 0
+    assert res.tier == "tesseract"
+
+
+@pytest.mark.anyio
+async def test_identity_form_still_escalates_to_vlm():
+    t = FakeTier("tesseract", mean_conf=20.0)
+    vlm = FakeTier("vlm", mean_conf=95.0)
+    router = _router(t=t, vlm=vlm)
+    res = await router.route(_msg_type("form"), b"img")
+    assert t.calls == 1 and vlm.calls == 1  # identity page → full ladder
+    assert res.tier == "vlm"

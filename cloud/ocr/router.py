@@ -43,6 +43,16 @@ _START: dict[str, int] = {
     # mixed / unknown / anything else → start cheap, let conf-net escalate.
 }
 
+# Coarse manifest page_type values that carry the practitioner identity block.
+# Only these pages get the full Tesseract→VLM transcription ladder; every other
+# page is capped at Tesseract (no paid VLM transcription) — its page_type is
+# assigned by the keyword page-typer instead.
+_IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"cover", "form"})
+
+
+def is_identity_page(page_type: str) -> bool:
+    return page_type in _IDENTITY_PAGE_TYPES
+
 
 class _UnavailableTier:
     """Stand-in for a cloud tier whose engine isn't configured.
@@ -103,12 +113,15 @@ class OcrRouter:
         return _START.get(content_type, 0)
 
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
-        """Run the tier ladder. Returns the accepted result, or None if no tier
-        produced one (e.g. handwritten page hitting the Vision stub)."""
-        start = self._start_index(msg.content_type)
+        """Run the tier ladder. Identity pages use the full ladder; non-identity
+        pages are capped at Tesseract (no VLM transcription). Returns the
+        accepted result, or None if no tier produced one."""
+        identity = is_identity_page(msg.page_type)
+        start = self._start_index(msg.content_type) if identity else 0
+        end = len(_LADDER) if identity else 1  # 1 == Tesseract only
         best: OcrResult | None = None
 
-        for idx in range(start, len(_LADDER)):
+        for idx in range(start, end):
             name = _LADDER[idx]
             tier = self._tiers[name]
             try:
@@ -126,14 +139,6 @@ class OcrRouter:
                     page_num=msg.page_num,
                     reason=str(exc),
                 )
-                # This tier isn't configured (missing creds) — skip it and try
-                # the next HIGHER tier. An unavailable T2 (Vision) must not block
-                # a configured T3 (Gemini). We only ever escalate, never fall
-                # back to a lower tier, so `best` (from any lower tier already
-                # run) is preserved and returned if everything above is also
-                # unavailable. Deliberately NO fall-back to Tesseract on a
-                # handwritten page — that would reintroduce the confident-garbage
-                # the proactive ladder exists to avoid.
                 continue
 
             result.low_conf_count = sum(
@@ -141,8 +146,8 @@ class OcrRouter:
             )
             best = result
 
-            if result.mean_conf >= self._threshold or idx == len(_LADDER) - 1:
-                break  # good enough, or top of ladder
+            if result.mean_conf >= self._threshold or idx == end - 1:
+                break  # good enough, or top of the (possibly capped) ladder
 
             log.info(
                 "ocr_escalate",
