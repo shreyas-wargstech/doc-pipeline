@@ -10,6 +10,8 @@ content-type eval lab. Constants until there is labelled data to tune against.
 """
 from __future__ import annotations
 
+__all__ = ["classify_page_type", "PAGE_TYPE_CONF_NET"]
+
 # Confidence net mirrors the OCR/Match constant-threshold convention. Below this
 # the router escalates to the VLM classifier.
 PAGE_TYPE_CONF_NET = 0.5
@@ -23,10 +25,12 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("marks_statement", ("statement of marks", "marks statement", "marksheet",
                           "mark sheet")),
     ("passing_cert", ("passing certificate", "degree certificate", "convocation")),
-    ("internship_cert", ("internship", "rotatory", "compulsory rotating")),
+    ("internship_cert", ("internship",  # broad; rotatory/compulsory rotating anchor it
+                        "rotatory", "compulsory rotating")),
     ("provisional_reg", ("provisional registration", "provisional certificate")),
-    ("sbi_receipt", ("state bank of india", "e-receipt", "challan",
-                     "transaction reference")),
+    ("sbi_receipt", ("state bank of india", "e-receipt",
+                    "challan",  # broad; state-bank/transaction-reference anchor it
+                    "transaction reference")),
     ("marriage_cert", ("marriage certificate", "marriage registration")),
     ("form_e", ("form e ", "form-e")),
     ("photo_id", ("permanent account number", "driving licence", "passport no",

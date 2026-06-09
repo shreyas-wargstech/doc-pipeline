@@ -27,3 +27,4 @@ def test_ambiguous_two_rules_low_conf_for_escalation():
     # router escalates to the VLM classifier.
     ptype, conf = classify_page_type("S.S.C result and H.S.C result combined sheet")
     assert conf < PAGE_TYPE_CONF_NET
+    assert ptype == "ssc"   # first matching rule wins on ambiguity
