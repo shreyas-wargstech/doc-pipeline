@@ -19,19 +19,20 @@
 
 ## P1 — Git / integration hygiene
 
-- [ ] **Push `main` to origin** — local-only, ahead of origin by 30+ commits (user's choice to hold). Confirm before pushing.
-- [ ] **Verify branch merges** — `feat/content-type-eval-lab` + `feat/ocr-vlm-migration` + `fix/ingest-ocr-race-and-dockerignore` land state (git log shows eval-lab merged; confirm the rest are in `main`, no dangling branches). `feat/lean-ownership-retrieval` merged 2026-06-10 (`--no-ff`, branch deleted).
+- [ ] **Push `main` to origin** — local-only, ~19 commits ahead of origin (user's choice to hold). Confirm before pushing. (`feat/orchestration-fan-in` also unpushed.)
+- [x] **Verify branch merges** — confirmed 2026-06-10: eval-lab (d5dd19f), ocr-vlm-migration (d081973), lean-ownership-retrieval (9329dd6) all in `main`; no dangling feature branches. Active branch now `feat/orchestration-fan-in` (spec+plan only).
 - [ ] **Wire `OPENROUTER_API_KEY`** (sole cloud-OCR credential) → run the skipped `openrouter` integration test.
 - [ ] **Run full gated integration suite with Docker up** — `make up` → `uv run pytest -m integration` (26 deselected when Docker down; confirm no regressions).
 - [ ] **Manual dashboard smoke** — `make up` + `make serve` + `make web-dev` + seed user (`python -m scripts.add_dashboard_user`); click through documents/detail/metrics/audit/eval. NOT yet run.
 
 ## P2 — Next pipeline milestone: AWS orchestration
 
-- [ ] **Inter-stage auto-trigger chaining** — Structure→Match→Persist currently manual (`make structure|match|persist DOC=<id>`). Wire auto-trigger after each stage. (Local-first done; this is the cloud chain.)
+- [~] **Inter-stage auto-trigger chaining + OCR→Structure fan-in** — SPEC + PLAN DONE 2026-06-10 (`feat/orchestration-fan-in`); execution not started. Pattern DECIDED: **Lambda-per-stage + SQS chaining**; fan-in = **EventBridge scheduled sweeper** (at-least-once + idempotent; advance when no page `pending`/`queued`; single `structuring` status latch). Spec `docs/superpowers/specs/2026-06-10-orchestration-fan-in-chaining-design.md`; plan `docs/superpowers/plans/2026-06-10-orchestration-fan-in-chaining.md` (13 TDD tasks). **NEXT: execute the plan via subagent-driven-development.** Scope = logic on elasticmq; AWS provisioning deferred ↓.
 - [ ] **AWS infra (LAST, sub-project E)** — S3 event → SQS → Lambda per stage. Open decisions:
-  - [ ] Lambda-per-stage + SQS **vs** Step Functions (UNDECIDED).
-  - [ ] Lambda container images packaging heavy native deps (Tesseract, OpenCV, PyMuPDF, pyzbar).
+  - [x] Lambda-per-stage + SQS **vs** Step Functions → **Lambda-per-stage + SQS chaining** (decided 2026-06-10).
+  - [ ] Lambda container images packaging heavy native deps (Tesseract, OpenCV, PyMuPDF, pyzbar; **torch/MiniLM for persist — may move persist off Lambda to Fargate/Batch**).
   - [ ] IaC tool: Terraform **vs** SAM/CDK (UNDECIDED).
+  - [ ] Datastores: RDS/Aurora + real S3 + Qdrant/Neo4j hosting (self-host ECS/EC2 vs Qdrant Cloud / Neo4j Aura); VPC + NAT (Lambdas reach DBs + outbound OpenRouter); Secrets Manager for `OPENROUTER_API_KEY`/DB creds/`SESSION_SECRET`; S3-event→ingest trigger; per-stage DLQs + stuck-doc alarm.
 
 ## P2 — Persist stage future nodes
 
