@@ -35,7 +35,13 @@ export default function EvalPage() {
           </span>
         ) : null}
       </div>
-      {pages.data ? <EvalLabeler pages={pages.data.pages} /> : <p className="text-sm">Loading…</p>}
+      {pages.isError ? (
+        <p className="text-sm text-destructive">Failed to load eval pages: {String(pages.error)}</p>
+      ) : pages.data ? (
+        <EvalLabeler pages={pages.data.pages} />
+      ) : (
+        <p className="text-sm">Loading…</p>
+      )}
       <EvalScorePanel />
     </div>
   );

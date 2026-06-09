@@ -17,7 +17,7 @@ export function EvalScorePanel() {
             <>
               <p className="text-sm">n = {score.data.n} · accuracy {pct(score.data.accuracy)}</p>
               <p className="text-sm">precision {pct(score.data.precision)} · recall {pct(score.data.recall)} · f1 {pct(score.data.f1)}</p>
-              <table className="mt-2 text-xs">
+              <table className="mt-2 text-xs" aria-label="Confusion matrix">
                 <tbody>
                   <tr><td className="pr-3">TP (hand→hand)</td><td>{score.data.confusion.tp}</td></tr>
                   <tr><td className="pr-3">FP (typed→hand)</td><td>{score.data.confusion.fp}</td></tr>
