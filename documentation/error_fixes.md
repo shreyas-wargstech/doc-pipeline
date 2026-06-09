@@ -720,4 +720,6 @@ mocking the query client.
 
 **Files:** `cloud/match/{models,reference,service}.py`.
 
+**Trade-off:** a *correct* exact reg_no hit on a poor-OCR doc that extracted no name AND no dob now degrades to `manual_review` (nscore=0, dob_agrees=False → treated as identity conflict). This is the deliberate cost of the guard — false-positive wrong-person matches traded for false-negative human-review on under-extracted docs. Same applies to registry rows with blank name/dob (can never verify-exact).
+
 **Rule:** an exact ID hit is a *candidate*, not a verdict — always gate a join key against an independent identity signal before trusting it.
