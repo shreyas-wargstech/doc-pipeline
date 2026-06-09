@@ -110,6 +110,8 @@ def threshold_sweep(
     """Evaluate every (height_cv, stroke_cv, height_weight) combination on the
     labeled rows. Recommend the cell with highest accuracy; tie-break toward
     higher typed-precision (fewer typed pages mislabeled handwritten)."""
+    if not rows:
+        return SweepResult(best=SweepCell(Thresholds(), 0.0, 0.0), cells=[])
     hg = height_grid or _DEFAULT_HEIGHT_GRID
     sg = stroke_grid or _DEFAULT_STROKE_GRID
     wg = weight_grid or _DEFAULT_WEIGHT_GRID
@@ -131,5 +133,4 @@ def threshold_sweep(
                     )
                 )
     cells.sort(key=lambda c: (c.accuracy, c.typed_precision), reverse=True)
-    best = cells[0] if cells else SweepCell(Thresholds(), 0.0, 0.0)
-    return SweepResult(best=best, cells=cells)
+    return SweepResult(best=cells[0], cells=cells)

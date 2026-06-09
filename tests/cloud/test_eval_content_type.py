@@ -55,7 +55,7 @@ def test_threshold_sweep_recovers_separating_thresholds():
     assert res.best.accuracy == 1.0
     # best thresholds must lie strictly between the typed cluster (<=0.10) and the
     # handwritten cluster (>=0.70) on the combined score boundary.
-    assert 0.0 < res.best.thresholds.height_cv_threshold
+    assert res.best.thresholds.height_cv_threshold > 0.0
     assert len(res.cells) > 1
     # cells sorted best-first
     assert res.cells[0].accuracy >= res.cells[-1].accuracy
