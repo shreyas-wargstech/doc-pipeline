@@ -1,7 +1,11 @@
 """Unit tests for the keyword page-typer."""
 from __future__ import annotations
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from cloud.ocr.page_type import PAGE_TYPE_CONF_NET, classify_page_type
+import pytest
+
+from cloud.ocr.page_type import PAGE_TYPE_CONF_NET, classify_page_type, VlmPageTyper
 
 
 def test_aadhaar_keywords_classify_high_conf():
@@ -28,3 +32,23 @@ def test_ambiguous_two_rules_low_conf_for_escalation():
     ptype, conf = classify_page_type("S.S.C result and H.S.C result combined sheet")
     assert conf < PAGE_TYPE_CONF_NET
     assert ptype == "ssc"   # first matching rule wins on ambiguity
+
+
+def _fake_client(content: str):
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
+    return client
+
+
+@pytest.mark.anyio
+async def test_vlm_typer_returns_validated_label():
+    typer = VlmPageTyper(client=_fake_client("aadhaar"), model="x")
+    assert await typer.classify(b"img") == "aadhaar"
+
+
+@pytest.mark.anyio
+async def test_vlm_typer_unknown_label_falls_back_to_other():
+    typer = VlmPageTyper(client=_fake_client("a birthday card"), model="x")
+    assert await typer.classify(b"img") == "other"
