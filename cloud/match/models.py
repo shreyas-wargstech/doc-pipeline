@@ -20,10 +20,15 @@ MatchStatus = Literal["matched", "unmatched", "not_applicable", "manual_review"]
 
 @dataclass(frozen=True)
 class ReferenceMatch:
-    """Result of an exact registration_no lookup."""
+    """Result of an exact registration_no lookup, with identity fields for the
+    name+dob cross-check (the FALSE-MATCH guard). full_name / name_change come
+    pre-lowercased from fields_norm; date_of_birth is the registry TEXT value."""
 
     id: int
     registration_no: int
+    full_name: str = ""
+    name_change: str = ""
+    date_of_birth: str = ""
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,7 @@ class MatchResult:
     method: MatchMethod | None
     score: float | None
     candidate_registration_no: str | None
-    matched_on: Literal["registration_no", "name+dob"] | None
+    matched_on: Literal["registration_no", "registration_no+name", "name+dob"] | None
 
 
 def parse_registration_no(value: str | None) -> int | None:

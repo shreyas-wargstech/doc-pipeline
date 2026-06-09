@@ -20,18 +20,28 @@ class ReferenceRepository:
         self.session = session
 
     async def find_by_registration_no(self, reg_no: int) -> ReferenceMatch | None:
-        """Exact lookup. Returns None if no row has this registration_no."""
+        """Exact lookup. Returns the row plus identity fields (name + dob) so the
+        Match stage can cross-check before trusting the number. None if no row."""
         result = await self.session.execute(
             text(
-                "SELECT id, registration_no FROM reference_data "
-                "WHERE registration_no = :rn"
+                "SELECT id, registration_no, "
+                "       COALESCE(fields_norm->>'full_name', '')   AS full_name, "
+                "       COALESCE(fields_norm->>'name_change', '') AS name_change, "
+                "       COALESCE(date_of_birth, '')               AS date_of_birth "
+                "FROM reference_data WHERE registration_no = :rn"
             ),
             {"rn": reg_no},
         )
         row = result.first()
         if row is None:
             return None
-        return ReferenceMatch(id=row.id, registration_no=row.registration_no)
+        return ReferenceMatch(
+            id=row.id,
+            registration_no=row.registration_no,
+            full_name=row.full_name,
+            name_change=row.name_change,
+            date_of_birth=row.date_of_birth,
+        )
 
     async def find_by_dob(self, dob_iso: str) -> list[ReferenceCandidate]:
         """All registry rows whose date_of_birth equals dob_iso ('YYYY-MM-DD').
