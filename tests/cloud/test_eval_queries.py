@@ -65,6 +65,55 @@ async def test_set_label_rejects_bad_label():
         await eval_queries.set_label(session, page_id="doc:1", label="nope", labeled_by="a")
 
 
+def _result(rows: list[dict]) -> MagicMock:
+    """A fake SQLAlchemy Result whose .mappings().all() yields the given rows."""
+    res = MagicMock()
+    res.mappings.return_value.all.return_value = rows
+    return res
+
+
+@pytest.mark.asyncio
+async def test_list_eval_pages_returns_dicts():
+    rows = [{"page_id": "doc:1", "label": None, "height_cv": 0.1,
+             "stroke_cv": 0.1, "n_components": 30, "document_id": "doc", "page_num": 1,
+             "s3_key_image": "k", "labeled_by": None, "labeled_at": None}]
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=_result(rows))
+    out = await eval_queries.list_eval_pages(session, only_unlabeled=True)
+    assert out[0]["page_id"] == "doc:1"
+    # only_unlabeled is forwarded as a bind param
+    assert session.execute.await_args.args[1] == {"only_unlabeled": True}
+
+
+@pytest.mark.asyncio
+async def test_labeled_rows_maps_to_evalrow_and_handles_null_components():
+    rows = [
+        {"label": "typed", "height_cv": 0.1, "stroke_cv": 0.2, "n_components": 30},
+        {"label": "handwritten", "height_cv": 0.8, "stroke_cv": 0.9, "n_components": None},
+    ]
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=_result(rows))
+    out = await eval_queries.labeled_rows(session)
+    assert [r.label for r in out] == ["typed", "handwritten"]
+    assert out[1].n_components == 0  # NULL -> 0 guard
+
+
+class _RaisingS3:
+    async def get_object(self, Bucket: str, Key: str):  # noqa: N803
+        raise RuntimeError("s3 down")
+
+
+@pytest.mark.asyncio
+async def test_enrol_returns_zero_when_every_page_fails():
+    session = MagicMock()
+    session.execute = AsyncMock(
+        return_value=_result([{"page_id": "doc:1", "page_num": 1, "s3_key_image": "k1"},
+                              {"page_id": "doc:2", "page_num": 2, "s3_key_image": "k2"}])
+    )
+    n = await eval_queries.enrol(session, s3=_RaisingS3(), bucket="b", document_id="doc")
+    assert n == 0  # systemic failure surfaces as 0 enrolled (+ logged eval_enrol_all_failed)
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_enrol_label_score_roundtrip_live():

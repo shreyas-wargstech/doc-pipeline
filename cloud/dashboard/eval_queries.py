@@ -115,6 +115,10 @@ async def enrol(
             n += 1
         except Exception as exc:  # noqa: BLE001 — one bad image must not abort enrol
             log.warning("eval_enrol_skip", page_id=p["page_id"], error=str(exc))
+    # Distinguish "nothing to enrol" from "everything failed" (systemic S3/decode
+    # error masked by the per-page guard above).
+    if pages and n == 0:
+        log.error("eval_enrol_all_failed", n_pages=len(pages))
     return n
 
 
