@@ -55,6 +55,10 @@ async def test_set_label(client: AsyncClient, as_user):
     assert r.status_code == 200
     assert r.json()["ok"] is True
     m.assert_awaited_once()
+    kwargs = m.await_args.kwargs
+    assert kwargs["page_id"] == "doc1:1"
+    assert kwargs["label"] == "typed"
+    assert kwargs["labeled_by"] == "tester"  # authenticated session user, not hardcoded
 
 
 @pytest.mark.asyncio
@@ -77,7 +81,10 @@ async def test_score(client: AsyncClient, as_user):
             r = await c.get("/api/eval/score")
     assert r.status_code == 200
     body = r.json()
-    assert body["n"] == 2 and "precision" in body and "confusion" in body
+    assert body["n"] == 2 and "precision" in body
+    # counts live only under "confusion", not duplicated at root
+    assert body["confusion"] == {"tp": 1, "fp": 0, "tn": 1, "fn": 0}
+    assert "tp" not in body
 
 
 @pytest.mark.asyncio

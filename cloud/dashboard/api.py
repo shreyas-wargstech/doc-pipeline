@@ -197,14 +197,6 @@ class RequeueBody(BaseModel):
     page_nums: list[int] | None = None
 
 
-class EnrolBody(BaseModel):
-    document_id: str | None = None  # None => enrol every page
-
-
-class LabelBody(BaseModel):
-    label: str
-
-
 @router.post("/documents/{document_id}/ingest")
 async def action_ingest(document_id: str, user: str = Depends(require_session)) -> dict[str, Any]:
     try:
@@ -266,6 +258,14 @@ async def action_reclassify(
 
 # --- eval lab (content-type calibration) -----------------------------------
 
+class EnrolBody(BaseModel):
+    document_id: str | None = None  # None => enrol every page
+
+
+class LabelBody(BaseModel):
+    label: str
+
+
 @router.post("/eval/enrol")
 async def eval_enrol(body: EnrolBody, user: str = Depends(require_session)) -> dict[str, Any]:
     try:
@@ -278,7 +278,7 @@ async def eval_enrol(body: EnrolBody, user: str = Depends(require_session)) -> d
                      params={"document_id": body.document_id}, result="ok", detail=f"{n} pages")
         return {"ok": True, "enrolled": n}
     except Exception as exc:  # noqa: BLE001
-        log.exception("api_eval_enrol_failed")
+        log.exception("api_eval_enrol_failed", document_id=body.document_id)
         await _audit(username=user, action="eval_enrol", document_id=body.document_id,
                      params={"document_id": body.document_id}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Enrol failed: {exc}"}
@@ -305,9 +305,15 @@ async def eval_label(
             await eval_queries.set_label(
                 session, page_id=page_id, label=body.label, labeled_by=user
             )
+        await _audit(username=user, action="eval_label", document_id=None,
+                     params={"page_id": page_id, "label": body.label},
+                     result="ok", detail=None)
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         log.exception("api_eval_label_failed", page_id=page_id)
+        await _audit(username=user, action="eval_label", document_id=None,
+                     params={"page_id": page_id, "label": body.label},
+                     result="error", detail=str(exc))
         return {"ok": False, "message": str(exc)}
 
 
@@ -317,7 +323,13 @@ async def eval_score(_user: str = Depends(require_session)) -> dict[str, Any]:
         rows = await eval_queries.labeled_rows(session)
     cm = confusion_matrix(rows, Thresholds())
     pr = precision_recall(cm)
-    return {**pr, "confusion": {"tp": cm.tp, "fp": cm.fp, "tn": cm.tn, "fn": cm.fn}}
+    # Keep scalars at root; the tp/fp/tn/fn counts live only under "confusion"
+    # (precision_recall also returns them, so drop those to avoid duplication).
+    return {
+        "precision": pr["precision"], "recall": pr["recall"],
+        "accuracy": pr["accuracy"], "f1": pr["f1"], "n": pr["n"],
+        "confusion": {"tp": cm.tp, "fp": cm.fp, "tn": cm.tn, "fn": cm.fn},
+    }
 
 
 @router.get("/eval/sweep")
