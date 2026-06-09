@@ -33,4 +33,10 @@ describe("evalReducer", () => {
     expect(s.cursor).toBe(1);
     expect(s.pages[0].label).toBeNull();
   });
+
+  it("goto clamps above the last index and below zero", () => {
+    const s = evalReducer(initialEvalState, { type: "load", pages });
+    expect(evalReducer(s, { type: "goto", cursor: 99 }).cursor).toBe(1);
+    expect(evalReducer(s, { type: "goto", cursor: -5 }).cursor).toBe(0);
+  });
 });

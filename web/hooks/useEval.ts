@@ -37,6 +37,8 @@ export function useSetLabel() {
       apiPost<{ ok: boolean; message?: string }>(
         `/api/eval/pages/${encodeURIComponent(pageId)}/label`, { label }),
     onSuccess: () => {
+      // eval-pages too: a filtered (only_unlabeled) view must drop the row.
+      qc.invalidateQueries({ queryKey: ["eval-pages"] });
       qc.invalidateQueries({ queryKey: ["eval-score"] });
       qc.invalidateQueries({ queryKey: ["eval-sweep"] });
     },
