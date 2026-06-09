@@ -678,3 +678,30 @@ it, instead of nesting only.
 **Rule:** Pick ONE location for each field in an API response and keep the test guarding the
 absence of the duplicate. Counts (matrix) and derived metrics are different shapes — nest the
 raw counts, keep scalars flat; don't mirror.
+
+### FIX-032 · eval labeler jumps back to page 1 on every label (refetch resets local cursor)
+
+**Symptom:** In the `/eval` labeler, clicking Typed/Handwritten did NOT advance to the next page —
+it snapped back to page 1 of the document. Skip advanced normally. To reach page 3 you had to
+skip twice, page 4 three times, etc.
+
+**Root cause:** `useSetLabel.onSuccess` invalidates `["eval-pages"]` → React Query refetches and
+hands `EvalLabeler` a **new `pages` array reference** → its `useEffect(() => dispatch({type:"load"}), [pages])`
+fires → reducer `load` hard-reset `cursor: 0`. So: label dispatched a local advance (0→1), the
+mutation succeeded, the invalidation refetched, the new prop reference re-ran `load`, cursor reset
+to 0. Skip never triggered a mutation/invalidation, so its `pages` reference was stable and the
+reset effect never ran — which is exactly why skip worked and label didn't.
+
+**Fix:** Make `load` distinguish a *refetch of the same page set* from a *genuinely new set*.
+`evalReducer` `load` now keeps the cursor (clamped) when the incoming `page_id` set matches the
+current one, and only resets to 0 when the set actually changes (enrolling another document). The
+fresh server data is still merged in. (Component + invalidation left unchanged — the decision lives
+in the pure reducer so it is unit-testable.)
+
+**Files:** `web/lib/eval-reducer.ts`, `web/__tests__/eval-reducer.test.ts`
+
+**Rule:** A background refetch that returns the SAME identity set is not a fresh load — never reset
+local UI position (cursor, scroll, selection, focus) on it. Key any "reload/reset" effect off a
+stable identity signature (the set of ids), not the array reference, which React Query changes on
+every refetch. Put the same-set-vs-new-set decision in a pure function so it is testable without
+mocking the query client.
