@@ -193,10 +193,6 @@ CREATE TABLE IF NOT EXISTS eval_content_type (
 CREATE INDEX IF NOT EXISTS idx_eval_content_type_label
     ON eval_content_type (label) WHERE label IS NOT NULL;
 
-CREATE TRIGGER set_eval_content_type_updated_at
-    BEFORE UPDATE ON eval_content_type
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
-
 
 -- -----------------------------------------------------------------------------
 -- updated_at triggers
@@ -212,6 +208,7 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS set_documents_updated_at      ON documents;
 DROP TRIGGER IF EXISTS set_pages_updated_at          ON pages;
 DROP TRIGGER IF EXISTS set_reference_data_updated_at ON reference_data;
+DROP TRIGGER IF EXISTS set_eval_content_type_updated_at ON eval_content_type;
 
 CREATE TRIGGER set_documents_updated_at
     BEFORE UPDATE ON documents
@@ -223,6 +220,10 @@ CREATE TRIGGER set_pages_updated_at
 
 CREATE TRIGGER set_reference_data_updated_at
     BEFORE UPDATE ON reference_data
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+CREATE TRIGGER set_eval_content_type_updated_at
+    BEFORE UPDATE ON eval_content_type
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 -- -----------------------------------------------------------------------------
