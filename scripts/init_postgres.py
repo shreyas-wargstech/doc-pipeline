@@ -60,6 +60,10 @@ EXPECTED: dict[str, list[str]] = {
         "confidence_score", "language_detected", "ocr_status",
         "created_at", "updated_at",
     ],
+    "eval_content_type": [
+        "page_id", "s3_key_image", "label", "height_cv", "stroke_cv",
+        "n_components", "labeled_by", "labeled_at", "created_at", "updated_at",
+    ],
 }
 
 EXPECTED_INDEXES: list[str] = [
@@ -75,6 +79,7 @@ EXPECTED_INDEXES: list[str] = [
     "idx_pages_ocr_status",
     "idx_pages_page_type",
     "idx_pages_structured_json",
+    "idx_eval_content_type_label",
 ]
 
 
@@ -134,6 +139,7 @@ async def verify() -> bool:
                 "set_documents_updated_at",
                 "set_pages_updated_at",
                 "set_reference_data_updated_at",
+                "set_eval_content_type_updated_at",
             }
             missing_trg = expected_triggers - actual_triggers
             if missing_trg:

@@ -71,3 +71,25 @@ export interface StreamEvent {
   document_id: string; status: DocStatus; match_status: MatchStatus;
   ocr_done: number; ocr_total: number;
 }
+
+export interface EvalScore {
+  precision: number;
+  recall: number;
+  accuracy: number;
+  f1: number;
+  n: number;
+  confusion: { tp: number; fp: number; tn: number; fn: number };
+}
+
+export interface SweepCell {
+  height_cv_threshold: number;
+  stroke_cv_threshold: number;
+  height_weight: number;
+  accuracy: number;
+  typed_precision: number;
+}
+
+export interface EvalSweep {
+  best: SweepCell;
+  cells: SweepCell[];
+}

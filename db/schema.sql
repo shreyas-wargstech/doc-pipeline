@@ -174,6 +174,27 @@ CREATE INDEX IF NOT EXISTS idx_pages_structured_json
 
 
 -- -----------------------------------------------------------------------------
+-- eval_content_type : ground-truth labels + cached CV features for calibrating
+-- the triage typed-vs-handwritten detector. Dev/eval only; not on the hot path.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS eval_content_type (
+    page_id       TEXT PRIMARY KEY REFERENCES pages(page_id) ON DELETE CASCADE,
+    s3_key_image  TEXT NOT NULL,
+    label         TEXT CHECK (label IN ('typed', 'handwritten', 'unknown')),
+    height_cv     REAL,
+    stroke_cv     REAL,
+    n_components  INTEGER,
+    labeled_by    TEXT,
+    labeled_at    TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_content_type_label
+    ON eval_content_type (label) WHERE label IS NOT NULL;
+
+
+-- -----------------------------------------------------------------------------
 -- updated_at triggers
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION trigger_set_updated_at()
@@ -187,6 +208,7 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS set_documents_updated_at      ON documents;
 DROP TRIGGER IF EXISTS set_pages_updated_at          ON pages;
 DROP TRIGGER IF EXISTS set_reference_data_updated_at ON reference_data;
+DROP TRIGGER IF EXISTS set_eval_content_type_updated_at ON eval_content_type;
 
 CREATE TRIGGER set_documents_updated_at
     BEFORE UPDATE ON documents
@@ -198,6 +220,10 @@ CREATE TRIGGER set_pages_updated_at
 
 CREATE TRIGGER set_reference_data_updated_at
     BEFORE UPDATE ON reference_data
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+CREATE TRIGGER set_eval_content_type_updated_at
+    BEFORE UPDATE ON eval_content_type
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 -- -----------------------------------------------------------------------------

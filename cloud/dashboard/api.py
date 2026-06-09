@@ -18,13 +18,19 @@ from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect
 
-from cloud.dashboard import actions, audit, queries, sse
+from cloud.dashboard import actions, audit, eval_queries, queries, sse
 from cloud.dashboard.session import (
     COOKIE_NAME,
     DEFAULT_MAX_AGE,
     issue_session,
     require_session,
     verify_credentials,
+)
+from cloud.eval.content_type import (
+    Thresholds,
+    confusion_matrix,
+    precision_recall,
+    threshold_sweep,
 )
 from cloud.ingest.storage_db import DocumentRepository, PageRepository
 from shared.config import get_settings
@@ -248,3 +254,97 @@ async def action_reclassify(
         await _audit(username=user, action="reclassify", document_id=document_id,
                      params={}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Re-classify failed: {exc}"}
+
+
+# --- eval lab (content-type calibration) -----------------------------------
+
+class EnrolBody(BaseModel):
+    document_id: str | None = None  # None => enrol every page
+
+
+class LabelBody(BaseModel):
+    label: str
+
+
+@router.post("/eval/enrol")
+async def eval_enrol(body: EnrolBody, user: str = Depends(require_session)) -> dict[str, Any]:
+    try:
+        bucket = get_settings().s3_bucket
+        async with session_scope() as session, get_s3_client() as s3:
+            n = await eval_queries.enrol(
+                session, s3=s3, bucket=bucket, document_id=body.document_id
+            )
+        await _audit(username=user, action="eval_enrol", document_id=body.document_id,
+                     params={"document_id": body.document_id}, result="ok", detail=f"{n} pages")
+        return {"ok": True, "enrolled": n}
+    except Exception as exc:  # noqa: BLE001
+        log.exception("api_eval_enrol_failed", document_id=body.document_id)
+        await _audit(username=user, action="eval_enrol", document_id=body.document_id,
+                     params={"document_id": body.document_id}, result="error", detail=str(exc))
+        return {"ok": False, "message": f"Enrol failed: {exc}"}
+
+
+@router.get("/eval/pages")
+async def eval_pages(
+    only_unlabeled: bool = False, _user: str = Depends(require_session)
+) -> dict[str, Any]:
+    async with session_scope() as session:
+        rows = await eval_queries.list_eval_pages(session, only_unlabeled=only_unlabeled)
+    return {"pages": [
+        {**r, "labeled_at": str(r["labeled_at"]) if r.get("labeled_at") else None}
+        for r in rows
+    ]}
+
+
+@router.post("/eval/pages/{page_id:path}/label")
+async def eval_label(
+    page_id: str, body: LabelBody, user: str = Depends(require_session)
+) -> dict[str, Any]:
+    try:
+        async with session_scope() as session:
+            await eval_queries.set_label(
+                session, page_id=page_id, label=body.label, labeled_by=user
+            )
+        await _audit(username=user, action="eval_label", document_id=None,
+                     params={"page_id": page_id, "label": body.label},
+                     result="ok", detail=None)
+        return {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        log.exception("api_eval_label_failed", page_id=page_id)
+        await _audit(username=user, action="eval_label", document_id=None,
+                     params={"page_id": page_id, "label": body.label},
+                     result="error", detail=str(exc))
+        return {"ok": False, "message": str(exc)}
+
+
+@router.get("/eval/score")
+async def eval_score(_user: str = Depends(require_session)) -> dict[str, Any]:
+    async with session_scope() as session:
+        rows = await eval_queries.labeled_rows(session)
+    cm = confusion_matrix(rows, Thresholds())
+    pr = precision_recall(cm)
+    # Keep scalars at root; the tp/fp/tn/fn counts live only under "confusion"
+    # (precision_recall also returns them, so drop those to avoid duplication).
+    return {
+        "precision": pr["precision"], "recall": pr["recall"],
+        "accuracy": pr["accuracy"], "f1": pr["f1"], "n": pr["n"],
+        "confusion": {"tp": cm.tp, "fp": cm.fp, "tn": cm.tn, "fn": cm.fn},
+    }
+
+
+@router.get("/eval/sweep")
+async def eval_sweep(_user: str = Depends(require_session)) -> dict[str, Any]:
+    async with session_scope() as session:
+        rows = await eval_queries.labeled_rows(session)
+    res = threshold_sweep(rows)
+
+    def _cell(c) -> dict[str, Any]:
+        return {
+            "height_cv_threshold": c.thresholds.height_cv_threshold,
+            "stroke_cv_threshold": c.thresholds.stroke_cv_threshold,
+            "height_weight": c.thresholds.height_weight,
+            "accuracy": c.accuracy,
+            "typed_precision": c.typed_precision,
+        }
+
+    return {"best": _cell(res.best), "cells": [_cell(c) for c in res.cells[:25]]}

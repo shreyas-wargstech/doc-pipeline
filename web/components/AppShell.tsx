@@ -1,5 +1,5 @@
 "use client";
-import { FileText, ListChecks, LogOut, BarChart3 } from "lucide-react";
+import { FileText, ListChecks, LogOut, BarChart3, FlaskConical } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
@@ -10,6 +10,7 @@ const nav = [
   { href: "/", label: "Documents", icon: FileText },
   { href: "/metrics", label: "Metrics", icon: BarChart3 },
   { href: "/audit", label: "Audit", icon: ListChecks },
+  { href: "/eval", label: "Eval", icon: FlaskConical },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
