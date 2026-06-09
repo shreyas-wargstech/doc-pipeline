@@ -581,10 +581,12 @@ class PageRepository:
         structured_json: dict | None,
         ocr_status: str,
         language_detected: str | None = None,
+        page_type: str | None = None,
     ) -> None:
-        """Persist OCR-stage output for one page. Idempotent on page_id —
-        safe to re-run on SQS redelivery. structured_json=None on failure
-        (leaves any prior value untouched via COALESCE-style guard below)."""
+        """Persist OCR-stage output for one page. Idempotent on page_id.
+        structured_json=None on failure leaves any prior JSON untouched.
+        page_type=None leaves the existing page_type untouched (identity pages
+        are typed later by the Structure stage)."""
         if ocr_status not in OCRStatus.ALL:
             raise PersistError(f"save_ocr_result: invalid ocr_status {ocr_status!r}")
         await self.session.execute(
@@ -595,6 +597,7 @@ class PageRepository:
                            WHEN :has_json THEN CAST(:structured_json AS jsonb)
                            ELSE structured_json
                        END,
+                       page_type         = COALESCE(:page_type, page_type),
                        ocr_status        = :ocr_status,
                        language_detected = COALESCE(:language_detected, language_detected)
                  WHERE page_id = :page_id
@@ -606,6 +609,7 @@ class PageRepository:
                 "structured_json": json.dumps(structured_json)
                 if structured_json is not None
                 else None,
+                "page_type": page_type,
                 "ocr_status": ocr_status,
                 "language_detected": language_detected,
             },

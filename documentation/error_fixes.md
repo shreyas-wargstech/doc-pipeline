@@ -705,3 +705,21 @@ local UI position (cursor, scroll, selection, focus) on it. Key any "reload/rese
 stable identity signature (the set of ids), not the array reference, which React Query changes on
 every refetch. Put the same-set-vs-new-set decision in a pure function so it is testable without
 mocking the query client.
+
+---
+
+## 2026-06-10 — Match stage false-match (lean ownership-propagation retrieval)
+
+### FIX-033 — Match exact path trusted registration_no with no identity check
+
+**Symptom:** doc with reg 47896 matched the wrong person (form's "Provisional No" collided with a different holder's permanent registration_no).
+
+**Root cause:** `cloud/match/service.py` exact path returned `matched` on any `find_by_registration_no` hit — no name/dob cross-check (the fuzzy path already had one).
+
+**Fix:** verified-exact — accept the number only when name (+dob) agrees; on identity conflict recover via dob-fuzzy, else `manual_review`. `find_by_registration_no` now also returns name+dob.
+
+**Files:** `cloud/match/{models,reference,service}.py`.
+
+**Trade-off:** a *correct* exact reg_no hit on a poor-OCR doc that extracted no name AND no dob now degrades to `manual_review` (nscore=0, dob_agrees=False → treated as identity conflict). This is the deliberate cost of the guard — false-positive wrong-person matches traded for false-negative human-review on under-extracted docs. Same applies to registry rows with blank name/dob (can never verify-exact).
+
+**Rule:** an exact ID hit is a *candidate*, not a verdict — always gate a join key against an independent identity signal before trusting it.

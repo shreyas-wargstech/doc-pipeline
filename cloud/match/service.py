@@ -11,7 +11,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud.ingest.storage_db import DocumentRepository
-from cloud.match.fuzzy import best_candidate
+from cloud.match.fuzzy import best_candidate, name_score
 from cloud.match.models import (
     FUZZY_MATCH_HIGH,
     FUZZY_REVIEW_LOW,
@@ -83,61 +83,107 @@ async def match_document(
         log.info("match_not_applicable", document_id=document_id)
         return result
 
-    # Exact path.
+    # Exact path — number is only trusted after a name/dob cross-check.
+    exact_conflict = False
     reg_int = parse_registration_no(doc.registration_no)
     if reg_int is not None:
         row = await ref_repo.find_by_registration_no(reg_int)
         if row is not None:
-            result = MatchResult(
-                match_status="matched",
-                reference_data_id=row.id,
-                method="exact",
-                score=None,
-                candidate_registration_no=str(row.registration_no),
-                matched_on="registration_no",
+            nscore = name_score(
+                doc.applicant_name_raw or "", row.full_name, row.name_change
             )
-            await _persist(doc_repo, document_id, result, write_metadata=True)
-            log.info("match_exact_hit", document_id=document_id, reference_data_id=row.id)
-            return result
+            dob_agrees = bool(
+                doc.dob is not None
+                and row.date_of_birth
+                and doc.dob.isoformat() == row.date_of_birth
+            )
+            if nscore >= FUZZY_MATCH_HIGH or (dob_agrees and nscore >= FUZZY_REVIEW_LOW):
+                result = MatchResult(
+                    match_status="matched",
+                    reference_data_id=row.id,
+                    method="exact",
+                    score=nscore,
+                    candidate_registration_no=str(row.registration_no),
+                    matched_on="registration_no+name",
+                )
+                await _persist(doc_repo, document_id, result, write_metadata=True)
+                log.info("match_exact_verified", document_id=document_id,
+                         reference_data_id=row.id, name_score=round(nscore, 1))
+                return result
+            if nscore >= FUZZY_REVIEW_LOW or dob_agrees:
+                result = MatchResult(
+                    match_status="manual_review",
+                    reference_data_id=row.id,
+                    method="exact",
+                    score=nscore,
+                    candidate_registration_no=str(row.registration_no),
+                    matched_on="registration_no+name",
+                )
+                await _persist(doc_repo, document_id, result, write_metadata=True)
+                log.info("match_exact_partial", document_id=document_id,
+                         reference_data_id=row.id, name_score=round(nscore, 1))
+                return result
+            # Number hit but identity disagrees — the FALSE-MATCH case. Do NOT
+            # accept; try to recover the correct person via dob-fuzzy below.
+            exact_conflict = True
+            log.warning("match_exact_identity_conflict", document_id=document_id,
+                        candidate_registration_no=str(row.registration_no),
+                        name_score=round(nscore, 1))
 
-    # Fuzzy fallback (reg_no missing | unparseable | not found).
+    # Fuzzy fallback (reg_no missing | unparseable | not found | identity conflict).
+    conflict_floor = "manual_review" if exact_conflict else "unmatched"
+    conflict_method = "exact" if exact_conflict else None
+    conflict_on = "registration_no+name" if exact_conflict else None
+
+    # On exact_conflict, method/matched_on stay "exact"/"registration_no+name" as
+    # provenance (the exact path hit a row but identity failed) even though
+    # reference_data_id is None — signals "needs review", not a clean match.
     if doc.dob is None:
-        result = _unmatched(method=None, score=None, matched_on=None)
+        result = MatchResult(
+            match_status=conflict_floor, reference_data_id=None,
+            method=conflict_method, score=None,
+            candidate_registration_no=None, matched_on=conflict_on,
+        )
         await _persist(doc_repo, document_id, result, write_metadata=True)
-        log.info("match_unmatched", document_id=document_id, reason="no_dob")
+        log.info("match_done", document_id=document_id, status=conflict_floor,
+                 reason="no_dob")
         return result
 
     candidates = await ref_repo.find_by_dob(doc.dob.isoformat())
     if not candidates:
-        result = _unmatched(method="fuzzy", score=None, matched_on="name+dob")
+        result = MatchResult(
+            match_status=conflict_floor, reference_data_id=None,
+            method="fuzzy" if not exact_conflict else "exact", score=None,
+            candidate_registration_no=None,
+            matched_on="name+dob" if not exact_conflict else conflict_on,
+        )
         await _persist(doc_repo, document_id, result, write_metadata=True)
-        log.info("match_unmatched", document_id=document_id, reason="no_dob_candidates")
+        log.info("match_done", document_id=document_id, status=conflict_floor,
+                 reason="no_dob_candidates")
         return result
 
     best, score = best_candidate(doc.applicant_name_raw or "", candidates)
-    log.info(
-        "match_fuzzy_candidate",
-        document_id=document_id,
-        score=score,
-        candidate_registration_no=str(best.registration_no) if best else None,
-    )
+    log.info("match_fuzzy_candidate", document_id=document_id, score=score,
+             candidate_registration_no=str(best.registration_no) if best else None)
 
     if score >= FUZZY_MATCH_HIGH:
         status = "matched"
     elif score >= FUZZY_REVIEW_LOW:
         status = "manual_review"
     else:
-        status = "unmatched"
+        status = conflict_floor  # unmatched normally; manual_review on conflict
 
     if status == "unmatched":
         result = _unmatched(method="fuzzy", score=score, matched_on="name+dob")
+    elif best is None:
+        result = MatchResult(
+            match_status=status, reference_data_id=None, method="fuzzy",
+            score=score, candidate_registration_no=None, matched_on="name+dob",
+        )
     else:
         result = MatchResult(
-            match_status=status,
-            reference_data_id=best.id,
-            method="fuzzy",
-            score=score,
-            candidate_registration_no=str(best.registration_no),
+            match_status=status, reference_data_id=best.id, method="fuzzy",
+            score=score, candidate_registration_no=str(best.registration_no),
             matched_on="name+dob",
         )
     await _persist(doc_repo, document_id, result, write_metadata=True)

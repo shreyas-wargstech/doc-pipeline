@@ -61,14 +61,17 @@ docs/     INTEGRATION.md
 - S3 layout: `documents/<doc_id>/{original.pdf, pages/page_NNN.png, manifest.json}`. Manifest uploaded LAST = atomic completion signal.
 - Embedding model: `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, Cosine). Locked — changing = full re-embed.
 - Qdrant collection `document_pages`, 384-dim, Cosine.
+- Qdrant `document_pages` embeds **identity pages only** (`app_cover`/`application_form`), not every page — retrieval is structured (`owner × page_type`) with light semantic backup. (Was: embed all page text.)
 - Neo4j: `Document.document_id` UNIQUE, `Page.page_id` UNIQUE, Person merges on `registration_no`; index `(Entity.type, Entity.value)`. Rels: `HAS_PAGE`, `MENTIONS`, `BELONGS_TO`, `MATCHES`. All writes MERGE.
-- OCR = PROACTIVE classify-first routing (not reactive cascade). Tiers (2): T1 Tesseract `eng+mar+hin` (typed) → T2 VLM transcription via OpenRouter (handwriting + low-conf escalation). Confidence-net (70) retained — meaningful on the Tesseract→VLM hop (Tesseract emits real per-word conf). REMOVED 2026-06-09: Google Cloud Vision T2 — collapsed to a single OpenRouter cloud tier, killed the GCP credential (GCV's per-word conf/bboxes were unused downstream; Structure reads `raw_text`).
+- OCR = PROACTIVE classify-first routing, **identity-scoped transcription** (2026-06-09): only identity pages (`cover`/`form`) get the full Tesseract→VLM ladder. Every other page is **Tesseract-only** (no paid VLM transcription); its `page_type` comes from the keyword page-typer (`cloud/ocr/page_type.py`), escalating to a cheap VLM **classify** call (label, not transcription) when keyword confidence < 0.5. Confidence-net (70) still governs the identity-page Tesseract→VLM hop.
 - VLM tier transport = OpenRouter (OpenAI-compatible `openai` SDK), model `google/gemini-2.5-flash` (model-agnostic tier name `vlm`, so the model can be swapped without renaming). REJECTED: Google AI Studio direct + Vertex AI (user is on OpenRouter).
 - REJECTED: AWS Textract (no Devanagari). LangChain/LangGraph (SQS/Lambda already orchestrate; flows too short). Old Qwen/Gemma local fallback (superseded by tier model).
 - `app_no` = BIGINT (overflows INT32). TEXT date cols store ISO `YYYY-MM-DD`; only `cr_dt` is TIMESTAMPTZ (datetime objects).
 - Reference data: per-chunk transactions + idempotent `ON CONFLICT` (single-txn wrapping caused full rollback on partial fail).
 - `Manifest` = slim: `schema_version, document_id, original_s3_key, document_category, pages`. `PageManifest` = `page_num, s3_key, page_type, content_type, language_hint`. Literal aliases live in `nas/manifest/models.py`; `OcrPageMessage` imports them (no drift).
 - `match_status` = `matched|unmatched|not_applicable|manual_review`. NULL = not-yet-matched; match stage owns the column.
+- Match = **verified-exact** (2026-06-09): the exact `registration_no` hit is accepted only after a name (+dob) cross-check; identity disagreement → recover via dob-fuzzy, else `manual_review`. Fixes the FALSE-MATCH bug. `matched_on` gains `registration_no+name`.
+- Retrieval: `owner × page_type` over Postgres (`cloud/retrieval/service.py`, `GET /retrieve`); owner filter requires `documents.match_status='matched'` (verified owners only). By-person scope = practitioner bundles only.
 - SQS = one message per page; enqueue before final DB write; FIFO dedup key `<document_id>:<page_num>`.
 
 ## Current state (as of 2026-06-09)
@@ -85,7 +88,7 @@ Cross-cutting facts (bitten — remember):
 - LLM (classifier/structure): all share `openrouter_*` creds, `anyio.to_thread` offload, graceful JSON-parse fallback; absent key → stage `*Error` (classifier/structure), NOT `TierNotImplemented`.
 
 Active threads:
-- **FALSE-MATCH bug (open, deferred by user 2026-06-09):** exact `registration_no` match has no name/dob cross-check, so a doc with reg N matches whoever holds N in the registry even if names differ (seen: reg 47896 → wrong person). Design fix deferred — brainstorm next.
+- **FALSE-MATCH bug — FIXED 2026-06-10** (`feat/lean-ownership-retrieval`): exact registration_no match now cross-checks name (+dob) before trusting the number; identity conflict → dob-fuzzy recovery, else manual_review. See FIX-033.
 - **Triage over-classifies `handwritten` (calibration UNBLOCKED 2026-06-09):** `HeuristicContentTypeDetector` thresholds (height_cv .35 / stroke_cv .45) still uncalibrated, but the DASH-3 **content-type eval lab is now BUILT** (`feat/content-type-eval-lab`, not yet merged) — label real scans at `/eval`, score, sweep → recommended thresholds. Triage split: `compute_features` (CV) + `classify_features` (decision); `cloud/eval/content_type.py` does the pure sweep; `eval_content_type` table persists labels+features. Lab NEVER auto-writes thresholds — operator hand-applies the recommendation to triage defaults. To CLOSE: merge branch → enrol+label → apply. Over-classification only *costly* (escalates to VLM) not fatal since FIX-028.
 - Match fuzzy thresholds `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` UNCALIBRATED (no labeled pairs yet).
 - AWS auto-trigger wiring (Structure→Match→Persist chain) — next pipeline milestone.

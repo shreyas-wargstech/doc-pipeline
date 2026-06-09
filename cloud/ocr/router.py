@@ -28,6 +28,7 @@ from cloud.ocr.models import OcrResult, Tier
 from cloud.ocr.tiers.base import OcrTier, TierNotImplemented
 from cloud.ocr.tiers.tesseract import TesseractTier
 from cloud.ocr.tiers.vlm import VlmTier
+from cloud.ocr.page_type import PAGE_TYPE_CONF_NET, VlmPageTyper, classify_page_type
 from shared.config import get_settings
 from shared.logging import get_logger
 
@@ -42,6 +43,18 @@ _START: dict[str, int] = {
     "handwritten": 1,
     # mixed / unknown / anything else → start cheap, let conf-net escalate.
 }
+
+# Coarse manifest page_type values that carry the practitioner identity block.
+# Only these pages get the full Tesseract→VLM transcription ladder; every other
+# page is capped at Tesseract (no paid VLM transcription) — its page_type is
+# assigned by the keyword page-typer instead.
+_IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"cover", "form"})
+_TESSERACT_IDX: int = _LADDER.index("tesseract")  # cap index for non-identity pages
+
+
+def is_identity_page(page_type: str) -> bool:
+    """True if page_type carries the practitioner identity block (coarse manifest label)."""
+    return page_type in _IDENTITY_PAGE_TYPES
 
 
 class _UnavailableTier:
@@ -91,6 +104,7 @@ class OcrRouter:
         tiers: dict[Tier, OcrTier] | None = None,
         *,
         threshold: float | None = None,
+        page_typer: object | None = None,
     ) -> None:
         self._tiers = tiers or _default_tiers()
         if threshold is None:
@@ -98,17 +112,31 @@ class OcrRouter:
                 getattr(get_settings(), "ocr_confidence_threshold", 70)
             )
         self._threshold = threshold
+        # VLM page-type classifier for non-identity pages the keyword typer can't
+        # place. None when OpenRouter isn't configured (degrades to keyword-only).
+        if page_typer is None:
+            try:
+                page_typer = VlmPageTyper()
+            except TierNotImplemented as exc:
+                log.warning("page_typer_unconfigured", reason=str(exc))
+                page_typer = None
+        self._page_typer = page_typer
 
     def _start_index(self, content_type: str) -> int:
         return _START.get(content_type, 0)
 
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
-        """Run the tier ladder. Returns the accepted result, or None if no tier
-        produced one (e.g. handwritten page hitting the Vision stub)."""
-        start = self._start_index(msg.content_type)
+        """Run the tier ladder. Identity pages use the full ladder; non-identity
+        pages are capped at Tesseract — always START at Tesseract (even when
+        content_type=handwritten) and never escalate to the paid VLM tier.
+        Escalation only — never falls back to a lower tier. Returns the accepted
+        result, or None if no tier produced one."""
+        identity = is_identity_page(msg.page_type)
+        start = self._start_index(msg.content_type) if identity else 0
+        end = len(_LADDER) if identity else _TESSERACT_IDX + 1  # non-identity: Tesseract only
         best: OcrResult | None = None
 
-        for idx in range(start, len(_LADDER)):
+        for idx in range(start, end):
             name = _LADDER[idx]
             tier = self._tiers[name]
             try:
@@ -126,14 +154,6 @@ class OcrRouter:
                     page_num=msg.page_num,
                     reason=str(exc),
                 )
-                # This tier isn't configured (missing creds) — skip it and try
-                # the next HIGHER tier. An unavailable T2 (Vision) must not block
-                # a configured T3 (Gemini). We only ever escalate, never fall
-                # back to a lower tier, so `best` (from any lower tier already
-                # run) is preserved and returned if everything above is also
-                # unavailable. Deliberately NO fall-back to Tesseract on a
-                # handwritten page — that would reintroduce the confident-garbage
-                # the proactive ladder exists to avoid.
                 continue
 
             result.low_conf_count = sum(
@@ -141,8 +161,8 @@ class OcrRouter:
             )
             best = result
 
-            if result.mean_conf >= self._threshold or idx == len(_LADDER) - 1:
-                break  # good enough, or top of ladder
+            if result.mean_conf >= self._threshold or idx == end - 1:
+                break  # good enough, or top of the (possibly capped) ladder
 
             log.info(
                 "ocr_escalate",
@@ -155,15 +175,34 @@ class OcrRouter:
 
         return best
 
+    async def _resolve_page_type(
+        self, msg: OcrPageMessage, image: bytes, result: OcrResult | None
+    ) -> str | None:
+        """Fine page_type for a NON-identity page. None for identity pages
+        (the Structure stage types those). Keyword-first, VLM-classify on a
+        low-confidence/ambiguous keyword result."""
+        if is_identity_page(msg.page_type):
+            return None
+        raw_text = result.raw_text if result is not None else ""
+        ptype, conf = classify_page_type(raw_text)
+        if conf < PAGE_TYPE_CONF_NET and self._page_typer is not None:
+            try:
+                ptype = await self._page_typer.classify(image)
+            except TierNotImplemented as exc:
+                log.warning("page_typer_unavailable", page_id=msg.document_id,
+                            reason=str(exc))
+        return ptype
+
     async def process_page(
         self,
         msg: OcrPageMessage,
         image: bytes,
         page_repo: PageRepository,
     ) -> OcrResult | None:
-        """Route + persist. Idempotent: writes are keyed on page_id."""
+        """Route + page-type + persist. Idempotent: writes are keyed on page_id."""
         page_id = f"{msg.document_id}:{msg.page_num}"
         result = await self.route(msg, image)
+        page_type = await self._resolve_page_type(msg, image, result)
 
         if result is None or result.is_empty:
             await page_repo.save_ocr_result(
@@ -171,8 +210,10 @@ class OcrRouter:
                 structured_json=None,
                 ocr_status=OCRStatus.FAILED,
                 language_detected=msg.language_hint,
+                page_type=page_type,
             )
-            log.warning("ocr_failed", page_id=page_id, content_type=msg.content_type)
+            log.warning("ocr_failed", page_id=page_id, content_type=msg.content_type,
+                        page_type=page_type)
             return result
 
         await page_repo.save_ocr_result(
@@ -180,6 +221,7 @@ class OcrRouter:
             structured_json=result.to_structured_json(),
             ocr_status=OCRStatus.DONE,
             language_detected=result.language_detected,
+            page_type=page_type,
         )
         log.info(
             "ocr_persisted",
@@ -187,5 +229,6 @@ class OcrRouter:
             tier=result.tier,
             mean_conf=round(result.mean_conf, 2),
             low_conf_count=result.low_conf_count,
+            page_type=page_type,
         )
         return result

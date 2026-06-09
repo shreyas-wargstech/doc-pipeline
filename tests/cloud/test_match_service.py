@@ -64,21 +64,83 @@ async def test_non_practitioner_not_applicable(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_exact_reg_no_hit(monkeypatch):
-    doc = _doc(reg_no="34903")
-    doc_repo, ref_repo = _wire(monkeypatch, doc, exact=ReferenceMatch(id=7, registration_no=34903))
+async def test_exact_reg_no_hit_verified_by_name(monkeypatch):
+    # token_sort_ratio("nidhi toshniwal", "nidhi r toshniwal") = 93.75 >= 90 → matched
+    doc = _doc(reg_no="34903", name="nidhi toshniwal")
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=7, registration_no=34903, full_name="nidhi r toshniwal"
+        ),
+    )
     result = await match_document("d", session=MagicMock())
     assert result.match_status == "matched"
     assert result.reference_data_id == 7
     assert result.method == "exact"
-    ref_repo.find_by_registration_no.assert_awaited_once_with(34903)
-    ref_repo.find_by_dob.assert_not_awaited()  # exact short-circuits
-    _, kw = doc_repo.update_fields.call_args
-    assert kw == {"match_status": "matched", "reference_data_id": 7}
-    doc_repo.update_metadata.assert_awaited_once()
-    _, mkw = doc_repo.update_metadata.call_args
-    assert mkw["patch"]["match"]["method"] == "exact"
-    assert mkw["patch"]["match"]["matched_on"] == "registration_no"
+    assert result.matched_on == "registration_no+name"
+    ref_repo.find_by_dob.assert_not_awaited()  # verified → short-circuit
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_dob_agrees_partial_name_matches(monkeypatch):
+    # token_sort_ratio("nidhi toshniwal","nidhi sanjay toshniwal") = 81.08 → in [75,90)
+    # but dob agrees, so condition (dob_agrees and nscore >= FUZZY_REVIEW_LOW) holds → matched.
+    doc = _doc(reg_no="34903", name="nidhi toshniwal", dob=datetime.date(1995, 2, 27))
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=7, registration_no=34903,
+            full_name="nidhi sanjay toshniwal", date_of_birth="1995-02-27",
+        ),
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    assert result.matched_on == "registration_no+name"
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_identity_conflict_recovers_via_fuzzy(monkeypatch):
+    """The 47896 case: form's number hits a DIFFERENT person in the registry.
+    Name disagrees → do NOT accept; fall through to dob-fuzzy and recover the
+    correct person."""
+    doc = _doc(reg_no="47896", name="nidhi toshniwal", dob=datetime.date(1995, 2, 27))
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=11, registration_no=47896,
+            full_name="ramesh kumar patil", date_of_birth="1980-01-01",
+        ),
+        # Exact-match candidate (score=100 >= 90) → fuzzy recovers as "matched"
+        candidates=[_cand(7, 99999, "nidhi toshniwal")],
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    assert result.method == "fuzzy"
+    assert result.reference_data_id == 7  # the correct person, not 11
+    ref_repo.find_by_dob.assert_awaited_once_with("1995-02-27")
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_identity_conflict_no_recovery_is_manual_review(monkeypatch):
+    """Number hits the wrong person and fuzzy can't recover → manual_review,
+    never a silent wrong match."""
+    doc = _doc(reg_no="47896", name="nidhi toshniwal", dob=None)
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=11, registration_no=47896, full_name="ramesh kumar patil"
+        ),
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "manual_review"
+    assert result.reference_data_id is None
+    assert result.method == "exact"        # provenance: exact lookup hit but identity failed
+    assert result.matched_on == "registration_no+name"
+    ref_repo.find_by_dob.assert_not_awaited()  # no dob to recover with
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,12 @@ from shared.exceptions import StructureError
 
 log = structlog.get_logger()
 
+# A page carries the identity block when its type is a coarse manifest identity
+# label (cover/form) or the fine label the LLM refines them to.
+_STRUCTURE_IDENTITY_TYPES: frozenset[str] = frozenset(
+    {"cover", "form", "app_cover", "application_form"}
+)
+
 
 def merge_entities(regex_ents: list[Entity], llm_ents: list[Entity]) -> list[Entity]:
     """Combine regex + LLM entities, deduped on (type, normalized value).
@@ -148,6 +154,8 @@ async def structure_document(
     for page in pages:
         if page.ocr_status != "done":
             continue
+        if (page.page_type or "") not in _STRUCTURE_IDENTITY_TYPES:
+            continue  # non-identity page — OCR already assigned its page_type
         sj = page.structured_json or {}
         raw_text = sj.get("raw_text", "") or ""
         if not raw_text.strip():
@@ -189,7 +197,14 @@ async def structure_document(
                 fields["dob"] = datetime.date.fromisoformat(fields["dob"])
             except ValueError:
                 del fields["dob"]
-    fields["status"] = "processing"
+        # No usable identity resolved from any identity page → can't propagate an
+        # owner; flag for a human rather than silently dropping (design §error).
+        has_identity = any(
+            k in fields for k in ("registration_no", "applicant_name_raw", "dob")
+        )
+        fields["status"] = "processing" if has_identity else "manual_review"
+    else:
+        fields["status"] = "processing"
     await doc_repo.update_fields(document_id, **fields)
     log.info(
         "structure_rollup_done",

@@ -73,18 +73,20 @@ async def test_failed_status_not_downgraded(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_only_text_pages_embedded(monkeypatch):
-    pages = [_page(1, raw="hello"), _page(2, ocr="skipped", raw=None)]
+    # identity page (application_form) with text → embedded; non-text page → skipped
+    pages = [_page(1, raw="hello", ptype="application_form"), _page(2, ocr="skipped", raw=None)]
     _wire(monkeypatch, _doc(), pages)
     embedder = AsyncMock(return_value=[[0.0] * 384])
     await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
                            neo4j_session=AsyncMock(), embedder=embedder)
     args, _ = embedder.call_args
-    assert len(args[0]) == 1  # only the text page summarized
+    assert len(args[0]) == 1  # only the identity text page summarized
 
 
 @pytest.mark.asyncio
 async def test_qdrant_payload_shape(monkeypatch):
-    page = _page(1, entities=[{"type": "qualification", "value": "BHMS"}])
+    page = _page(1, entities=[{"type": "qualification", "value": "BHMS"}],
+                 ptype="application_form")
     _wire(monkeypatch, _doc(reg="34903"), [page])
     qdrant = AsyncMock()
     await persist_document("d", session=MagicMock(), qdrant=qdrant,
@@ -97,6 +99,41 @@ async def test_qdrant_payload_shape(monkeypatch):
     assert payload["s3_key_image"] == "k1"
     assert payload["registration_no"] == "34903"
     assert payload["entity_types"] == ["qualification"]
+
+
+@pytest.mark.asyncio
+async def test_only_identity_pages_embedded(monkeypatch):
+    """Non-identity pages (e.g. aadhaar) must not be embedded; identity pages must be."""
+    pages = [
+        _page(1, raw="aadhaar text here", ptype="aadhaar"),
+        _page(2, raw="application text here", ptype="application_form"),
+    ]
+    _wire(monkeypatch, _doc(status="processing", match_status="matched",
+                            reg="12345", name="Test Name", meta={}), pages)
+    captured: list[list[str]] = []
+
+    async def _embedder(texts: list[str]) -> list[list[float]]:
+        captured.append(list(texts))
+        return [[0.0] * 384] * len(texts)
+
+    qdrant = AsyncMock()
+    await persist_document("d", session=MagicMock(), qdrant=qdrant,
+                           neo4j_session=AsyncMock(), embedder=_embedder)
+    assert len(captured) == 1, "embedder should have been called exactly once"
+    assert len(captured[0]) == 1, "exactly one summary (application_form) should be embedded"
+    _, kw = qdrant.upsert.call_args
+    assert len(kw["points"]) == 1
+    assert kw["points"][0].payload["page_id"] == "d:2"
+
+
+@pytest.mark.asyncio
+async def test_manual_review_status_preserved(monkeypatch):
+    """manual_review status must NOT be promoted to processed."""
+    doc_repo, _ = _wire(monkeypatch, _doc(status="manual_review"), [_page(1)])
+    embedder = AsyncMock(return_value=[])
+    await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
+                           neo4j_session=AsyncMock(), embedder=embedder)
+    doc_repo.update_fields.assert_not_awaited()
 
 
 def test_mentions_from_entities_maps_labels():

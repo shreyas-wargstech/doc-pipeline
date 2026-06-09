@@ -49,7 +49,8 @@ async def test_list_pages(client: AsyncClient, as_user):
 
 @pytest.mark.asyncio
 async def test_set_label(client: AsyncClient, as_user):
-    with patch("cloud.dashboard.api.eval_queries.set_label", new=AsyncMock()) as m:
+    with patch("cloud.dashboard.api.eval_queries.set_label", new=AsyncMock()) as m, \
+         patch("cloud.dashboard.api._audit", new=AsyncMock()):
         async with client as c:
             r = await c.post("/api/eval/pages/doc1:1/label", json={"label": "typed"})
     assert r.status_code == 200
@@ -64,7 +65,8 @@ async def test_set_label(client: AsyncClient, as_user):
 @pytest.mark.asyncio
 async def test_set_label_bad_value_returns_ok_false(client: AsyncClient, as_user):
     with patch("cloud.dashboard.api.eval_queries.set_label",
-               new=AsyncMock(side_effect=ValueError("invalid label: 'x'"))):
+               new=AsyncMock(side_effect=ValueError("invalid label: 'x'"))), \
+         patch("cloud.dashboard.api._audit", new=AsyncMock()):
         async with client as c:
             r = await c.post("/api/eval/pages/doc1:1/label", json={"label": "x"})
     assert r.status_code == 200

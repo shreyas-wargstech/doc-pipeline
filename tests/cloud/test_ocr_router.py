@@ -50,13 +50,14 @@ class FakeRepo:
         self.saved = []
 
     async def save_ocr_result(self, *, page_id, structured_json, ocr_status,
-                              language_detected=None):
+                              language_detected=None, page_type=None):
         self.saved.append(
             {
                 "page_id": page_id,
                 "structured_json": structured_json,
                 "ocr_status": ocr_status,
                 "language_detected": language_detected,
+                "page_type": page_type,
             }
         )
 
@@ -225,3 +226,103 @@ async def test_unavailable_tier_raises_at_run():
     t = router_mod._UnavailableTier("vlm", "no creds")
     with pytest.raises(TierNotImplemented, match="no creds"):
         await t.run(b"img", document_id="d", page_num=1)
+
+
+# ── identity-page capping ────────────────────────────────────────────────
+def _msg_type(page_type, content_type="typed"):
+    from cloud.ingest.models import OcrPageMessage
+    return OcrPageMessage(
+        document_id="doc1", page_num=2,
+        s3_key="documents/doc1/pages/page_002.png",
+        document_category="practitioner",
+        page_type=page_type, content_type=content_type, language_hint="latin",
+    )
+
+
+@pytest.mark.anyio
+async def test_non_identity_lowconf_does_not_escalate_to_vlm():
+    t = FakeTier("tesseract", mean_conf=20.0)
+    vlm = FakeTier("vlm", mean_conf=95.0)
+    router = _router(t=t, vlm=vlm)
+    res = await router.route(_msg_type("certificate"), b"img")
+    assert t.calls == 1 and vlm.calls == 0  # capped at tesseract
+    assert res.tier == "tesseract"
+
+
+@pytest.mark.anyio
+async def test_non_identity_handwritten_starts_tesseract_not_vlm():
+    t = FakeTier("tesseract", mean_conf=30.0)
+    vlm = FakeTier("vlm", mean_conf=95.0)
+    router = _router(t=t, vlm=vlm)
+    res = await router.route(_msg_type("certificate", "handwritten"), b"img")
+    assert t.calls == 1 and vlm.calls == 0
+    assert res.tier == "tesseract"
+
+
+@pytest.mark.anyio
+async def test_identity_form_still_escalates_to_vlm():
+    t = FakeTier("tesseract", mean_conf=20.0)
+    vlm = FakeTier("vlm", mean_conf=95.0)
+    router = _router(t=t, vlm=vlm)
+    res = await router.route(_msg_type("form"), b"img")
+    assert t.calls == 1 and vlm.calls == 1  # identity page → full ladder
+    assert res.tier == "vlm"
+
+
+# ── page_type assignment ──────────────────────────────────────────────────
+
+
+class FakeTyper:
+    def __init__(self, label="aadhaar"):
+        self.calls = 0
+        self._label = label
+
+    async def classify(self, image):
+        self.calls += 1
+        return self._label
+
+
+def _router_typed(t=None, vlm=None, typer=None, threshold=70.0):
+    r = OcrRouter(
+        tiers={"tesseract": t or FakeTier("tesseract"),
+               "vlm": vlm or FakeTier("vlm")},
+        threshold=threshold,
+    )
+    r._page_typer = typer  # inject (None disables escalation)
+    return r
+
+
+@pytest.mark.anyio
+async def test_non_identity_page_type_from_keywords():
+    t = FakeTier("tesseract", mean_conf=95.0)
+    async def run(image, *, document_id, page_num, language_hint="unknown"):
+        return OcrResult(document_id=document_id, page_num=page_num, tier="tesseract",
+                         words=[OcrWord(text="AADHAAR", conf=95.0, bbox=(0,0,1,1), page_num=page_num)],
+                         raw_text="Government of India AADHAAR", mean_conf=95.0)
+    t.run = run
+    router = _router_typed(t=t, typer=FakeTyper())
+    repo = FakeRepo()
+    await router.process_page(_msg_type("certificate"), b"img", repo)
+    assert repo.saved[0]["page_type"] == "aadhaar"
+
+
+@pytest.mark.anyio
+async def test_non_identity_lowconf_keywords_escalate_to_typer():
+    t = FakeTier("tesseract", mean_conf=95.0, words=1)  # raw_text="x" → no keywords
+    typer = FakeTyper("ssc")
+    router = _router_typed(t=t, typer=typer)
+    repo = FakeRepo()
+    await router.process_page(_msg_type("certificate"), b"img", repo)
+    assert typer.calls == 1
+    assert repo.saved[0]["page_type"] == "ssc"
+
+
+@pytest.mark.anyio
+async def test_identity_page_type_not_overwritten():
+    t = FakeTier("tesseract", mean_conf=95.0)
+    typer = FakeTyper("aadhaar")
+    router = _router_typed(t=t, typer=typer)
+    repo = FakeRepo()
+    await router.process_page(_msg_type("form"), b"img", repo)
+    assert typer.calls == 0               # identity page → structure types it
+    assert repo.saved[0]["page_type"] is None

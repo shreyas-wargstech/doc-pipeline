@@ -32,6 +32,13 @@ def _is_text_page(page: Any) -> bool:
     return bool(((page.structured_json or {}).get("raw_text") or "").strip())
 
 
+_IDENTITY_PAGE_TYPES = frozenset({"app_cover", "application_form", "cover", "form"})
+
+
+def _is_identity_page(page: Any) -> bool:
+    return (page.page_type or "") in _IDENTITY_PAGE_TYPES
+
+
 def _mentions_from_entities(entities: list[dict[str, Any]]) -> list[GraphMention]:
     out: list[GraphMention] = []
     for e in entities:
@@ -85,12 +92,14 @@ async def persist_document(
     summaries: list[str] = []
     for page in pages:
         mentions: list[GraphMention] = []
-        if _is_text_page(page):
+        if _is_text_page(page) and _is_identity_page(page):
             entities = (page.structured_json or {}).get("entities") or []
             mentions = _mentions_from_entities(entities)
             summaries.append(build_page_summary(page))
             text_pages.append(page)
-        graph_pages.append(GraphPage(page_id=page.page_id, mentions=mentions))
+        graph_pages.append(
+            GraphPage(page_id=page.page_id, mentions=mentions, page_type=page.page_type)
+        )
 
     # --- Qdrant ---
     vectors = await embedder(summaries) if summaries else []
@@ -137,8 +146,8 @@ async def persist_document(
         async with neo4j_session_scope() as ns:
             await write_document_graph(ns, doc=graph_doc, pages=graph_pages)
 
-    # --- Promote status (always processing→processed; never downgrade failed) ---
-    if doc.status != "failed":
+    # --- Promote status (processing→processed; never downgrade failed/manual_review) ---
+    if doc.status not in ("failed", "manual_review"):
         await doc_repo.update_fields(document_id, status="processed")
 
     log.info(
@@ -146,5 +155,5 @@ async def persist_document(
         document_id=document_id,
         points=n_points,
         pages=len(graph_pages),
-        status="processed" if doc.status != "failed" else doc.status,
+        status="processed" if doc.status not in ("failed", "manual_review") else doc.status,
     )

@@ -446,3 +446,13 @@
 - Branch `feat/content-type-eval-lab` (commits 9b9d86f/7bbe48d spec+plan → fdd80b0 … f01a8c4). NOT yet merged. `main` still local-only, ahead of origin (not pushed).
 - Next step: merge `feat/content-type-eval-lab`; then operator runs the lab (enrol real scans → label → read recommended thresholds → hand-apply to triage defaults) to CLOSE the over-classification thread; then AWS auto-trigger wiring.
 
+## 2026-06-10 — Lean ownership-propagation retrieval (feat/lean-ownership-retrieval)
+- Shipped the lean retrieval redesign end-to-end via subagent-driven TDD (10 tasks, all unit-green).
+- OCR: non-identity pages capped at Tesseract (no paid VLM transcription); new keyword page-typer (`cloud/ocr/page_type.py`) + VLM-classify escalation; router assigns+persists page_type.
+- Structure: extracts only on identity pages (`cover/form/app_cover/application_form`); practitioner with no resolved identity → `manual_review`.
+- Match: verified-exact — name+dob cross-check on the exact reg_no hit (FIX-033, FALSE-MATCH fix); identity conflict recovers via dob-fuzzy else manual_review.
+- Persist: embeds identity pages only into Qdrant; Page node carries page_type; preserves `manual_review` status.
+- Retrieval: new `cloud/retrieval/service.py find_pages(owner × page_type)` + `GET /retrieve` (verified owners only).
+- Spec: docs/superpowers/specs/2026-06-09-lean-ownership-propagation-retrieval-design.md; plan: docs/superpowers/plans/2026-06-09-lean-ownership-propagation-retrieval.md.
+- Next: AWS auto-trigger wiring; page-typer + fuzzy threshold calibration via the eval lab.
+
