@@ -21,7 +21,7 @@ Design notes
 
 Tier mapping (consumed cloud-side, not here):
     typed       -> Tier 1 (Tesseract)
-    handwritten -> Tier 2 (Google Cloud Vision)
+    handwritten -> Tier 2 (VLM via OpenRouter)
     unknown     -> Tier 1, let the confidence-net decide
 """
 
@@ -62,6 +62,19 @@ class ContentType(str, Enum):
     TYPED = "typed"
     HANDWRITTEN = "handwritten"
     UNKNOWN = "unknown"
+
+
+class ContentFeatures(BaseModel):
+    """Raw CV features extracted from a page, independent of any threshold.
+
+    Splitting extraction (this) from the typed/handwritten decision
+    (:func:`classify_features`) lets the eval lab sweep thresholds over cached
+    features without re-running the CV pipeline.
+    """
+
+    height_cv: float = Field(ge=0.0)
+    stroke_cv: float = Field(ge=0.0)
+    n_components: int = Field(ge=0)
 
 
 # OSD reports these script names; map the ones we care about, rest -> UNKNOWN.
@@ -166,6 +179,84 @@ class ContentTypeDetector(Protocol):
     def __call__(self, gray: np.ndarray) -> tuple[ContentType, float]: ...
 
 
+def _coeff_of_variation(values: "np.ndarray | list[int]") -> float:
+    arr = np.asarray(values, dtype=np.float64)
+    mean = float(arr.mean())
+    if mean <= 1e-9:
+        return 0.0
+    return float(arr.std() / mean)
+
+
+def _binarize(gray: np.ndarray) -> np.ndarray:
+    if gray.ndim != 2:
+        gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return binary
+
+
+def _glyph_heights(
+    page_h: int, binary: np.ndarray, *, min_glyph_h: int, max_glyph_h_frac: float
+) -> list[int]:
+    """Heights of plausibly-glyph-sized connected components."""
+    max_h = max(min_glyph_h + 1, int(page_h * max_glyph_h_frac))
+    n, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        binary, connectivity=8
+    )
+    out: list[int] = []
+    for i in range(1, n):  # 0 is background
+        h = int(stats[i, cv2.CC_STAT_HEIGHT])
+        area = int(stats[i, cv2.CC_STAT_AREA])
+        if min_glyph_h <= h <= max_h and area >= 4:
+            out.append(h)
+    return out
+
+
+def _stroke_width_cv(binary: np.ndarray) -> float:
+    """CV of stroke width via distance transform (peaks ~ half stroke width)."""
+    dist = cv2.distanceTransform(binary, cv2.DIST_L2, 3)
+    widths = dist[dist > 0.5]
+    if widths.size < 50:
+        return 0.0
+    return _coeff_of_variation(widths)
+
+
+def compute_features(
+    gray: np.ndarray, *, min_glyph_h: int = 6, max_glyph_h_frac: float = 0.25
+) -> ContentFeatures:
+    """Extract threshold-independent CV features from a grayscale page."""
+    binary = _binarize(gray)
+    heights = _glyph_heights(
+        gray.shape[0] if gray.ndim == 2 else binary.shape[0],
+        binary,
+        min_glyph_h=min_glyph_h,
+        max_glyph_h_frac=max_glyph_h_frac,
+    )
+    return ContentFeatures(
+        height_cv=_coeff_of_variation(heights) if heights else 0.0,
+        stroke_cv=_stroke_width_cv(binary),
+        n_components=len(heights),
+    )
+
+
+def classify_features(
+    features: ContentFeatures,
+    *,
+    min_components: int = 12,
+    height_cv_threshold: float = 0.35,
+    stroke_cv_threshold: float = 0.45,
+    height_weight: float = 0.5,
+) -> tuple[ContentType, float]:
+    """Decide typed vs handwritten from features at the given thresholds."""
+    if features.n_components < min_components:
+        return ContentType.UNKNOWN, 0.0
+    h_norm = features.height_cv / height_cv_threshold
+    s_norm = features.stroke_cv / stroke_cv_threshold
+    score = height_weight * h_norm + (1.0 - height_weight) * s_norm
+    content = ContentType.HANDWRITTEN if score >= 1.0 else ContentType.TYPED
+    conf = min(abs(score - 1.0), 1.0)
+    return content, conf
+
+
 class HeuristicContentTypeDetector:
     """CPU-only heuristic. No model, no GPU — runs in milliseconds.
 
@@ -197,75 +288,25 @@ class HeuristicContentTypeDetector:
         self.max_glyph_h_frac = max_glyph_h_frac
 
     def __call__(self, gray: np.ndarray) -> tuple[ContentType, float]:
-        if gray.ndim != 2:
-            gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
-
-        # Foreground (text) = white on black after inverse-Otsu binarisation.
-        _, binary = cv2.threshold(
-            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        features = compute_features(
+            gray, min_glyph_h=self.min_glyph_h, max_glyph_h_frac=self.max_glyph_h_frac
         )
-
-        heights = self._glyph_heights(gray.shape[0], binary)
-        if len(heights) < self.min_components:
-            log.debug("triage.content.too_few_components", n=len(heights))
-            return ContentType.UNKNOWN, 0.0
-
-        height_cv = _coeff_of_variation(heights)
-        stroke_cv = self._stroke_width_cv(binary)
-
-        # Combined irregularity score, normalised against thresholds so that
-        # 1.0 == exactly at the typed/handwritten boundary.
-        h_norm = height_cv / self.height_cv_threshold
-        s_norm = stroke_cv / self.stroke_cv_threshold
-        score = self.height_weight * h_norm + (1.0 - self.height_weight) * s_norm
-
-        content = ContentType.HANDWRITTEN if score >= 1.0 else ContentType.TYPED
-        # Confidence grows with distance from the boundary; clamp to [0, 1].
-        conf = min(abs(score - 1.0), 1.0)
-
+        content, conf = classify_features(
+            features,
+            min_components=self.min_components,
+            height_cv_threshold=self.height_cv_threshold,
+            stroke_cv_threshold=self.stroke_cv_threshold,
+            height_weight=self.height_weight,
+        )
         log.debug(
             "triage.content",
             content_type=content.value,
-            height_cv=round(height_cv, 3),
-            stroke_cv=round(stroke_cv, 3),
-            score=round(score, 3),
+            height_cv=round(features.height_cv, 3),
+            stroke_cv=round(features.stroke_cv, 3),
+            n_components=features.n_components,
             conf=round(conf, 3),
         )
         return content, conf
-
-    def _glyph_heights(self, page_h: int, binary: np.ndarray) -> list[int]:
-        """Heights of plausibly-glyph-sized connected components."""
-        max_h = max(self.min_glyph_h + 1, int(page_h * self.max_glyph_h_frac))
-        n, _labels, stats, _centroids = cv2.connectedComponentsWithStats(
-            binary, connectivity=8
-        )
-        out: list[int] = []
-        for i in range(1, n):  # 0 is background
-            h = int(stats[i, cv2.CC_STAT_HEIGHT])
-            area = int(stats[i, cv2.CC_STAT_AREA])
-            if self.min_glyph_h <= h <= max_h and area >= 4:
-                out.append(h)
-        return out
-
-    def _stroke_width_cv(self, binary: np.ndarray) -> float:
-        """Coefficient of variation of stroke width via distance transform.
-
-        Distance-transform peaks approximate half the local stroke width. Uniform
-        strokes (typed) -> low CV; variable strokes (handwriting) -> high CV.
-        """
-        dist = cv2.distanceTransform(binary, cv2.DIST_L2, 3)
-        widths = dist[dist > 0.5]  # ignore edge/background noise
-        if widths.size < 50:
-            return 0.0
-        return _coeff_of_variation(widths)
-
-
-def _coeff_of_variation(values: "np.ndarray | list[int]") -> float:
-    arr = np.asarray(values, dtype=np.float64)
-    mean = float(arr.mean())
-    if mean <= 1e-9:
-        return 0.0
-    return float(arr.std() / mean)
 
 
 # --------------------------------------------------------------------------- #
@@ -382,10 +423,13 @@ def is_blank_page(gray: np.ndarray, *, min_components: int = 5, **kwargs: object
 __all__ = [
     "Script",
     "ContentType",
+    "ContentFeatures",
     "TriageResult",
     "TriageError",
     "ContentTypeDetector",
     "HeuristicContentTypeDetector",
+    "compute_features",
+    "classify_features",
     "detect_script_and_orientation",
     "triage_page",
     "count_text_components",
