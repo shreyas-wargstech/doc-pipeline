@@ -1,0 +1,72 @@
+"""Unit tests for the stage consumers — heavy deps mocked."""
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from cloud.orchestration.models import StageMessage
+
+
+@pytest.fixture()
+def mock_session_scope_structure():
+    session = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("cloud.structure.consumer.session_scope", return_value=ctx):
+        yield session
+
+
+@pytest.mark.asyncio
+async def test_structure_consumer_chains_to_match(mock_session_scope_structure):
+    from cloud.structure import consumer
+
+    body = StageMessage(document_id="doc1").model_dump_json()
+    with patch.object(consumer, "structure_document", new_callable=AsyncMock) as sd, \
+         patch.object(consumer, "enqueue_stage", new_callable=AsyncMock) as eq, \
+         patch.object(consumer, "get_settings",
+                      return_value=type("S", (), {"sqs_match_queue_url": "http://q/match.fifo"})()):
+        await consumer.process_record(body)
+
+    sd.assert_awaited_once()
+    assert sd.call_args.args[0] == "doc1"
+    eq.assert_awaited_once()
+    assert eq.call_args.args[0] == "http://q/match.fifo"
+    assert eq.call_args.args[1] == "doc1"
+
+
+@pytest.mark.asyncio
+async def test_structure_consumer_failure_does_not_chain(mock_session_scope_structure):
+    from cloud.structure import consumer
+
+    body = StageMessage(document_id="doc1").model_dump_json()
+    with patch.object(consumer, "structure_document", new_callable=AsyncMock,
+                      side_effect=RuntimeError("llm down")) as sd, \
+         patch.object(consumer, "enqueue_stage", new_callable=AsyncMock) as eq:
+        with pytest.raises(RuntimeError):
+            await consumer.process_record(body)
+
+    eq.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_structure_run_event_isolates_failures(mock_session_scope_structure):
+    from cloud.structure import consumer
+
+    good = StageMessage(document_id="good").model_dump_json()
+    bad = StageMessage(document_id="bad").model_dump_json()
+
+    async def fake_proc(body, **_):
+        if "bad" in body:
+            raise RuntimeError("boom")
+
+    with patch.object(consumer, "process_record", side_effect=fake_proc):
+        out = await consumer._run_event_async({
+            "Records": [
+                {"messageId": "1", "body": good},
+                {"messageId": "2", "body": bad},
+            ]
+        })
+
+    assert out == {"batchItemFailures": [{"itemIdentifier": "2"}]}
