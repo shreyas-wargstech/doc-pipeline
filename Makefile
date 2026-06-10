@@ -42,6 +42,12 @@ web-up:  ## Build + start api + web containers (one origin on :3000)
 ocr-worker:  ## Drain the local OCR queue (elasticmq) — run alongside the pipeline
 	python -m scripts.run_ocr_worker
 
+stage-worker:  ## Drain one stage queue. Usage: make stage-worker STAGE=structure|match|persist
+	uv run python -m scripts.run_stage_worker --stage $(STAGE)
+
+sweep:  ## Run one fan-in sweep (advance OCR-complete docs to Structure)
+	uv run python -m scripts.run_sweeper
+
 upload:  ## Upload a PDF end-to-end. Usage: make upload PDF=path [CATEGORY=practitioner] [TRIGGER=direct]
 	python -m scripts.upload_pdf "$(PDF)" --category "$(or $(CATEGORY),practitioner)" --trigger "$(or $(TRIGGER),direct)"
 

@@ -122,3 +122,21 @@ async def test_persist_consumer_is_terminal(mock_session_scope_persist):
     assert pd.call_args.args[0] == "doc3"
     # No enqueue_stage import on a terminal consumer
     assert not hasattr(consumer, "enqueue_stage")
+
+
+def test_stage_worker_config_maps_each_stage():
+    from scripts.run_stage_worker import _stage_config
+
+    for stage in ("structure", "match", "persist"):
+        queue_attr, proc = _stage_config(stage)
+        assert queue_attr.startswith("sqs_") and queue_attr.endswith("_queue_url")
+        assert callable(proc)
+
+
+def test_stage_worker_config_rejects_unknown():
+    import pytest as _pytest
+
+    from scripts.run_stage_worker import _stage_config
+
+    with _pytest.raises(ValueError):
+        _stage_config("nope")
