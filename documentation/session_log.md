@@ -469,3 +469,11 @@
 - SCOPE: orchestration LOGIC validated locally on elasticmq. AWS provisioning (VPC/NAT for RDS+Qdrant+Neo4j+OpenRouter, managed datastores, Secrets Mgr, Lambda container images for Tesseract/OpenCV/PyMuPDF + torch/MiniLM for persist (may move off Lambda), S3-event ingest trigger, EventBridge resource, per-stage DLQs, Terraform-vs-SAM) = deferred sub-project E.
 - **STOPPED before execution (user's choice). Next session: execute the 13-task plan via subagent-driven-development.** `main` still local-only, ahead of origin; new work on `feat/orchestration-fan-in`.
 
+## 2026-06-10 — Orchestration fan-in + inter-stage chaining IMPLEMENTED (`feat/orchestration-fan-in`)
+- Executed all 13 TDD tasks from `docs/superpowers/plans/2026-06-10-orchestration-fan-in-chaining.md` via subagent-driven-development (implementer + spec + quality review per task).
+- **New modules:** `cloud/orchestration/` (`StageMessage`, `enqueue_stage` FIFO producer, `sweep_once` fan-in sweeper + Lambda `handler`); `cloud/{structure,match,persist}/consumer.py` (SQS consumers with batch/partial-failure + chaining; persist is terminal).
+- **DB/model changes:** `DocumentStatus.STRUCTURING = "structuring"` added; `db/schema.sql` CHECK widened; `cloud/ingest/service.py` now sets `status='processing'` on OCR-bound branch; `DocumentRepository` gained `try_advance_status()` (guarded latch) + `ocr_complete_processing_ids()` (sweeper query). `shared/config.py` +3 queue URL fields; `shared/exceptions.py` `OrchestrationError`.
+- **Scripts/Make:** `scripts/{run_stage_worker,run_sweeper,apply_status_structuring}.py`; `scripts/init_sqs.py` now creates all 4 queues; `make stage-worker STAGE=...` + `make sweep`.
+- **Tests:** 290 unit green; gated integration tests in `test_sweeper_integration.py` + `test_chain_integration.py` (run with `make up && make init && uv run pytest -m integration`). Lint clean.
+- **Next:** merge to main → run integration tests with Docker → AWS provisioning (sub-project E); calibrate eval lab thresholds; manual dashboard smoke test.
+

@@ -27,7 +27,7 @@
 
 ## P2 — Next pipeline milestone: AWS orchestration
 
-- [~] **Inter-stage auto-trigger chaining + OCR→Structure fan-in** — SPEC + PLAN DONE 2026-06-10 (`feat/orchestration-fan-in`); execution not started. Pattern DECIDED: **Lambda-per-stage + SQS chaining**; fan-in = **EventBridge scheduled sweeper** (at-least-once + idempotent; advance when no page `pending`/`queued`; single `structuring` status latch). Spec `docs/superpowers/specs/2026-06-10-orchestration-fan-in-chaining-design.md`; plan `docs/superpowers/plans/2026-06-10-orchestration-fan-in-chaining.md` (13 TDD tasks). **NEXT: execute the plan via subagent-driven-development.** Scope = logic on elasticmq; AWS provisioning deferred ↓.
+- [x] **Inter-stage auto-trigger chaining + OCR→Structure fan-in** — DONE 2026-06-10 (`feat/orchestration-fan-in`). All 13 TDD tasks executed via subagent-driven-development. 290 unit tests green, lint clean. New: `cloud/orchestration/` (StageMessage, enqueue_stage, sweeper), `cloud/{structure,match,persist}/consumer.py`, `scripts/{run_stage_worker,run_sweeper,apply_status_structuring}.py`, `make sweep`/`make stage-worker`, `structuring` status latch. Gated integration tests in `test_sweeper_integration.py` + `test_chain_integration.py` (run with `make up && make init -m integration`). AWS provisioning deferred ↓.
 - [ ] **AWS infra (LAST, sub-project E)** — S3 event → SQS → Lambda per stage. Open decisions:
   - [x] Lambda-per-stage + SQS **vs** Step Functions → **Lambda-per-stage + SQS chaining** (decided 2026-06-10).
   - [ ] Lambda container images packaging heavy native deps (Tesseract, OpenCV, PyMuPDF, pyzbar; **torch/MiniLM for persist — may move persist off Lambda to Fargate/Batch**).

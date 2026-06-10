@@ -94,7 +94,7 @@ Active threads:
 - AWS auto-trigger wiring (Structure→Match→Persist chain) — next pipeline milestone.
 - Manual dashboard smoke NOT yet run (needs `make up` + `make serve` + `make web-dev` + seeded user via `python -m scripts.add_dashboard_user`).
 
-Local run needs: tesseract on PATH (`eng+mar+hin`+`osd`); `make up` (elasticmq + DBs); `.env` SQS block + `OPENROUTER_API_KEY` (sole cloud-OCR credential). `make serve` = uvicorn :8000; `/pipeline/notify` → 202, `handle_manifest()` in background.
+Local run needs: tesseract on PATH (`eng+mar+hin`+`osd`); `make up` (elasticmq + DBs); `.env` SQS block + `OPENROUTER_API_KEY` (sole cloud-OCR credential). `make serve` = uvicorn :8000; `/pipeline/notify` → 202, `handle_manifest()` in background. **New (2026-06-10):** add `SQS_STRUCTURE_QUEUE_URL`, `SQS_MATCH_QUEUE_URL`, `SQS_PERSIST_QUEUE_URL` to `.env` (see `.env.example`); run `python -m scripts.apply_status_structuring` once against live DB to widen the status CHECK; `make stage-worker STAGE=structure|match|persist` drains a queue; `make sweep` runs one fan-in pass.
 
 ## Default assumptions (override per task)
 
