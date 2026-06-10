@@ -70,3 +70,31 @@ async def test_structure_run_event_isolates_failures(mock_session_scope_structur
         })
 
     assert out == {"batchItemFailures": [{"itemIdentifier": "2"}]}
+
+
+@pytest.fixture()
+def mock_session_scope_match():
+    session = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("cloud.match.consumer.session_scope", return_value=ctx):
+        yield session
+
+
+@pytest.mark.asyncio
+async def test_match_consumer_chains_to_persist(mock_session_scope_match):
+    from cloud.match import consumer
+
+    body = StageMessage(document_id="doc2").model_dump_json()
+    with patch.object(consumer, "match_document", new_callable=AsyncMock) as md, \
+         patch.object(consumer, "enqueue_stage", new_callable=AsyncMock) as eq, \
+         patch.object(consumer, "get_settings",
+                      return_value=type("S", (), {"sqs_persist_queue_url": "http://q/persist.fifo"})()):
+        await consumer.process_record(body)
+
+    md.assert_awaited_once()
+    assert md.call_args.args[0] == "doc2"
+    eq.assert_awaited_once()
+    assert eq.call_args.args[0] == "http://q/persist.fifo"
+    assert eq.call_args.args[1] == "doc2"
