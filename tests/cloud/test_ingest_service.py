@@ -201,3 +201,36 @@ async def test_handle_manifest_idempotent_db_upsert(
     # upsert called twice — idempotency is the repository's responsibility
     assert mock_doc_repo.upsert.call_count == 2
     assert mock_page_repo.upsert.call_count == 4  # 2 pages × 2 runs
+
+
+# ── Tests: processing status ──────────────────────────────────────────────────
+
+from cloud.ingest.storage_db import DocumentStatus
+
+
+@pytest.mark.asyncio
+async def test_handle_manifest_sets_processing_on_ocr_path(
+    mock_doc_repo, mock_page_repo, mock_enqueue, mock_classifier
+):
+    manifest = _make_manifest(category="practitioner")
+    mock_classifier.classify.return_value = _make_classifier_result("practitioner")
+
+    await handle_manifest(manifest)
+
+    mock_doc_repo.update_status.assert_any_call(
+        manifest.document_id, DocumentStatus.PROCESSING
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_manifest_other_does_not_set_processing(
+    mock_doc_repo, mock_page_repo, mock_enqueue, mock_classifier
+):
+    manifest = _make_manifest(category="other")
+    mock_classifier.classify.return_value = _make_classifier_result("other")
+
+    await handle_manifest(manifest)
+
+    # 'other' path skips OCR → must NOT be marked 'processing'
+    for c in mock_doc_repo.update_status.call_args_list:
+        assert c.args[1] != DocumentStatus.PROCESSING

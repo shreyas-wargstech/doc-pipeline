@@ -16,6 +16,7 @@ from cloud.ingest.sqs import enqueue_page
 from cloud.ingest.storage_db import (
     DocumentCategory,
     DocumentRepository,
+    DocumentStatus,
     MatchStatus,
     OCRStatus,
     PageRepository,
@@ -141,7 +142,10 @@ async def handle_manifest(manifest: Manifest) -> None:
             manifest.document_id,
             document_category=result.document_category,
             match_status=None if result.match_reference_data else MatchStatus.NOT_APPLICABLE,
-        )       
+        )
+        await doc_repo.update_status(
+            manifest.document_id, DocumentStatus.PROCESSING
+        )
         if blank_page_nums:
             await page_repo.bulk_update_ocr_status(
                 manifest.document_id, blank_page_nums, OCRStatus.SKIPPED
