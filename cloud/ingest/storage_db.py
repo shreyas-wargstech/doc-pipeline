@@ -284,7 +284,27 @@ class DocumentRepository:
             return
         doc.status = status
         logger.info("document_status_updated", document_id=document_id, status=status)
-    
+
+    async def try_advance_status(
+        self, document_id: str, *, expect: str, to: str
+    ) -> bool:
+        """Guarded atomic status latch: flip `expect`→`to` only if the row is
+        currently `expect`. Returns True iff this call won the transition.
+
+        Used by the fan-in sweeper so concurrent/overlapping runs advance a
+        given document exactly once.
+        """
+        if expect not in DocumentStatus.ALL or to not in DocumentStatus.ALL:
+            raise PersistError(f"invalid status latch: {expect!r}->{to!r}")
+        stmt = text(
+            "UPDATE documents SET status = :to, updated_at = now() "
+            "WHERE document_id = :doc AND status = :expect"
+        )
+        res = await self.session.execute(
+            stmt, {"to": to, "doc": document_id, "expect": expect}
+        )
+        return res.rowcount == 1
+
     async def update_fields(self, document_id: str, **kwargs: Any) -> None:
         """
         Targeted UPDATE of specific document columns.
