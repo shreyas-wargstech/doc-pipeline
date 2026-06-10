@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     sqs_ocr_queue_url: str = Field(..., alias="SQS_OCR_QUEUE_URL")
     aws_region: str = Field("ap-south-1", alias="AWS_REGION")
     sqs_endpoint_url: str = Field("", alias="SQS_ENDPOINT_URL")
+    sqs_structure_queue_url: str = Field("", alias="SQS_STRUCTURE_QUEUE_URL")
+    sqs_match_queue_url: str = Field("", alias="SQS_MATCH_QUEUE_URL")
+    sqs_persist_queue_url: str = Field("", alias="SQS_PERSIST_QUEUE_URL")
 
     # OpenRouter (cloud OCR tier — VLM via OpenAI-compatible gateway)
     openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")

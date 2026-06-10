@@ -51,3 +51,7 @@ class PersistError(PipelineError):
 
 class MatchError(PipelineError):
     """Reference-data matching failure (lookup or scoring)."""
+
+
+class OrchestrationError(PipelineError):
+    """Raised by the inter-stage orchestration (sweeper / stage chaining)."""
