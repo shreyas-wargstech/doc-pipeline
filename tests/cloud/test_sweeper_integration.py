@@ -72,3 +72,30 @@ async def test_ocr_complete_processing_ids_selects_only_ready():
     assert ready in ids
     assert not_ready not in ids
     assert not_processing not in ids
+
+
+@pytest.mark.asyncio
+async def test_sweep_once_latches_and_enqueues(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from cloud.orchestration.sweeper import sweep_once
+
+    doc_id = "sweep_e2e_1"
+    await _seed_doc(doc_id, status=DocumentStatus.PROCESSING, pages=[(1, "done")])
+    monkeypatch.setattr(
+        "cloud.orchestration.sweeper.get_settings",
+        lambda: type("S", (), {"sqs_structure_queue_url": "http://q/structure.fifo"})(),
+    )
+    client = AsyncMock()
+    client.send_message.return_value = {"MessageId": "m1"}
+
+    async with session_scope() as session:
+        first = await sweep_once(session=session, sqs_client=client)
+    # second sweep: doc now 'structuring' → not picked up again
+    async with session_scope() as session:
+        second = await sweep_once(session=session, sqs_client=client)
+
+    assert doc_id in first
+    assert doc_id not in second
+    assert client.send_message.call_count == 1
+    assert doc_id in client.send_message.call_args.kwargs["MessageBody"]
