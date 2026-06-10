@@ -98,3 +98,27 @@ async def test_match_consumer_chains_to_persist(mock_session_scope_match):
     eq.assert_awaited_once()
     assert eq.call_args.args[0] == "http://q/persist.fifo"
     assert eq.call_args.args[1] == "doc2"
+
+
+@pytest.fixture()
+def mock_session_scope_persist():
+    session = AsyncMock()
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("cloud.persist.consumer.session_scope", return_value=ctx):
+        yield session
+
+
+@pytest.mark.asyncio
+async def test_persist_consumer_is_terminal(mock_session_scope_persist):
+    from cloud.persist import consumer
+
+    body = StageMessage(document_id="doc3").model_dump_json()
+    with patch.object(consumer, "persist_document", new_callable=AsyncMock) as pd:
+        await consumer.process_record(body)
+
+    pd.assert_awaited_once()
+    assert pd.call_args.args[0] == "doc3"
+    # No enqueue_stage import on a terminal consumer
+    assert not hasattr(consumer, "enqueue_stage")
