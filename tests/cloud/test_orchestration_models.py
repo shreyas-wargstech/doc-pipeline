@@ -27,3 +27,11 @@ def test_stage_message_roundtrip():
 def test_stage_message_requires_document_id():
     with pytest.raises(ValidationError):
         StageMessage()  # type: ignore[call-arg]
+
+
+from cloud.ingest.storage_db import DocumentStatus
+
+
+def test_structuring_status_registered():
+    assert DocumentStatus.STRUCTURING == "structuring"
+    assert "structuring" in DocumentStatus.ALL

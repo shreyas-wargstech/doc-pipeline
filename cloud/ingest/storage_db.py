@@ -60,11 +60,12 @@ class DocumentCategory:
 class DocumentStatus:
     RECEIVED = "received"
     PROCESSING = "processing"
+    STRUCTURING = "structuring"
     PROCESSED = "processed"
     FAILED = "failed"
     MANUAL_REVIEW = "manual_review"
 
-    ALL = frozenset({RECEIVED, PROCESSING, PROCESSED, FAILED, MANUAL_REVIEW})
+    ALL = frozenset({RECEIVED, PROCESSING, STRUCTURING, PROCESSED, FAILED, MANUAL_REVIEW})
 
 
 class MatchStatus:

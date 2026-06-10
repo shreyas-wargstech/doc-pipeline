@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
     status               TEXT        NOT NULL DEFAULT 'received'
         CHECK (status IN
-            ('received', 'processing', 'processed', 'failed', 'manual_review')),
+            ('received', 'processing', 'structuring', 'processed', 'failed', 'manual_review')),
 
     -- ---- Practitioner-only fields (nullable for other categories) ----------
     application_number   TEXT,                             -- AMR-MCH-26-A-XXXXX
