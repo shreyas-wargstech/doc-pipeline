@@ -305,6 +305,29 @@ class DocumentRepository:
         )
         return res.rowcount == 1
 
+    async def ocr_complete_processing_ids(self, *, limit: int = 100) -> list[str]:
+        """Document ids in status='processing' whose pages are ALL OCR-terminal
+        (none `pending`/`queued`) — i.e. ready to advance to Structure.
+
+        Read by the fan-in sweeper. A doc with some `failed`/`skipped` pages
+        still qualifies (advance-when-no-pending/queued, per spec).
+        """
+        stmt = text(
+            "SELECT d.document_id FROM documents d "
+            "WHERE d.status = :processing "
+            "AND NOT EXISTS ("
+            "  SELECT 1 FROM pages p "
+            "  WHERE p.document_id = d.document_id "
+            "  AND p.ocr_status IN ('pending', 'queued')"
+            ") "
+            "ORDER BY d.document_id "
+            "LIMIT :limit"
+        )
+        res = await self.session.execute(
+            stmt, {"processing": DocumentStatus.PROCESSING, "limit": limit}
+        )
+        return [row[0] for row in res.all()]
+
     async def update_fields(self, document_id: str, **kwargs: Any) -> None:
         """
         Targeted UPDATE of specific document columns.

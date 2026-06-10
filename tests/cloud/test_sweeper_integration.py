@@ -51,3 +51,24 @@ async def test_try_advance_status_wins_once():
     async with session_scope() as session:
         doc = await DocumentRepository(session).get(doc_id)
         assert doc.status == DocumentStatus.STRUCTURING
+
+
+@pytest.mark.asyncio
+async def test_ocr_complete_processing_ids_selects_only_ready():
+    ready = "sweep_ready_1"
+    not_ready = "sweep_busy_1"      # has a queued page
+    not_processing = "sweep_recv_1"  # still 'received'
+
+    await _seed_doc(ready, status=DocumentStatus.PROCESSING,
+                    pages=[(1, "done"), (2, "skipped")])
+    await _seed_doc(not_ready, status=DocumentStatus.PROCESSING,
+                    pages=[(1, "done"), (2, "queued")])
+    await _seed_doc(not_processing, status=DocumentStatus.RECEIVED,
+                    pages=[(1, "done")])
+
+    async with session_scope() as session:
+        ids = await DocumentRepository(session).ocr_complete_processing_ids()
+
+    assert ready in ids
+    assert not_ready not in ids
+    assert not_processing not in ids
