@@ -84,7 +84,6 @@ export interface EvalScore {
 export interface SweepCell {
   height_cv_threshold: number;
   stroke_cv_threshold: number;
-  height_weight: number;
   accuracy: number;
   typed_precision: number;
 }

@@ -4,8 +4,9 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from shared.exceptions import OrchestrationError, PipelineError
+from cloud.ingest.storage_db import DocumentStatus
 from cloud.orchestration.models import StageMessage
+from shared.exceptions import OrchestrationError, PipelineError
 
 
 def test_orchestration_error_is_pipeline_error():
@@ -27,9 +28,6 @@ def test_stage_message_roundtrip():
 def test_stage_message_requires_document_id():
     with pytest.raises(ValidationError):
         StageMessage()  # type: ignore[call-arg]
-
-
-from cloud.ingest.storage_db import DocumentStatus
 
 
 def test_structuring_status_registered():

@@ -342,7 +342,6 @@ async def eval_sweep(_user: str = Depends(require_session)) -> dict[str, Any]:
         return {
             "height_cv_threshold": c.thresholds.height_cv_threshold,
             "stroke_cv_threshold": c.thresholds.stroke_cv_threshold,
-            "height_weight": c.thresholds.height_weight,
             "accuracy": c.accuracy,
             "typed_precision": c.typed_precision,
         }

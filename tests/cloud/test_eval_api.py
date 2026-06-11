@@ -76,7 +76,7 @@ async def test_set_label_bad_value_returns_ok_false(client: AsyncClient, as_user
 @pytest.mark.asyncio
 async def test_score(client: AsyncClient, as_user):
     from cloud.eval.content_type import EvalRow
-    rows = [EvalRow("typed", 0.05, 0.05, 40), EvalRow("handwritten", 0.8, 0.9, 40)]
+    rows = [EvalRow("typed", 0.05, 0.05, 40), EvalRow("handwritten", 1.5, 2.0, 40)]
     with patch("cloud.dashboard.api.eval_queries.labeled_rows",
                new=AsyncMock(return_value=rows)):
         async with client as c:
@@ -92,7 +92,7 @@ async def test_score(client: AsyncClient, as_user):
 @pytest.mark.asyncio
 async def test_sweep(client: AsyncClient, as_user):
     from cloud.eval.content_type import EvalRow
-    rows = [EvalRow("typed", 0.05, 0.05, 40), EvalRow("handwritten", 0.8, 0.9, 40)]
+    rows = [EvalRow("typed", 0.05, 0.05, 40), EvalRow("handwritten", 1.5, 2.0, 40)]
     with patch("cloud.dashboard.api.eval_queries.labeled_rows",
                new=AsyncMock(return_value=rows)):
         async with client as c:

@@ -134,6 +134,41 @@ async def test_structure_document_dob_converted_to_date(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_structure_document_dob_word_form_converted(monkeypatch):
+    """LLM returns DOB in word form (as on Form A); rollup must parse it."""
+    page = _page(1, "NINTH MARCH NINETEEN SEVENTY-NINE")
+    llm_ret = (
+        "application_form",
+        [Entity(type="date_of_birth", value="NINTH MARCH NINETEEN SEVENTY-NINE", confidence=0.9, source="llm")],
+        {},
+    )
+    doc_repo, _ = _wire(monkeypatch, _doc(), [page], llm_ret)
+    await structure_document("doc1", session=MagicMock(), client=MagicMock())
+    sent = {}
+    for c in doc_repo.update_fields.await_args_list:
+        sent.update(c.kwargs)
+    assert sent["dob"] == datetime.date(1979, 3, 9)
+    assert sent["status"] == "processing"
+
+
+# ---- _parse_word_date -------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [
+    ("NINTH MARCH NINETEEN SEVENTY-NINE",  datetime.date(1979, 3, 9)),
+    ("NINTH MARCH NINETEEN SEVENTY NINE",  datetime.date(1979, 3, 9)),  # no hyphen
+    ("TWENTY-FIRST JULY NINETEEN EIGHTY",  datetime.date(1980, 7, 21)),
+    ("FIRST JANUARY NINETEEN SIXTY FIVE",  datetime.date(1965, 1, 1)),
+    ("THIRTIETH APRIL NINETEEN NINETY",    datetime.date(1990, 4, 30)),
+    ("THIRD OCTOBER TWENTY TWENTY",        datetime.date(2020, 10, 3)),
+    ("not a date",                         None),
+    ("",                                   None),
+])
+def test_parse_word_date(raw, expected):
+    from cloud.structure.service import _parse_word_date
+    assert _parse_word_date(raw) == expected
+
+
+@pytest.mark.asyncio
 async def test_structure_document_skips_non_done_and_empty(monkeypatch):
     pages = [
         _page(1, "", ocr_status="done"),          # empty raw_text → skip

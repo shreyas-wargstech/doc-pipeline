@@ -20,6 +20,12 @@ _REG_NO_RE = re.compile(
     r"\s*[:.\-]?\s*([A-Za-z]?-?\d{4,7})",
     re.IGNORECASE,
 )
+# MCH Form A office-use block: "34903  13. Registration No. allotted"
+# The number appears BEFORE the label on this physical form layout.
+_REG_NO_ALLOTTED_RE = re.compile(
+    r"\b([A-Za-z]?-?\d{4,7})\s+\d+\.\s+Registration\s+No",
+    re.IGNORECASE,
+)
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"\b[6-9]\d{9}\b")
 _PINCODE_RE = re.compile(r"\b\d{6}\b")
@@ -68,6 +74,9 @@ def regex_extract(raw_text: str) -> list[Entity]:
         add("application_number", m.group(0).upper(), 0.97)
 
     for m in _REG_NO_RE.finditer(text):
+        add("registration_no", m.group(1).strip(), 0.9)
+
+    for m in _REG_NO_ALLOTTED_RE.finditer(text):
         add("registration_no", m.group(1).strip(), 0.9)
 
     for m in _EMAIL_RE.finditer(text):

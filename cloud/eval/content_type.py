@@ -21,9 +21,8 @@ class EvalRow:
 
 @dataclass(frozen=True)
 class Thresholds:
-    height_cv_threshold: float = 0.35
-    stroke_cv_threshold: float = 0.45
-    height_weight: float = 0.5
+    height_cv_threshold: float = 1.10
+    stroke_cv_threshold: float = 1.80
     min_components: int = 12
 
 
@@ -56,7 +55,6 @@ def _predict_handwritten(row: EvalRow, t: Thresholds) -> bool:
         min_components=t.min_components,
         height_cv_threshold=t.height_cv_threshold,
         stroke_cv_threshold=t.stroke_cv_threshold,
-        height_weight=t.height_weight,
     )
     return content is ContentType.HANDWRITTEN
 
@@ -94,9 +92,8 @@ def _typed_precision(cm: ConfusionMatrix) -> float:
     return cm.tn / pred_typed if pred_typed else 0.0
 
 
-_DEFAULT_HEIGHT_GRID = [round(0.20 + 0.05 * i, 2) for i in range(9)]   # 0.20..0.60
-_DEFAULT_STROKE_GRID = [round(0.20 + 0.05 * i, 2) for i in range(9)]   # 0.20..0.60
-_DEFAULT_WEIGHT_GRID = [0.3, 0.4, 0.5, 0.6, 0.7]
+_DEFAULT_HEIGHT_GRID = [0.10, 0.20, 0.40, 0.60, 0.80, 1.00, 1.10, 1.20, 1.50, 1.80, 2.00, 2.50]
+_DEFAULT_STROKE_GRID = [0.10, 0.20, 0.40, 0.60, 0.80, 1.00, 1.50, 1.80, 2.00, 2.50, 3.00]
 
 
 def threshold_sweep(
@@ -104,33 +101,30 @@ def threshold_sweep(
     *,
     height_grid: list[float] | None = None,
     stroke_grid: list[float] | None = None,
-    weight_grid: list[float] | None = None,
     min_components: int = 12,
 ) -> SweepResult:
-    """Evaluate every (height_cv, stroke_cv, height_weight) combination on the
-    labeled rows. Recommend the cell with highest accuracy; tie-break toward
-    higher typed-precision (fewer typed pages mislabeled handwritten)."""
+    """Evaluate every (height_cv, stroke_cv) threshold combination on labeled rows.
+    Recommend the cell with highest accuracy; tie-break toward higher typed-precision
+    (fewer typed pages mislabeled handwritten)."""
     if not rows:
         return SweepResult(best=SweepCell(Thresholds(), 0.0, 0.0), cells=[])
     hg = height_grid or _DEFAULT_HEIGHT_GRID
     sg = stroke_grid or _DEFAULT_STROKE_GRID
-    wg = weight_grid or _DEFAULT_WEIGHT_GRID
     cells: list[SweepCell] = []
     for h in hg:
         for s in sg:
-            for w in wg:
-                t = Thresholds(
-                    height_cv_threshold=h, stroke_cv_threshold=s,
-                    height_weight=w, min_components=min_components,
+            t = Thresholds(
+                height_cv_threshold=h, stroke_cv_threshold=s,
+                min_components=min_components,
+            )
+            cm = confusion_matrix(rows, t)
+            pr = precision_recall(cm)
+            cells.append(
+                SweepCell(
+                    thresholds=t,
+                    accuracy=float(pr["accuracy"]),
+                    typed_precision=_typed_precision(cm),
                 )
-                cm = confusion_matrix(rows, t)
-                pr = precision_recall(cm)
-                cells.append(
-                    SweepCell(
-                        thresholds=t,
-                        accuracy=float(pr["accuracy"]),
-                        typed_precision=_typed_precision(cm),
-                    )
-                )
+            )
     cells.sort(key=lambda c: (c.accuracy, c.typed_precision), reverse=True)
     return SweepResult(best=cells[0], cells=cells)

@@ -54,8 +54,14 @@ class Settings(BaseSettings):
     openrouter_base_url: str = Field(
         "https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )
+    # Vision model — used by VlmTier (handwriting OCR) + VlmPageTyper (image classify).
     openrouter_model: str = Field(
         "google/gemini-2.5-flash", alias="OPENROUTER_MODEL"
+    )
+    # Text-only model — used by classifier LLM + structure LLM (no image input).
+    # Defaults to openrouter/free (auto-selects a working free model); override with OPENROUTER_TEXT_MODEL in .env.
+    openrouter_text_model: str = Field(
+        "openrouter/free", alias="OPENROUTER_TEXT_MODEL"
     )
 
     # Structure stage

@@ -36,8 +36,7 @@ export function EvalScorePanel() {
             <>
               <p className="text-sm">
                 height_cv ≤ <b>{sweep.data.best.height_cv_threshold}</b> ·
-                stroke_cv ≤ <b>{sweep.data.best.stroke_cv_threshold}</b> ·
-                weight <b>{sweep.data.best.height_weight}</b>
+                stroke_cv ≤ <b>{sweep.data.best.stroke_cv_threshold}</b>
               </p>
               <p className="text-sm">accuracy {pct(sweep.data.best.accuracy)} · typed-precision {pct(sweep.data.best.typed_precision)}</p>
               <p className="text-xs text-muted-foreground">

@@ -37,20 +37,21 @@ def test_classify_below_min_components_is_unknown():
 
 
 def test_classify_handwritten_above_boundary():
-    # h_norm=0.5/0.35=1.42857, s_norm=0.5/0.45=1.11111,
-    # score=0.5*1.42857+0.5*1.11111=1.26984 -> HANDWRITTEN, conf=min(.26984,1)
-    feats = ContentFeatures(height_cv=0.5, stroke_cv=0.5, n_components=40)
+    # h_ratio=1.5/1.10=1.3636, s_ratio=2.0/1.80=1.1111 → both ≥ 1.0 → HANDWRITTEN
+    # conf = min(min(1.3636, 1.1111) - 1.0, 1.0) = 0.1111
+    feats = ContentFeatures(height_cv=1.5, stroke_cv=2.0, n_components=40)
     content, conf = classify_features(feats)
     assert content is ContentType.HANDWRITTEN
-    assert conf == pytest.approx(0.26984, abs=1e-4)
+    assert conf == pytest.approx(0.1111, abs=1e-4)
 
 
 def test_classify_typed_below_boundary():
-    # h_norm=0.1/0.35=0.2857, s_norm=0.1/0.45=0.2222, score=0.2540 -> TYPED
+    # h_ratio=0.1/1.10=0.0909, s_ratio=0.1/1.80=0.0556 → both < 1.0 → TYPED
+    # conf = min(1.0 - max(0.0909, 0.0556), 1.0) = 0.9091
     feats = ContentFeatures(height_cv=0.1, stroke_cv=0.1, n_components=40)
     content, conf = classify_features(feats)
     assert content is ContentType.TYPED
-    assert conf == pytest.approx(0.74603, abs=1e-4)
+    assert conf == pytest.approx(0.9091, abs=1e-4)
 
 
 # --- compute_features: structural properties on a synthetic typed grid -----
@@ -74,7 +75,6 @@ def test_detector_call_equals_composition():
         min_components=det.min_components,
         height_cv_threshold=det.height_cv_threshold,
         stroke_cv_threshold=det.stroke_cv_threshold,
-        height_weight=det.height_weight,
     )
     assert det(img) == expected
 

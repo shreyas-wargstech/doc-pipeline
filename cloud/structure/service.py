@@ -22,6 +22,94 @@ from shared.exceptions import StructureError
 
 log = structlog.get_logger()
 
+# ---------------------------------------------------------------------------
+# Word-form date parser  ("NINTH MARCH NINETEEN SEVENTY-NINE" → date)
+# ---------------------------------------------------------------------------
+_ORDINALS: dict[str, int] = {
+    "FIRST": 1, "SECOND": 2, "THIRD": 3, "FOURTH": 4, "FIFTH": 5,
+    "SIXTH": 6, "SEVENTH": 7, "EIGHTH": 8, "NINTH": 9, "TENTH": 10,
+    "ELEVENTH": 11, "TWELFTH": 12, "THIRTEENTH": 13, "FOURTEENTH": 14,
+    "FIFTEENTH": 15, "SIXTEENTH": 16, "SEVENTEENTH": 17, "EIGHTEENTH": 18,
+    "NINETEENTH": 19, "TWENTIETH": 20, "THIRTIETH": 30,
+    "TWENTY-FIRST": 21, "TWENTY FIRST": 21,
+    "TWENTY-SECOND": 22, "TWENTY SECOND": 22,
+    "TWENTY-THIRD": 23, "TWENTY THIRD": 23,
+    "TWENTY-FOURTH": 24, "TWENTY FOURTH": 24,
+    "TWENTY-FIFTH": 25, "TWENTY FIFTH": 25,
+    "TWENTY-SIXTH": 26, "TWENTY SIXTH": 26,
+    "TWENTY-SEVENTH": 27, "TWENTY SEVENTH": 27,
+    "TWENTY-EIGHTH": 28, "TWENTY EIGHTH": 28,
+    "TWENTY-NINTH": 29, "TWENTY NINTH": 29,
+    "THIRTY-FIRST": 31, "THIRTY FIRST": 31,
+}
+_MONTHS: dict[str, int] = {
+    "JANUARY": 1, "FEBRUARY": 2, "MARCH": 3, "APRIL": 4,
+    "MAY": 5, "JUNE": 6, "JULY": 7, "AUGUST": 8,
+    "SEPTEMBER": 9, "OCTOBER": 10, "NOVEMBER": 11, "DECEMBER": 12,
+}
+_YEAR_HUNDREDS = {"NINETEEN": 1900, "TWENTY": 2000}
+_YEAR_TENS = {
+    "TEN": 10, "ELEVEN": 11, "TWELVE": 12, "THIRTEEN": 13, "FOURTEEN": 14,
+    "FIFTEEN": 15, "SIXTEEN": 16, "SEVENTEEN": 17, "EIGHTEEN": 18,
+    "NINETEEN": 19, "TWENTY": 20, "THIRTY": 30, "FORTY": 40, "FIFTY": 50,
+    "SIXTY": 60, "SEVENTY": 70, "EIGHTY": 80, "NINETY": 90,
+}
+_YEAR_ONES = {
+    "ONE": 1, "TWO": 2, "THREE": 3, "FOUR": 4, "FIVE": 5,
+    "SIX": 6, "SEVEN": 7, "EIGHT": 8, "NINE": 9,
+}
+
+
+def _parse_year_words(s: str) -> int | None:
+    tokens = [t for t in s.replace("-", " ").upper().split() if t != "AND"]
+    if not tokens:
+        return None
+    century = _YEAR_HUNDREDS.get(tokens[0])
+    if century is None:
+        return None
+    tail = tokens[1:]
+    suffix = 0
+    if not tail or tail == ["HUNDRED"]:
+        suffix = 0
+    elif len(tail) == 1:
+        suffix = _YEAR_TENS.get(tail[0]) or _YEAR_ONES.get(tail[0]) or 0
+        if not suffix:
+            return None
+    elif len(tail) == 2:
+        tens = _YEAR_TENS.get(tail[0], 0)
+        ones = _YEAR_ONES.get(tail[1], 0)
+        if not tens and not ones:
+            return None
+        suffix = tens + ones
+    else:
+        return None
+    year = century + suffix
+    return year if 1900 <= year <= 2099 else None
+
+
+def _parse_word_date(raw: str) -> datetime.date | None:
+    """Parse English word-form DOB into a date.
+
+    Handles patterns produced by Indian government Form A, e.g.:
+    'NINTH MARCH NINETEEN SEVENTY-NINE' → date(1979, 3, 9)
+    """
+    text = raw.upper().strip()
+    for month_name, month_num in _MONTHS.items():
+        pos = text.find(month_name)
+        if pos == -1:
+            continue
+        day_raw = text[:pos].strip().rstrip("-").strip()
+        year_raw = text[pos + len(month_name):].strip().lstrip("-").strip()
+        day = _ORDINALS.get(day_raw) or _ORDINALS.get(day_raw.replace("-", " "))
+        year = _parse_year_words(year_raw)
+        if day and year:
+            try:
+                return datetime.date(year, month_num, day)
+            except ValueError:
+                continue
+    return None
+
+
 # A page carries the identity block when its type is a coarse manifest identity
 # label (cover/form) or the fine label the LLM refines them to.
 _STRUCTURE_IDENTITY_TYPES: frozenset[str] = frozenset(
@@ -193,9 +281,15 @@ async def structure_document(
     if doc.document_category == "practitioner":
         fields = dict(rollup_identity(entities_by_page, identity_hints))
         if "dob" in fields:
+            raw_dob: str = fields["dob"]
+            parsed: datetime.date | None = None
             try:
-                fields["dob"] = datetime.date.fromisoformat(fields["dob"])
+                parsed = datetime.date.fromisoformat(raw_dob)
             except ValueError:
+                parsed = _parse_word_date(raw_dob)
+            if parsed:
+                fields["dob"] = parsed
+            else:
                 del fields["dob"]
         # No usable identity resolved from any identity page → can't propagate an
         # owner; flag for a human rather than silently dropping (design §error).

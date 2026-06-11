@@ -34,6 +34,16 @@ PAGE_TYPE_CONF_NET = 0.5
 # (page_type, keyword phrases). Phrases are matched case-insensitively as
 # substrings of the page text. Order = priority on single-rule matches.
 _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # Identity pages — listed FIRST so they win on multi-match (order = priority).
+    ("application_form", ("application for registration",
+                          "applicant name",       # online portal printout label
+                          "qualification details",
+                          "for use at the council")),
+    ("app_cover", ("form of application",
+                   "homoeopathy act",
+                   "under sub-section",
+                   "to the registrar")),
+    # Supporting documents.
     ("aadhaar", ("aadhaar", "आधार", "uidai", "unique identification")),
     ("ssc", ("secondary school certificate", "s.s.c", "board of secondary")),
     ("hsc", ("higher secondary", "h.s.c")),

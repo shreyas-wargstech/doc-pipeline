@@ -174,6 +174,39 @@ CREATE INDEX IF NOT EXISTS idx_pages_structured_json
 
 
 -- -----------------------------------------------------------------------------
+-- page_types : reference catalogue of known page type labels.
+-- pages.page_type is a free TEXT column (no FK) — new types discovered during
+-- classification can be stored without a prior schema change. This table exists
+-- for management, reporting, and UI dropdowns only.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS page_types (
+    name        TEXT        PRIMARY KEY,
+    description TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO page_types (name, description) VALUES
+    ('application_form',  'Practitioner registration application form (MCH Form)'),
+    ('app_cover',         'Application cover letter / Form A'),
+    ('aadhaar',           'Aadhaar identity card page'),
+    ('ssc',               'Secondary School Certificate (S.S.C.)'),
+    ('hsc',               'Higher Secondary Certificate (H.S.C.)'),
+    ('marks_statement',   'University statement of marks'),
+    ('passing_cert',      'Passing / degree certificate'),
+    ('internship_cert',   'Internship completion certificate'),
+    ('provisional_reg',   'Provisional registration certificate'),
+    ('form_e',            'Form E (name change / renewal)'),
+    ('marriage_cert',     'Marriage certificate'),
+    ('sbi_receipt',       'SBI e-receipt / challan'),
+    ('photo_id',          'Photo identity document (PAN / driving licence / passport)'),
+    ('letter_body',       'Official correspondence body'),
+    ('invoice',           'Vendor invoice or cash memo'),
+    ('blank',             'Blank or near-blank page'),
+    ('other',             'Page type not yet classified')
+ON CONFLICT (name) DO NOTHING;
+
+
+-- -----------------------------------------------------------------------------
 -- eval_content_type : ground-truth labels + cached CV features for calibrating
 -- the triage typed-vs-handwritten detector. Dev/eval only; not on the hot path.
 -- -----------------------------------------------------------------------------

@@ -20,7 +20,7 @@ from shared.exceptions import StructureError
 
 log = structlog.get_logger()
 
-_DEFAULT_MODEL = "google/gemini-2.5-flash"  # mirrors openrouter_model default
+_DEFAULT_MODEL = "openrouter/free"  # mirrors openrouter_text_model default
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 _IDENTITY_KEYS = ("name", "dob", "gender", "registration_no", "application_number")
 
@@ -159,7 +159,7 @@ async def llm_extract(
             base_url=settings.openrouter_base_url,
             api_key=settings.openrouter_api_key,
         )
-        model = settings.openrouter_model
+        model = settings.openrouter_text_model
         max_chars = settings.structure_max_chars
     else:
         model = _DEFAULT_MODEL

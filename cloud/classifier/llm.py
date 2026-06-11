@@ -22,7 +22,7 @@ log = structlog.get_logger()
 
 _CATEGORIES = frozenset({"practitioner", "letter", "receipt", "record", "other"})
 _MAX_COVER_CHARS = 3000
-_DEFAULT_MODEL = "google/gemini-2.5-flash"  # mirrors openrouter_model default
+_DEFAULT_MODEL = "openrouter/free"  # mirrors openrouter_text_model default
 
 _SYSTEM_PROMPT = (
     "You are a document classifier for the Maharashtra Council of Homoeopathy. "
@@ -115,7 +115,7 @@ async def llm_classify(
             base_url=settings.openrouter_base_url,
             api_key=settings.openrouter_api_key,
         )
-        model = settings.openrouter_model
+        model = settings.openrouter_text_model
     else:
         model = _DEFAULT_MODEL
 

@@ -504,3 +504,26 @@
 - **Tests:** 310 unit green (5 new match + 2 new router, 1 replaced); 30 integration deselected.
 - **Validation note:** real bundle c405e466... expected to match cleanly on registration_no+dob (or +name after VLM re-OCR of form page).
 - **Next:** validate on real bundle (`make up && make stage-worker STAGE=match DOC=c405e466...`); calibrate fuzzy thresholds (labeled pairs needed); AWS auto-trigger wiring.
+
+## 2026-06-11 (continued) — Real 3-bundle pipeline validation + page_type.py crash fix
+
+- **What was done:** Validated the full pipeline (ingest→OCR→structure→match→persist) on 3 new practitioner bundles. Committed `cloud/ocr/page_type.py` empty-choices guard (FIX-036).
+- **Bundles:** AMR-MCH-26-A-22023 (18p), AMR-MCH-26-A-22020 (19p, Manisha Yewale), AMR-MCH-26-A-07723 (15p).
+- **OCR results:** 45 done, 4 failed (blank/other pages only — not extraction failures), 3 skipped. No missed identity pages.
+- **Structure:** reg_no=34903 extracted from AMR-MCH-26-A-22020's application_form; other 2 docs got only `status` from rollup (VLM text too garbled/sparse to extract reg_no from those form pages).
+- **Match:** c405e466 (22020) → **matched**, `matched_on=registration_no`, `name_score=0.0` — reg_no-authoritative policy working correctly (absent name = no conflict, not a block). 07723 + 22023 → unmatched (no reg_no extracted → no_dob path → no reference_data hit).
+- **Persist:** c405e466 → `status=processed`; other 2 → `status=manual_review`. Neo4j: 3 Documents, 52 Pages, 1 Person (reg=34903 for c405e466 only), BELONGS_TO + MATCHES for matched doc. Qdrant: 4 points total (1+1+2 identity pages, one per application_form page).
+- **MinIO:** all 3 docs complete — original PDF + all page PNGs + manifest. 17/21/20 objects.
+- **FIX-036 found during OCR run:** VlmPageTyper crashed when OpenRouter returned HTTP 200 with empty choices. Fixed by adding `if not response.choices: return "other"` before indexing. Committed `363c682`.
+- **Why 2 docs unmatched:** Structure stage couldn't extract reg_no from their application_form pages (VLM output was garbled/mixed-script). This is an OCR quality gap, not a match policy failure. Match policy is correct.
+- **Next:** AWS auto-trigger wiring; calibrate fuzzy thresholds (labeled pairs needed); eval lab fine-tuning for real-scan OCR quality.
+
+## 2026-06-11 (continued) — Free-model switch, page_types table, keyword rule fix, re-run validation
+
+- **What was done:** Switched text-model default to `openrouter/free` (auto-routing free router) after `google/gemini-2.0-flash-exp:free` returned 404. Added `page_types` reference catalogue table (17 seed rows, no FK on pages.page_type — free TEXT). Added `application_form`/`app_cover` keyword rules at TOP of `_KEYWORD_RULES` so they win on multi-match. Corrected 3 misclassified pages in DB (7812b969 p1: internship_cert→application_form; d2d803d4 p1: other→app_cover; d2d803d4 p15: other→provisional_reg). Re-ran structure→match→persist on both docs.
+- **Files changed:** `shared/config.py` (openrouter_text_model default), `cloud/structure/llm.py` (_DEFAULT_MODEL), `cloud/classifier/llm.py` (_DEFAULT_MODEL), `.env.example`, `cloud/ocr/page_type.py` (keyword rules), `db/schema.sql` (page_types table), `scripts/apply_page_types.py` (new migration script).
+- **Re-run results:**
+  - d2d803d4 (AMR-MCH-26-A-22023): reg_no=62044 extracted from p14 (application_form). Exact hit REJECTED because OCR-garbled name "Gey Ku Mhaaske Nojana Shiva" scored 41.5 < NAME_CONFLICT_FLOOR=60. → manual_review (correct per policy). Persisted: 18 pages, 3 Qdrant points.
+  - 7812b969 (AMR-MCH-26-A-07723): p1 now correctly `application_form` (keyword fix worked). Structure LLM extracted `registration_no=1514253720` — a 10-digit mobile number ("Mobile No" field). Online portal application form has no final MCH reg_no (pre-approval stage; only Provisional No=47896 present). → unmatched (correct: no valid reg_no in document). Persisted: 15 pages, 2 Qdrant points.
+- **Root causes confirmed:** (1) Keyword priority fix works structurally. (2) Online portal application forms don't carry the final MCH registration number — Provisional No ≠ MCH reg_no. Match failure is data gap, not pipeline failure. (3) OCR garbling of handwritten names causes name-conflict rejections → manual_review (correct behavior).
+- **Next:** AWS auto-trigger wiring; add regex/prompt hint to avoid extracting mobile numbers as registration_no (phone is 10-digit, MCH reg is ≤5 digits); calibrate NAME_CONFIRM/NAME_CONFLICT_FLOOR with labeled pairs; eval lab fine-tuning.

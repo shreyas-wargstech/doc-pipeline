@@ -14,10 +14,12 @@ import pytesseract
 
 from nas.preprocess import triage
 from nas.preprocess.triage import (
+    ContentFeatures,
     ContentType,
     HeuristicContentTypeDetector,
     Script,
     TriageError,
+    classify_features,
     detect_script_and_orientation,
     triage_page,
 )
@@ -124,10 +126,20 @@ def test_heuristic_flags_typed():
     assert conf > 0.0
 
 
-def test_heuristic_flags_handwritten():
-    detector = HeuristicContentTypeDetector()
-    content, _conf = detector(_handwritten_page())
-    assert content is ContentType.HANDWRITTEN
+@pytest.mark.parametrize("h_cv,s_cv,expected", [
+    (1.50, 2.00, ContentType.HANDWRITTEN),   # both well above thresholds
+    (1.10, 1.80, ContentType.HANDWRITTEN),   # exactly at thresholds (inclusive)
+    (0.50, 0.80, ContentType.TYPED),         # both well below thresholds
+    (0.05, 0.05, ContentType.TYPED),         # typical printed page
+    (1.50, 0.80, ContentType.UNKNOWN),       # h high, s low → ambiguous
+    (0.50, 2.00, ContentType.UNKNOWN),       # h low, s high → ambiguous
+])
+def test_classify_features_and_logic(h_cv, s_cv, expected):
+    """AND gate: HANDWRITTEN only when BOTH metrics exceed their thresholds."""
+    content, _conf = classify_features(ContentFeatures(
+        height_cv=h_cv, stroke_cv=s_cv, n_components=20
+    ))
+    assert content is expected
 
 
 def test_heuristic_blank_is_unknown():

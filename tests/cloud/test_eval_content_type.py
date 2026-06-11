@@ -11,12 +11,13 @@ from cloud.eval.content_type import (
 
 
 def _rows() -> list[EvalRow]:
-    # Two clearly-typed (low cv) + two clearly-handwritten (high cv), 40 comps each.
+    # Two clearly-typed (both cv well below 1.10/1.80 thresholds) + two clearly-
+    # handwritten (both cv well above thresholds), 40 comps each.
     return [
-        EvalRow(label="typed", height_cv=0.05, stroke_cv=0.05, n_components=40),
-        EvalRow(label="typed", height_cv=0.08, stroke_cv=0.10, n_components=40),
-        EvalRow(label="handwritten", height_cv=0.80, stroke_cv=0.90, n_components=40),
-        EvalRow(label="handwritten", height_cv=0.70, stroke_cv=0.85, n_components=40),
+        EvalRow(label="typed",       height_cv=0.05, stroke_cv=0.05, n_components=40),
+        EvalRow(label="typed",       height_cv=0.08, stroke_cv=0.10, n_components=40),
+        EvalRow(label="handwritten", height_cv=1.50, stroke_cv=2.00, n_components=40),
+        EvalRow(label="handwritten", height_cv=1.20, stroke_cv=1.90, n_components=40),
     ]
 
 
@@ -45,7 +46,7 @@ def test_precision_recall_handles_empty():
 def test_below_min_components_counts_as_misprediction_for_handwritten():
     # n_components below min -> predicted UNKNOWN (not handwritten) -> a handwritten
     # ground-truth becomes a false negative.
-    rows = [EvalRow(label="handwritten", height_cv=0.9, stroke_cv=0.9, n_components=3)]
+    rows = [EvalRow(label="handwritten", height_cv=1.5, stroke_cv=2.0, n_components=3)]
     cm = confusion_matrix(rows, Thresholds(min_components=12))
     assert (cm.tp, cm.fn) == (0, 1)
 

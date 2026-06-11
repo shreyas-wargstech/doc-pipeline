@@ -42,10 +42,10 @@ async def test_structure_consumer_failure_does_not_chain(mock_session_scope_stru
 
     body = StageMessage(document_id="doc1").model_dump_json()
     with patch.object(consumer, "structure_document", new_callable=AsyncMock,
-                      side_effect=RuntimeError("llm down")) as sd, \
-         patch.object(consumer, "enqueue_stage", new_callable=AsyncMock) as eq:
-        with pytest.raises(RuntimeError):
-            await consumer.process_record(body)
+                      side_effect=RuntimeError("llm down")), \
+         patch.object(consumer, "enqueue_stage", new_callable=AsyncMock) as eq, \
+         pytest.raises(RuntimeError):
+        await consumer.process_record(body)
 
     eq.assert_not_awaited()
 

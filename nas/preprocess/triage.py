@@ -242,19 +242,33 @@ def classify_features(
     features: ContentFeatures,
     *,
     min_components: int = 12,
-    height_cv_threshold: float = 0.35,
-    stroke_cv_threshold: float = 0.45,
-    height_weight: float = 0.5,
+    height_cv_threshold: float = 1.10,
+    stroke_cv_threshold: float = 1.80,
 ) -> tuple[ContentType, float]:
-    """Decide typed vs handwritten from features at the given thresholds."""
+    """Decide typed vs handwritten from features using AND logic.
+
+    Both metrics must independently exceed their thresholds to call a page
+    HANDWRITTEN. If only one exceeds, the page is UNKNOWN (→ Tesseract + the
+    70-confidence-net escalates if needed). This avoids false-positive VLM
+    routing on scanned typed documents where scan noise inflates one metric.
+
+    Thresholds calibrated on real Maharashtra Council scans 2026-06-11:
+    all 19 pages of a practitioner bundle correctly avoided false HANDWRITTEN
+    classification with (1.10, 1.80).
+    """
     if features.n_components < min_components:
         return ContentType.UNKNOWN, 0.0
-    h_norm = features.height_cv / height_cv_threshold
-    s_norm = features.stroke_cv / stroke_cv_threshold
-    score = height_weight * h_norm + (1.0 - height_weight) * s_norm
-    content = ContentType.HANDWRITTEN if score >= 1.0 else ContentType.TYPED
-    conf = min(abs(score - 1.0), 1.0)
-    return content, conf
+    h_ratio = features.height_cv / height_cv_threshold
+    s_ratio = features.stroke_cv / stroke_cv_threshold
+    h_over = h_ratio >= 1.0
+    s_over = s_ratio >= 1.0
+    if h_over and s_over:
+        conf = min(min(h_ratio, s_ratio) - 1.0, 1.0)
+        return ContentType.HANDWRITTEN, round(conf, 4)
+    if not h_over and not s_over:
+        conf = min(1.0 - max(h_ratio, s_ratio), 1.0)
+        return ContentType.TYPED, round(max(conf, 0.0), 4)
+    return ContentType.UNKNOWN, 0.0
 
 
 class HeuristicContentTypeDetector:
@@ -274,16 +288,14 @@ class HeuristicContentTypeDetector:
         self,
         *,
         min_components: int = 12,
-        height_cv_threshold: float = 0.35,
-        stroke_cv_threshold: float = 0.45,
-        height_weight: float = 0.5,
+        height_cv_threshold: float = 1.10,
+        stroke_cv_threshold: float = 1.80,
         min_glyph_h: int = 6,
         max_glyph_h_frac: float = 0.25,
     ) -> None:
         self.min_components = min_components
         self.height_cv_threshold = height_cv_threshold
         self.stroke_cv_threshold = stroke_cv_threshold
-        self.height_weight = height_weight
         self.min_glyph_h = min_glyph_h
         self.max_glyph_h_frac = max_glyph_h_frac
 
@@ -296,7 +308,6 @@ class HeuristicContentTypeDetector:
             min_components=self.min_components,
             height_cv_threshold=self.height_cv_threshold,
             stroke_cv_threshold=self.stroke_cv_threshold,
-            height_weight=self.height_weight,
         )
         log.debug(
             "triage.content",

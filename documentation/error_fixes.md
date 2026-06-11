@@ -723,3 +723,68 @@ mocking the query client.
 **Trade-off:** a *correct* exact reg_no hit on a poor-OCR doc that extracted no name AND no dob now degrades to `manual_review` (nscore=0, dob_agrees=False → treated as identity conflict). This is the deliberate cost of the guard — false-positive wrong-person matches traded for false-negative human-review on under-extracted docs. Same applies to registry rows with blank name/dob (can never verify-exact).
 
 **Rule:** an exact ID hit is a *candidate*, not a verdict — always gate a join key against an independent identity signal before trusting it.
+
+---
+
+## 2026-06-11 — VlmPageTyper crash on empty OpenRouter response
+
+### FIX-036 · `response.choices[0]` crashes when OpenRouter returns HTTP 200 with empty choices
+
+**Symptom:**
+```
+TypeError: 'NoneType' object is not subscriptable
+  cloud/ocr/page_type.py:128 — response.choices[0].message.content
+```
+Pages where keyword-typer confidence < 0.5 trigger the VLM classify path; OpenRouter occasionally returns `choices=None` or `choices=[]` (transient rate-limit / model issue) while still replying HTTP 200 (not an error status). The existing `except OpenAIError` handler doesn't catch this.
+
+**Root cause:** The SDK returns `choices` as `None` (not an empty list) on transient empty responses. Indexing `None[0]` raises `TypeError`, not `OpenAIError`.
+
+**Fix:** Added guard immediately after the `except` block:
+```python
+if not response.choices:
+    log.warning("page_typer_empty_response", model=self._model)
+    return "other"
+return (response.choices[0].message.content or "").strip().lower()
+```
+Fallback `"other"` is safe — page still stored, OCR continues; structural stage skips non-identity pages.
+
+**Files:** `cloud/ocr/page_type.py` (commit `363c682`)
+
+**Rule:** After any OpenAI-SDK call, guard `response.choices` before indexing — HTTP 200 does NOT guarantee a non-empty choices list. Empty-choices is a transient condition, not an API error, so it bypasses `except OpenAIError`.
+
+---
+
+## 2026-06-11 — Free-model 404
+
+### FIX-037 · `google/gemini-2.0-flash-exp:free` returns 404 on OpenRouter
+
+**Symptom:**
+```
+openai.NotFoundError: 404 - {'error': {'message': 'No endpoints found for google/gemini-2.0-flash-exp:free.'}}
+```
+
+**Root cause:** OpenRouter removed the specific free-tier model; hardcoded model IDs for free models rot quickly.
+
+**Fix:** Changed `openrouter_text_model` default from `google/gemini-2.0-flash-exp:free` to `openrouter/free` — OpenRouter's auto-routing free-model router. It dynamically picks an available free model, so no code change needed when a specific model disappears.
+
+**Files:** `shared/config.py`, `cloud/structure/llm.py` (`_DEFAULT_MODEL`), `cloud/classifier/llm.py` (`_DEFAULT_MODEL`), `.env.example`.
+
+**Rule:** Never hardcode a specific `:free` model ID. Use `openrouter/free` for the text-model default; OpenRouter routes to whatever's available.
+
+---
+
+## 2026-06-11 — Mobile number extracted as registration_no
+
+### FIX-038 · Structure LLM confuses "Mobile No" field with registration_no on portal application forms
+
+**Symptom:**
+```
+registration_no: 1514253720   # 10-digit mobile number
+```
+Online portal application form has "Mobile No" field immediately before qualification details; LLM picks it up as the registration number. The Provisional No (47896, 5 digits) is the real candidate but was not extracted.
+
+**Root cause:** No explicit constraint in the LLM prompt or regex anchors bounding registration_no to expected length (MCH reg_no ≤ 5–6 digits; mobile = exactly 10 digits).
+
+**Fix (partial — NOT yet implemented):** Add a post-extraction filter or prompt instruction: "registration_no must be ≤ 6 digits; discard values ≥ 7 digits as they are likely phone/application numbers." Also consider adding `provisional_no` as a separate entity type in structure models so it is captured without being confused with the final reg_no.
+
+**Rule:** Validate numeric identity fields by expected length after extraction. Mobile = 10 digits, application_no has alpha prefix — registration_no should be a short integer (≤ 6 digits for MCH).

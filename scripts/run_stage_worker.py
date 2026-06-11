@@ -37,8 +37,8 @@ _STAGES: dict[str, tuple[str, Callable[[str], Awaitable[None]]]] = {
 def _stage_config(stage: str) -> tuple[str, Callable[[str], Awaitable[None]]]:
     try:
         return _STAGES[stage]
-    except KeyError:
-        raise ValueError(f"unknown stage: {stage!r} (expected one of {sorted(_STAGES)})")
+    except KeyError as e:
+        raise ValueError(f"unknown stage: {stage!r} (expected one of {sorted(_STAGES)})") from e
 
 
 async def _drain_once(sqs: Any, queue_url: str, proc: Callable[[str], Awaitable[None]]) -> None:
