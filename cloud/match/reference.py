@@ -7,7 +7,7 @@ Two queries:
 """
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud.match.models import ReferenceCandidate, ReferenceMatch
@@ -98,6 +98,28 @@ class ReferenceRepository:
             ),
             {"dob": dob_iso},
         )
+        return [
+            ReferenceCandidate(
+                id=r.id,
+                registration_no=r.registration_no,
+                full_name=r.full_name,
+                name_change=r.name_change,
+            )
+            for r in result.all()
+        ]
+
+    async def find_by_dob_window(self, dobs: list[str]) -> list[ReferenceCandidate]:
+        """All registry rows whose date_of_birth is in `dobs` (a list of
+        'YYYY-MM-DD' strings — typically dob-1, dob+1 for the relaxed-DOB
+        fallback). full_name / name_change come pre-lowercased from
+        fields_norm."""
+        stmt = text(
+            "SELECT id, registration_no, "
+            "       COALESCE(fields_norm->>'full_name', '')   AS full_name, "
+            "       COALESCE(fields_norm->>'name_change', '') AS name_change "
+            "FROM reference_data WHERE date_of_birth IN :dobs"
+        ).bindparams(bindparam("dobs", expanding=True))
+        result = await self.session.execute(stmt, {"dobs": dobs})
         return [
             ReferenceCandidate(
                 id=r.id,

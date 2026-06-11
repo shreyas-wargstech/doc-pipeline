@@ -7,6 +7,8 @@ provenance block. Idempotent on document_id. Does NOT touch document.status
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -153,6 +155,14 @@ async def match_document(
         return result
 
     candidates = await ref_repo.find_by_dob(doc.dob.isoformat())
+    dob_relaxed = False
+    if not candidates:
+        window = [
+            (doc.dob + timedelta(days=delta)).isoformat() for delta in (-1, 1)
+        ]
+        candidates = await ref_repo.find_by_dob_window(window)
+        dob_relaxed = bool(candidates)
+
     if not candidates:
         result = MatchResult(
             match_status=conflict_floor, reference_data_id=None,
@@ -170,7 +180,10 @@ async def match_document(
              candidate_registration_no=str(best.registration_no) if best else None)
 
     if score >= FUZZY_MATCH_HIGH:
-        status = "matched"
+        # A relaxed DOB gate (+/-1 day) is a weaker signal than an exact match —
+        # cap at manual_review even for a strong name score so a human confirms
+        # the day/month transposition.
+        status = "manual_review" if dob_relaxed else "matched"
     elif score >= FUZZY_REVIEW_LOW:
         status = "manual_review"
     else:

@@ -25,7 +25,7 @@ def _cand(rid, reg, full, change=""):
     return ReferenceCandidate(id=rid, registration_no=reg, full_name=full, name_change=change)
 
 
-def _wire(monkeypatch, doc, *, exact=None, candidates=None):
+def _wire(monkeypatch, doc, *, exact=None, candidates=None, dob_window_candidates=None):
     doc_repo = MagicMock()
     doc_repo.get = AsyncMock(return_value=doc)
     doc_repo.update_fields = AsyncMock()
@@ -34,6 +34,8 @@ def _wire(monkeypatch, doc, *, exact=None, candidates=None):
     ref_repo = MagicMock()
     ref_repo.find_by_registration_no = AsyncMock(return_value=exact)
     ref_repo.find_by_dob = AsyncMock(return_value=candidates or [])
+    ref_repo.find_by_dob_window = AsyncMock(return_value=dob_window_candidates or [])
+    ref_repo.find_by_id = AsyncMock(return_value=None)
 
     monkeypatch.setattr("cloud.match.service.DocumentRepository", lambda s: doc_repo)
     monkeypatch.setattr("cloud.match.service.ReferenceRepository", lambda s: ref_repo)
@@ -207,6 +209,34 @@ async def test_no_dob_is_unmatched_without_scan(monkeypatch):
 async def test_no_dob_candidates_is_unmatched(monkeypatch):
     doc = _doc(dob=datetime.date(1996, 2, 26), name="ashish patil")
     doc_repo, ref_repo = _wire(monkeypatch, doc, candidates=[])
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "unmatched"
+
+
+@pytest.mark.asyncio
+async def test_dob_window_recovers_candidate_capped_at_manual_review(monkeypatch):
+    """Exact-DOB search is empty; +/-1 day window finds a strong name match
+    (score >= FUZZY_MATCH_HIGH). Because the DOB gate was relaxed, the result
+    is capped at manual_review — never auto-matched."""
+    doc = _doc(dob=datetime.date(1996, 2, 26), name="ashish patil")
+    doc_repo, ref_repo = _wire(
+        monkeypatch, doc, candidates=[],
+        dob_window_candidates=[_cand(7, 34903, "ashish patil")],
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "manual_review"
+    assert result.reference_data_id == 7
+    assert result.score >= 90.0
+    ref_repo.find_by_dob_window.assert_awaited_once_with(
+        ["1996-02-25", "1996-02-27"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_dob_window_empty_too_is_unmatched(monkeypatch):
+    """Both exact-DOB and the +/-1 window are empty -> unmatched, as before."""
+    doc = _doc(dob=datetime.date(1996, 2, 26), name="ashish patil")
+    doc_repo, ref_repo = _wire(monkeypatch, doc, candidates=[], dob_window_candidates=[])
     result = await match_document("d", session=MagicMock())
     assert result.match_status == "unmatched"
 

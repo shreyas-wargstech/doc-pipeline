@@ -107,6 +107,24 @@ async def test_find_by_id_returns_full_row():
 
 
 @pytest.mark.asyncio
+async def test_find_by_dob_window_returns_candidates():
+    row = SimpleNamespace(
+        id=7, registration_no=34903, full_name="ashish patil", name_change="",
+    )
+    result_obj = MagicMock()
+    result_obj.all.return_value = [row]
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result_obj)
+
+    repo = ReferenceRepository(session)
+    candidates = await repo.find_by_dob_window(["1996-02-25", "1996-02-27"])
+
+    assert len(candidates) == 1
+    assert candidates[0].id == 7
+    assert candidates[0].full_name == "ashish patil"
+
+
+@pytest.mark.asyncio
 async def test_find_by_id_missing_returns_none():
     result_obj = MagicMock()
     result_obj.first.return_value = None
