@@ -70,7 +70,7 @@ def _msg(content_type="typed", language_hint="latin"):
         page_num=1,
         s3_key="documents/doc1/pages/page_001.png",
         document_category="practitioner",
-        page_type="form",
+        page_type="cover",  # identity page that keeps the Tesseract→VLM ladder
         content_type=content_type,
         language_hint=language_hint,
     )
@@ -260,12 +260,14 @@ async def test_non_identity_handwritten_starts_tesseract_not_vlm():
 
 
 @pytest.mark.anyio
-async def test_identity_form_still_escalates_to_vlm():
-    t = FakeTier("tesseract", mean_conf=20.0)
-    vlm = FakeTier("vlm", mean_conf=95.0)
+async def test_identity_form_starts_vlm_direct():
+    """The application form goes straight to VLM — no Tesseract-first, no
+    confidence gate (it carries the handwritten identity fields)."""
+    t = FakeTier("tesseract", mean_conf=95.0)
+    vlm = FakeTier("vlm", mean_conf=88.0)
     router = _router(t=t, vlm=vlm)
     res = await router.route(_msg_type("form"), b"img")
-    assert t.calls == 1 and vlm.calls == 1  # identity page → full ladder
+    assert t.calls == 0 and vlm.calls == 1  # VLM-first, Tesseract skipped
     assert res.tier == "vlm"
 
 

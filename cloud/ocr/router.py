@@ -51,6 +51,13 @@ _START: dict[str, int] = {
 _IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"cover", "form"})
 _TESSERACT_IDX: int = _LADDER.index("tesseract")  # cap index for non-identity pages
 
+# Page types that go STRAIGHT to the VLM tier (no Tesseract-first, no conf gate).
+# The application form carries the handwritten identity fields (name, dob) that
+# Tesseract cannot read; the cover is excluded (its AMR-MCH number is usually the
+# filename, so paid VLM there adds little).
+_VLM_FIRST_PAGE_TYPES: frozenset[str] = frozenset({"form"})
+_VLM_IDX: int = _LADDER.index("vlm")
+
 
 def is_identity_page(page_type: str) -> bool:
     """True if page_type carries the practitioner identity block (coarse manifest label)."""
@@ -132,8 +139,13 @@ class OcrRouter:
         Escalation only — never falls back to a lower tier. Returns the accepted
         result, or None if no tier produced one."""
         identity = is_identity_page(msg.page_type)
-        start = self._start_index(msg.content_type) if identity else 0
-        end = len(_LADDER) if identity else _TESSERACT_IDX + 1  # non-identity: Tesseract only
+        vlm_first = msg.page_type in _VLM_FIRST_PAGE_TYPES
+        if vlm_first:
+            start, end = _VLM_IDX, len(_LADDER)          # form: VLM directly
+        elif identity:
+            start, end = self._start_index(msg.content_type), len(_LADDER)
+        else:
+            start, end = 0, _TESSERACT_IDX + 1           # non-identity: Tesseract only
         best: OcrResult | None = None
 
         for idx in range(start, end):
