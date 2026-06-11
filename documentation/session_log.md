@@ -477,3 +477,30 @@
 - **Tests:** 290 unit green; gated integration tests in `test_sweeper_integration.py` + `test_chain_integration.py` (run with `make up && make init && uv run pytest -m integration`). Lint clean.
 - **Next:** merge to main → run integration tests with Docker → AWS provisioning (sub-project E); calibrate eval lab thresholds; manual dashboard smoke test.
 
+
+## 2026-06-11 — Triage over-classification fixed; word-form DOB parser added
+
+### Bug 1: word-form DOB (FIX-034) — CLOSED
+- LLM returns DOB as English word-form ("NINTH MARCH NINETEEN SEVENTY-NINE") on Form A docs.
+- `datetime.date.fromisoformat()` raised ValueError → `del fields["dob"]` → match returned `reason=no_dob`.
+- Fix: added `_parse_word_date()` + `_parse_year_words()` to `cloud/structure/service.py`; rollup now falls back to word-form parser when ISO parse fails.
+- 8 parametrized test cases added (`test_parse_word_date`). 304 unit green.
+
+### Bug 2: triage over-classification (FIX-035) — CLOSED
+- Root cause: weighted-blend thresholds (h=0.35, s=0.45) calibrated on synthetic images. Real scans inflate both metrics via scan noise, causing all 19 pages of a practitioner bundle to classify as HANDWRITTEN → routed to paid VLM → VLM garbled output missing reg_no.
+- Fix: replaced weighted-blend with AND logic in `classify_features` (both metrics must exceed their thresholds independently); updated defaults to h=1.10 / s=1.80 (calibrated on real scans).
+- UNKNOWN returned when exactly one metric exceeds threshold (ambiguous) — falls through to Tesseract + 70-conf-net escalation.
+- Files: `nas/preprocess/triage.py` (classify_features + HeuristicContentTypeDetector defaults), `cloud/eval/content_type.py` (Thresholds defaults, removed height_weight, updated sweep grids), `cloud/dashboard/api.py` (_cell helper), `web/lib/types.ts`, `web/components/EvalScorePanel.tsx`.
+- Tests: replaced fragile `test_heuristic_flags_handwritten` (synthetic image below new thresholds) with 6-case parametrized `test_classify_features_and_logic` in `tests/nas/test_triage.py`; updated golden values in `tests/nas/test_content_features.py`; updated row fixtures in `tests/cloud/test_eval_content_type.py` and `tests/cloud/test_eval_api.py`.
+- 304 unit green. `height_weight` fully removed from all live code and tests.
+- Next: commit + merge to main; continue AWS auto-trigger wiring; eval lab still useful for fine-tuning (thresholds still need labeled real-scan data to pin exact values, but no longer broken for typical typed docs).
+
+## 2026-06-11 — Reliable practitioner auto-match + VLM-first form OCR
+
+- **Stage:** Match + OCR
+- **What was done:** Rewrote exact-hit block in `cloud/match/service.py` so `registration_no` is authoritative; absence of name/dob never blocks a match. Conflicts (dob present-and-unequal, or name present with token_sort_ratio < 60) trigger dob-fuzzy recovery then manual_review. `matched_on` gains `registration_no+dob`. OCR router (`cloud/ocr/router.py`) now routes form pages straight to VLM (no Tesseract-first, no 70-conf gate); VLM unavailable on form → Tesseract fallback (mixed content still extracts printed reg_no). No-fallback rule unchanged for cover/pure-handwritten.
+- **Constants added:** `NAME_CONFIRM=85.0`, `NAME_CONFLICT_FLOOR=60.0` in `cloud/match/models.py`; `matched_on` Literal widened to include `registration_no+dob`.
+- **Files changed:** `cloud/match/models.py`, `cloud/match/service.py`, `cloud/ocr/router.py`; tests: `tests/cloud/test_orchestration_models.py`, `tests/cloud/test_stage_consumers.py`, `tests/cloud/test_structure_service.py`.
+- **Tests:** 310 unit green (5 new match + 2 new router, 1 replaced); 30 integration deselected.
+- **Validation note:** real bundle c405e466... expected to match cleanly on registration_no+dob (or +name after VLM re-OCR of form page).
+- **Next:** validate on real bundle (`make up && make stage-worker STAGE=match DOC=c405e466...`); calibrate fuzzy thresholds (labeled pairs needed); AWS auto-trigger wiring.
