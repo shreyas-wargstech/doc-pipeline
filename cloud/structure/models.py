@@ -21,7 +21,7 @@ EntityType = Literal[
 ENTITY_TYPES: frozenset[str] = frozenset(get_args(EntityType))
 
 PageType = Literal[
-    "app_cover", "application_form", "aadhaar", "ssc", "hsc",
+    "application_form", "aadhaar", "ssc", "hsc",
     "marks_statement", "passing_cert", "internship_cert", "provisional_reg",
     "form_e", "marriage_cert", "sbi_receipt", "photo_id", "letter_body",
     "invoice", "blank", "other",
@@ -30,8 +30,9 @@ PageType = Literal[
 PAGE_TYPES: frozenset[str] = frozenset(get_args(PageType))
 
 # Page types that most reliably carry the practitioner identity block — the
-# rollup weights candidates from these pages higher.
-IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"app_cover", "application_form"})
+# rollup weights candidates from these pages higher. app_cover retired
+# (2026-06-12): it was a wrong abstraction — Form A IS the application form.
+IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"application_form"})
 
 
 class Entity(BaseModel):

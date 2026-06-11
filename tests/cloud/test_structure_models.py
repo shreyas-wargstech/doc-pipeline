@@ -18,12 +18,13 @@ def test_entity_types_contains_known_members():
 
 
 def test_page_types_contains_known_members():
-    assert {"app_cover", "application_form", "aadhaar", "blank", "other"} <= PAGE_TYPES
+    assert {"application_form", "aadhaar", "blank", "other"} <= PAGE_TYPES
+    assert "app_cover" not in PAGE_TYPES
 
 
 def test_identity_page_types_subset_of_page_types():
     assert IDENTITY_PAGE_TYPES <= PAGE_TYPES
-    assert "app_cover" in IDENTITY_PAGE_TYPES
+    assert IDENTITY_PAGE_TYPES == frozenset({"application_form"})
 
 
 def test_normalize_value_casefolds_and_collapses_whitespace():
