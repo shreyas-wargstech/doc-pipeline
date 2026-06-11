@@ -125,4 +125,7 @@ class VlmPageTyper:
             )
         except OpenAIError as exc:
             raise OCRError(f"OpenRouter page-type classify error: {exc}") from exc
+        if not response.choices:
+            log.warning("page_typer_empty_response", model=self._model)
+            return "other"
         return (response.choices[0].message.content or "").strip().lower()
