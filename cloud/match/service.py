@@ -7,7 +7,9 @@ provenance block. Idempotent on document_id. Does NOT touch document.status
 """
 from __future__ import annotations
 
-from datetime import timedelta
+import contextlib
+from datetime import date, timedelta
+from typing import Any
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +22,7 @@ from cloud.match.models import (
     NAME_CONFIRM,
     NAME_CONFLICT_FLOOR,
     MatchResult,
+    ReferenceMatch,
     parse_registration_no,
 )
 from cloud.match.reference import ReferenceRepository
@@ -28,31 +31,99 @@ from shared.exceptions import MatchError
 log = structlog.get_logger()
 
 
+def _build_backfill(
+    doc: Any, row: ReferenceMatch
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Authoritative document-column overwrites from the matched registry
+    row, plus (if not already captured by a prior run) the pre-overwrite OCR
+    values for metadata.match.ocr_extracted.
+
+    Reference data is ground truth (locked decision, 2026-06-12): on any
+    matched/manual_review result with a reference_data_id, identity columns
+    are overwritten with the registry values. Original OCR values are
+    preserved in metadata.match.ocr_extracted for audit — guarded so a
+    re-run never clobbers the true first-OCR values.
+    """
+    overwrite: dict[str, Any] = {
+        "registration_no": str(row.registration_no),
+        "applicant_name_raw": " ".join(
+            p for p in (row.f_name, row.m_name, row.l_name) if p
+        ).strip(),
+        "gender": row.gender or None,
+    }
+    if row.date_of_birth:
+        with contextlib.suppress(ValueError):
+            overwrite["dob"] = date.fromisoformat(row.date_of_birth)
+
+    existing_match = (doc.metadata_ or {}).get("match") or {}
+    ocr_extracted: dict[str, Any] | None = None
+    if "ocr_extracted" not in existing_match:
+        ocr_extracted = {
+            "registration_no": doc.registration_no,
+            "applicant_name_raw": doc.applicant_name_raw,
+            "dob": doc.dob.isoformat() if doc.dob else None,
+            "gender": doc.gender,
+        }
+    return overwrite, ocr_extracted
+
+
 async def _persist(
     doc_repo: DocumentRepository,
     document_id: str,
     result: MatchResult,
     *,
     write_metadata: bool,
+    backfill: dict[str, Any] | None = None,
+    ocr_extracted: dict[str, Any] | None = None,
 ) -> None:
-    await doc_repo.update_fields(
-        document_id,
-        match_status=result.match_status,
-        reference_data_id=result.reference_data_id,
-    )
+    fields: dict[str, Any] = {
+        "match_status": result.match_status,
+        "reference_data_id": result.reference_data_id,
+    }
+    if backfill:
+        fields.update(backfill)
+    await doc_repo.update_fields(document_id, **fields)
     if write_metadata:
+        match_patch: dict[str, Any] = {
+            "method": result.method,
+            "score": result.score,
+            "candidate_registration_no": result.candidate_registration_no,
+            "matched_on": result.matched_on,
+            "band": result.match_status,
+        }
+        if ocr_extracted is not None:
+            match_patch["ocr_extracted"] = ocr_extracted
         await doc_repo.update_metadata(
             document_id,
-            patch={
-                "match": {
-                    "method": result.method,
-                    "score": result.score,
-                    "candidate_registration_no": result.candidate_registration_no,
-                    "matched_on": result.matched_on,
-                    "band": result.match_status,
-                }
-            },
+            patch={"match": match_patch},
         )
+
+
+async def _persist_with_backfill(
+    doc_repo: DocumentRepository,
+    ref_repo: ReferenceRepository,
+    document_id: str,
+    doc: Any,
+    result: MatchResult,
+    *,
+    row: ReferenceMatch | None = None,
+) -> None:
+    """_persist, plus reference-data back-fill when result.reference_data_id
+    is set (matched or manual_review-with-suggestion). `row` is the already-
+    fetched ReferenceMatch for the exact path; the fuzzy path passes
+    row=None and this fetches it via find_by_id."""
+    backfill: dict[str, Any] | None = None
+    ocr_extracted: dict[str, Any] | None = None
+    if result.reference_data_id is not None:
+        ref_row = row
+        if ref_row is None:
+            ref_row = await ref_repo.find_by_id(result.reference_data_id)
+        if ref_row is not None:
+            backfill, ocr_extracted = _build_backfill(doc, ref_row)
+    await _persist(
+        doc_repo, document_id, result, write_metadata=True,
+        backfill=backfill, ocr_extracted=ocr_extracted,
+    )
 
 
 async def match_document(
@@ -123,7 +194,9 @@ async def match_document(
                     candidate_registration_no=str(row.registration_no),
                     matched_on=matched_on,
                 )
-                await _persist(doc_repo, document_id, result, write_metadata=True)
+                await _persist_with_backfill(
+                    doc_repo, ref_repo, document_id, doc, result, row=row
+                )
                 log.info("match_exact_verified", document_id=document_id,
                          reference_data_id=row.id, name_score=round(nscore, 1),
                          matched_on=matched_on)
@@ -202,7 +275,7 @@ async def match_document(
             score=score, candidate_registration_no=str(best.registration_no),
             matched_on="name+dob",
         )
-    await _persist(doc_repo, document_id, result, write_metadata=True)
+    await _persist_with_backfill(doc_repo, ref_repo, document_id, doc, result)
     log.info("match_done", document_id=document_id, status=status, score=score)
     return result
 

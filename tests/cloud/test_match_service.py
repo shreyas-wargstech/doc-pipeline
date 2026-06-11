@@ -12,12 +12,14 @@ from cloud.match.service import match_document
 from shared.exceptions import MatchError
 
 
-def _doc(category="practitioner", *, reg_no=None, dob=None, name=None):
+def _doc(category="practitioner", *, reg_no=None, dob=None, name=None, gender=None, metadata=None):
     return SimpleNamespace(
         document_category=category,
         registration_no=reg_no,
         dob=dob,
         applicant_name_raw=name,
+        gender=gender,
+        metadata_=metadata or {},
     )
 
 
@@ -345,3 +347,99 @@ async def test_fuzzy_partial_name_recovers_to_manual_review_below_old_floor(monk
     assert result.match_status == "manual_review"
     assert result.reference_data_id == 7
     assert 65.0 <= result.score < 75.0
+
+
+@pytest.mark.asyncio
+async def test_exact_match_backfills_identity_from_registry(monkeypatch):
+    """matched (exact path): documents columns get overwritten with the
+    authoritative registry values; original OCR values saved under
+    metadata.match.ocr_extracted."""
+    doc = _doc(reg_no="1514253720", name="Nidhi Sanjay", dob=None, gender=None)
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=7, registration_no=34903,
+            full_name="nidhi sanjay toshniwal", date_of_birth="1995-02-27",
+            f_name="Nidhi", m_name="Sanjay", l_name="Toshniwal", gender="F",
+        ),
+    )
+    # Force the exact path to be taken: parse_registration_no("1514253720") is
+    # None (Task 1), so wire reg_no="34903" instead for this test.
+    doc.registration_no = "34903"
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+
+    _, fkw = doc_repo.update_fields.call_args
+    assert fkw["registration_no"] == "34903"
+    assert fkw["applicant_name_raw"] == "Nidhi Sanjay Toshniwal"
+    assert fkw["dob"] == datetime.date(1995, 2, 27)
+    assert fkw["gender"] == "F"
+
+    _, mkw = doc_repo.update_metadata.call_args
+    ocr_extracted = mkw["patch"]["match"]["ocr_extracted"]
+    assert ocr_extracted == {
+        "registration_no": "34903",
+        "applicant_name_raw": "Nidhi Sanjay",
+        "dob": None,
+        "gender": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_backfill_skips_ocr_extracted_when_already_present(monkeypatch):
+    """Re-run: metadata.match.ocr_extracted already set -> not overwritten
+    (true first-OCR values must survive re-runs)."""
+    doc = _doc(
+        reg_no="34903", name="Nidhi Sanjay", dob=None, gender=None,
+        metadata={"match": {"ocr_extracted": {"registration_no": "ORIGINAL"}}},
+    )
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=7, registration_no=34903,
+            full_name="nidhi sanjay toshniwal", date_of_birth="1995-02-27",
+            f_name="Nidhi", m_name="Sanjay", l_name="Toshniwal", gender="F",
+        ),
+    )
+    await match_document("d", session=MagicMock())
+    _, mkw = doc_repo.update_metadata.call_args
+    assert "ocr_extracted" not in mkw["patch"]["match"]
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_match_backfills_via_find_by_id(monkeypatch):
+    """matched (fuzzy path): the fuzzy candidate only carries
+    registration_no/full_name; the back-fill fetches the full row via
+    find_by_id for dob/gender/name-parts."""
+    doc = _doc(dob=datetime.date(1996, 2, 26), name="ashish patil")
+    doc_repo, ref_repo = _wire(
+        monkeypatch, doc, candidates=[_cand(7, 34903, "ashish patil")]
+    )
+    ref_repo.find_by_id = AsyncMock(return_value=ReferenceMatch(
+        id=7, registration_no=34903,
+        f_name="Ashish", m_name="", l_name="Patil", gender="M",
+        date_of_birth="1996-02-26",
+    ))
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    ref_repo.find_by_id.assert_awaited_once_with(7)
+
+    _, fkw = doc_repo.update_fields.call_args
+    assert fkw["applicant_name_raw"] == "Ashish Patil"
+    assert fkw["dob"] == datetime.date(1996, 2, 26)
+    assert fkw["gender"] == "M"
+
+
+@pytest.mark.asyncio
+async def test_unmatched_does_not_backfill(monkeypatch):
+    doc = _doc(dob=datetime.date(1996, 2, 26), name="ashish patil")
+    doc_repo, ref_repo = _wire(
+        monkeypatch, doc, candidates=[_cand(7, 34903, "ramesh kumar")]
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "unmatched"
+    _, fkw = doc_repo.update_fields.call_args
+    assert "applicant_name_raw" not in fkw
+    ref_repo.find_by_id.assert_not_awaited()
