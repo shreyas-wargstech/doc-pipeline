@@ -299,3 +299,19 @@ async def test_exact_hit_midband_name_absent_dob_is_matched(monkeypatch):
     assert result.matched_on == "registration_no"
     assert result.score < 85.0  # mid-band, did not reach NAME_CONFIRM
     ref_repo.find_by_dob.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_partial_name_recovers_to_manual_review_below_old_floor(monkeypatch):
+    """The 7812b969 case: 'Nidhi Sanjay' vs 'Nidhi Sanjay Toshniwal' scores
+    ~70.6 — below the OLD floor (75, -> unmatched) but above the NEW floor
+    (65, -> manual_review). Document is recovered into the review queue
+    instead of being silently dropped."""
+    doc = _doc(dob=datetime.date(1995, 2, 27), name="Nidhi Sanjay")
+    doc_repo, ref_repo = _wire(
+        monkeypatch, doc, candidates=[_cand(7, 34903, "Nidhi Sanjay Toshniwal")]
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "manual_review"
+    assert result.reference_data_id == 7
+    assert 65.0 <= result.score < 75.0

@@ -11,8 +11,12 @@ from typing import Literal
 # Fuzzy name-score thresholds (0..100). UNCALIBRATED — no labeled match pairs
 # yet; same status as triage/preprocess thresholds. Tune when ground truth
 # exists. Constants (not settings) until there is data to tune against.
-FUZZY_MATCH_HIGH = 90.0  # >= → matched
-FUZZY_REVIEW_LOW = 75.0  # [LOW, HIGH) → manual_review; < LOW → unmatched
+FUZZY_MATCH_HIGH = 90.0  # >= -> matched
+# Lowered 75 -> 65 (2026-06-12): handwritten/garbled registration numbers push
+# the name+dob fuzzy path to primary; partial-name OCR (e.g. "Nidhi Sanjay" vs
+# "Nidhi Sanjay Toshniwal", score ~70.6) was landing below 75 -> unmatched ->
+# document lost. Recover borderline names to manual_review instead.
+FUZZY_REVIEW_LOW = 65.0  # [LOW, HIGH) -> manual_review; < LOW -> unmatched
 
 # Exact-hit cross-check bands (0..100). The exact registration_no path treats
 # the number as authoritative; these only classify the name signal as
