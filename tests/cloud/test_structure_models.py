@@ -24,7 +24,7 @@ def test_page_types_contains_known_members():
 
 def test_identity_page_types_subset_of_page_types():
     assert IDENTITY_PAGE_TYPES <= PAGE_TYPES
-    assert IDENTITY_PAGE_TYPES == frozenset({"application_form"})
+    assert frozenset({"application_form"}) == IDENTITY_PAGE_TYPES
 
 
 def test_normalize_value_casefolds_and_collapses_whitespace():

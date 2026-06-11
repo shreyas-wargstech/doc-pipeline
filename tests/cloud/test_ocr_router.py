@@ -153,9 +153,6 @@ async def test_non_identity_handwritten_still_capped_at_tesseract():
 async def test_form_vs_cover_vlm_unavailable_fallback():
     """Form and cover are both VLM-first. Form gets Tesseract fallback if VLM
     unavailable (mixed content). Cover does not (pure handwritten)."""
-    t = FakeTier("tesseract", mean_conf=95.0)
-    vlm = FakeTier("vlm", raises=True)
-
     # Test form fallback
     router1 = _router(t=FakeTier("tesseract", mean_conf=95.0), vlm=FakeTier("vlm", raises=True))
     repo1 = FakeRepo()
