@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS page_types (
 
 _SEED_ROWS = [
     ("application_form",  "Practitioner registration application form (MCH Form)"),
-    ("app_cover",         "Application cover letter / Form A"),
     ("aadhaar",           "Aadhaar identity card page"),
     ("ssc",               "Secondary School Certificate (S.S.C.)"),
     ("hsc",               "Higher Secondary Certificate (H.S.C.)"),

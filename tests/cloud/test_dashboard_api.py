@@ -239,7 +239,7 @@ async def test_requeue_ocr_parses_page_nums(client: AsyncClient, as_user):
 
 @pytest.mark.asyncio
 async def test_reclassify_action_ok(client: AsyncClient, as_user):
-    res = {"document_category": "practitioner", "document_type": "app_cover"}
+    res = {"document_category": "practitioner", "document_type": "application_form"}
     with patch("cloud.dashboard.api.actions.reclassify", new=AsyncMock(return_value=res)), \
          patch("cloud.dashboard.api._audit", new=AsyncMock()):
         async with client as c:

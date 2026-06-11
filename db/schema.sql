@@ -139,14 +139,14 @@ CREATE TABLE IF NOT EXISTS pages (
     page_num             INTEGER     NOT NULL CHECK (page_num >= 1),
     s3_key_image         TEXT        NOT NULL,
 
-    page_type            TEXT,                             -- e.g. 'app_cover', 'aadhaar',
+    page_type            TEXT,                             -- e.g. 'application_form', 'aadhaar',
                                                            --      'ssc', 'hsc',
                                                            --      'marks_statement',
                                                            --      'internship_cert',
                                                            --      'provisional_reg',
                                                            --      'form_e', 'marriage_cert',
                                                            --      'letter_body',
-                                                           --      'invoice_lines', 'blank'
+                                                           --      'invoice', 'blank'
 
     raw_text             TEXT,                             -- OCR output (Tesseract)
     structured_json      JSONB,                            -- LLM output (page-typed schema)
@@ -187,7 +187,6 @@ CREATE TABLE IF NOT EXISTS page_types (
 
 INSERT INTO page_types (name, description) VALUES
     ('application_form',  'Practitioner registration application form (MCH Form)'),
-    ('app_cover',         'Application cover letter / Form A'),
     ('aadhaar',           'Aadhaar identity card page'),
     ('ssc',               'Secondary School Certificate (S.S.C.)'),
     ('hsc',               'Higher Secondary Certificate (H.S.C.)'),

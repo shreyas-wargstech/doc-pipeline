@@ -291,7 +291,7 @@ async def test_page_bulk_upsert_idempotent():
 
         # Re-run with structured data added — should update, not duplicate
         pages_v2 = [
-            {**p, "page_type": "app_cover" if i == 0 else "blank",
+            {**p, "page_type": "application_form" if i == 0 else "blank",
              "structured_json": {"v": i}}
             for i, p in enumerate(pages)
         ]
@@ -300,7 +300,7 @@ async def test_page_bulk_upsert_idempotent():
 
         listed = await repo.list_for_document(DOC_ID_BULK)
         assert len(listed) == 5  # still 5, no duplicates
-        assert listed[0].page_type == "app_cover"
+        assert listed[0].page_type == "application_form"
         assert listed[0].structured_json == {"v": 0}
         assert listed[1].page_type == "blank"
 
@@ -329,7 +329,7 @@ async def test_page_update_ocr_and_structured():
 
         await repo.update_structured(
             DOC_ID_PRAC, 1,
-            page_type="app_cover",
+            page_type="application_form",
             structured_json={"applicant_name": "Nidhi Sanjay Toshniwal"},
         )
         await session.commit()
@@ -340,7 +340,7 @@ async def test_page_update_ocr_and_structured():
         assert page.confidence_score == pytest.approx(92.3)
         assert page.language_detected == "eng"
         assert page.ocr_status == OCRStatus.DONE
-        assert page.page_type == "app_cover"
+        assert page.page_type == "application_form"
         assert page.structured_json == {"applicant_name": "Nidhi Sanjay Toshniwal"}
 
 

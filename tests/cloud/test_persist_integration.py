@@ -41,7 +41,7 @@ async def _seed() -> None:
             document_id=_DOC_ID,
             page_num=_PAGE_NUM,
             s3_key_image="documents/itest/pages/page_001.png",
-            page_type="app_cover",
+            page_type="application_form",
         )
         # save_ocr_result takes page_id (not document_id + page_num) and
         # ocr_status (not status).  structured_json carries raw_text as a key.
