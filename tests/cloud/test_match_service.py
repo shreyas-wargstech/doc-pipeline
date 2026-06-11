@@ -84,8 +84,8 @@ async def test_exact_reg_no_hit_verified_by_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_exact_hit_dob_agrees_partial_name_matches(monkeypatch):
-    # token_sort_ratio("nidhi toshniwal","nidhi sanjay toshniwal") = 81.08 → in [75,90)
-    # but dob agrees, so condition (dob_agrees and nscore >= FUZZY_REVIEW_LOW) holds → matched.
+    # token_sort_ratio("nidhi toshniwal","nidhi sanjay toshniwal") = 81.08 → mid-band
+    # (< NAME_CONFIRM=85, not a conflict). dob agrees → matched, provenance = reg+dob.
     doc = _doc(reg_no="34903", name="nidhi toshniwal", dob=datetime.date(1995, 2, 27))
     doc_repo, ref_repo = _wire(
         monkeypatch,
@@ -97,7 +97,7 @@ async def test_exact_hit_dob_agrees_partial_name_matches(monkeypatch):
     )
     result = await match_document("d", session=MagicMock())
     assert result.match_status == "matched"
-    assert result.matched_on == "registration_no+name"
+    assert result.matched_on == "registration_no+dob"
 
 
 @pytest.mark.asyncio
@@ -222,3 +222,25 @@ async def test_married_name_matches_name_change(monkeypatch):
     result = await match_document("d", session=MagicMock())
     assert result.match_status == "matched"
     assert result.reference_data_id == 7
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_absent_name_dob_confirms_is_matched(monkeypatch):
+    """The c405e466 bundle: handwritten name never OCR'd (applicant_name_raw
+    None), but reg_no exact-hits and dob agrees → matched on registration_no+dob.
+    Absence must not block."""
+    doc = _doc(reg_no="34903", name=None, dob=datetime.date(1979, 3, 9))
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(
+            id=9, registration_no=34903,
+            full_name="manisha baban yewale", date_of_birth="1979-03-09",
+        ),
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    assert result.reference_data_id == 9
+    assert result.method == "exact"
+    assert result.matched_on == "registration_no+dob"
+    ref_repo.find_by_dob.assert_not_awaited()  # accepted on the exact path

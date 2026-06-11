@@ -15,6 +15,8 @@ from cloud.match.fuzzy import best_candidate, name_score
 from cloud.match.models import (
     FUZZY_MATCH_HIGH,
     FUZZY_REVIEW_LOW,
+    NAME_CONFIRM,
+    NAME_CONFLICT_FLOOR,
     MatchResult,
     parse_registration_no,
 )
@@ -83,48 +85,49 @@ async def match_document(
         log.info("match_not_applicable", document_id=document_id)
         return result
 
-    # Exact path — number is only trusted after a name/dob cross-check.
+    # Exact path — registration_no is the authoritative natural key. An exact hit
+    # is accepted UNLESS a *present* signal actively conflicts with it (FALSE-MATCH
+    # guard, FIX-033). Absence never blocks: a missing name/dob is "no evidence",
+    # not "disagreement". manual_review is reserved for the conflict path below
+    # when dob-fuzzy can't cleanly recover.
     exact_conflict = False
     reg_int = parse_registration_no(doc.registration_no)
     if reg_int is not None:
         row = await ref_repo.find_by_registration_no(reg_int)
         if row is not None:
+            name_present = bool((doc.applicant_name_raw or "").strip())
             nscore = name_score(
                 doc.applicant_name_raw or "", row.full_name, row.name_change
             )
+            dob_present = bool(doc.dob is not None and row.date_of_birth)
             dob_agrees = bool(
-                doc.dob is not None
-                and row.date_of_birth
-                and doc.dob.isoformat() == row.date_of_birth
+                dob_present and doc.dob.isoformat() == row.date_of_birth
             )
-            if nscore >= FUZZY_MATCH_HIGH or (dob_agrees and nscore >= FUZZY_REVIEW_LOW):
+            dob_conflicts = bool(dob_present and not dob_agrees)
+            name_conflicts = bool(name_present and nscore < NAME_CONFLICT_FLOOR)
+
+            if not dob_conflicts and not name_conflicts:
+                if nscore >= NAME_CONFIRM:
+                    matched_on = "registration_no+name"
+                elif dob_agrees:
+                    matched_on = "registration_no+dob"
+                else:
+                    matched_on = "registration_no"
                 result = MatchResult(
                     match_status="matched",
                     reference_data_id=row.id,
                     method="exact",
                     score=nscore,
                     candidate_registration_no=str(row.registration_no),
-                    matched_on="registration_no+name",
+                    matched_on=matched_on,
                 )
                 await _persist(doc_repo, document_id, result, write_metadata=True)
                 log.info("match_exact_verified", document_id=document_id,
-                         reference_data_id=row.id, name_score=round(nscore, 1))
+                         reference_data_id=row.id, name_score=round(nscore, 1),
+                         matched_on=matched_on)
                 return result
-            if nscore >= FUZZY_REVIEW_LOW or dob_agrees:
-                result = MatchResult(
-                    match_status="manual_review",
-                    reference_data_id=row.id,
-                    method="exact",
-                    score=nscore,
-                    candidate_registration_no=str(row.registration_no),
-                    matched_on="registration_no+name",
-                )
-                await _persist(doc_repo, document_id, result, write_metadata=True)
-                log.info("match_exact_partial", document_id=document_id,
-                         reference_data_id=row.id, name_score=round(nscore, 1))
-                return result
-            # Number hit but identity disagrees — the FALSE-MATCH case. Do NOT
-            # accept; try to recover the correct person via dob-fuzzy below.
+            # A present signal conflicts — the number's read is suspect. Do NOT
+            # accept; recover the correct person via dob-fuzzy below.
             exact_conflict = True
             log.warning("match_exact_identity_conflict", document_id=document_id,
                         candidate_registration_no=str(row.registration_no),
