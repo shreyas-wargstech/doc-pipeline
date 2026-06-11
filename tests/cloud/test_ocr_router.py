@@ -343,3 +343,4 @@ async def test_form_vlm_unavailable_falls_back_to_tesseract():
     assert res is not None and res.tier == "tesseract"  # fell back
     assert t.calls == 1
     assert repo.saved[0]["ocr_status"] == OCRStatus.DONE
+    assert res.low_conf_count == 0  # mean_conf=72.0 > threshold=70.0 → no low-conf words

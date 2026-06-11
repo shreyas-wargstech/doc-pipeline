@@ -137,7 +137,7 @@ class OcrRouter:
         at VLM, skipping Tesseract. Other identity pages (cover) use the full
         Tesseract→VLM ladder. Non-identity pages are capped at Tesseract only.
         Escalation only — never falls back to a lower tier (form gets a narrow
-        Tesseract fallback in process_page when VLM is unavailable). Returns the
+        Tesseract fallback in route() itself when VLM is unavailable). Returns the
         accepted result, or None if no tier produced one."""
         identity = is_identity_page(msg.page_type)
         vlm_first = msg.page_type in _VLM_FIRST_PAGE_TYPES
