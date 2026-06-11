@@ -133,11 +133,12 @@ class OcrRouter:
         return _START.get(content_type, 0)
 
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
-        """Run the tier ladder. Identity pages use the full ladder; non-identity
-        pages are capped at Tesseract — always START at Tesseract (even when
-        content_type=handwritten) and never escalate to the paid VLM tier.
-        Escalation only — never falls back to a lower tier. Returns the accepted
-        result, or None if no tier produced one."""
+        """Run the tier ladder. Form pages (_VLM_FIRST_PAGE_TYPES) start directly
+        at VLM, skipping Tesseract. Other identity pages (cover) use the full
+        Tesseract→VLM ladder. Non-identity pages are capped at Tesseract only.
+        Escalation only — never falls back to a lower tier (form gets a narrow
+        Tesseract fallback in process_page when VLM is unavailable). Returns the
+        accepted result, or None if no tier produced one."""
         identity = is_identity_page(msg.page_type)
         vlm_first = msg.page_type in _VLM_FIRST_PAGE_TYPES
         if vlm_first:
