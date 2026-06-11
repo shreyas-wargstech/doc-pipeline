@@ -14,6 +14,13 @@ from typing import Literal
 FUZZY_MATCH_HIGH = 90.0  # >= → matched
 FUZZY_REVIEW_LOW = 75.0  # [LOW, HIGH) → manual_review; < LOW → unmatched
 
+# Exact-hit cross-check bands (0..100). The exact registration_no path treats
+# the number as authoritative; these only classify the name signal as
+# "confirms" / "mid-band (non-blocking)" / "conflicts". UNCALIBRATED — tune when
+# labeled pairs exist.
+NAME_CONFIRM = 85.0          # >= → name confirms the read (provenance: registration_no+name)
+NAME_CONFLICT_FLOOR = 60.0   # name present AND < this → clearly a different person → conflict
+
 MatchMethod = Literal["exact", "fuzzy"]
 MatchStatus = Literal["matched", "unmatched", "not_applicable", "manual_review"]
 
@@ -51,7 +58,9 @@ class MatchResult:
     method: MatchMethod | None
     score: float | None
     candidate_registration_no: str | None
-    matched_on: Literal["registration_no", "registration_no+name", "name+dob"] | None
+    matched_on: Literal[
+        "registration_no", "registration_no+name", "registration_no+dob", "name+dob"
+    ] | None
 
 
 def parse_registration_no(value: str | None) -> int | None:
