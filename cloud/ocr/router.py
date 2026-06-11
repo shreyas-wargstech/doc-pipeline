@@ -53,9 +53,10 @@ _TESSERACT_IDX: int = _LADDER.index("tesseract")  # cap index for non-identity p
 
 # Page types that go STRAIGHT to the VLM tier (no Tesseract-first, no conf gate).
 # The application form carries the handwritten identity fields (name, dob) that
-# Tesseract cannot read; the cover is excluded (its AMR-MCH number is usually the
-# filename, so paid VLM there adds little).
-_VLM_FIRST_PAGE_TYPES: frozenset[str] = frozenset({"form"})
+# Tesseract cannot read. The cover (manifest label "cover") also carries the
+# handwritten name + dob and is now VLM-first too (2026-06-12) — Tesseract
+# garbles handwriting on covers, so identity extraction was failing.
+_VLM_FIRST_PAGE_TYPES: frozenset[str] = frozenset({"form", "cover"})
 _VLM_IDX: int = _LADDER.index("vlm")
 
 
@@ -186,7 +187,7 @@ class OcrRouter:
                 threshold=self._threshold,
             )
 
-        if best is None and vlm_first:
+        if best is None and msg.page_type == "form":
             # VLM unavailable on the mixed-content form → fall back to Tesseract,
             # which still extracts the printed registration_no (the authoritative
             # key). This is a deliberate, narrow exception to the no-fall-back rule,
