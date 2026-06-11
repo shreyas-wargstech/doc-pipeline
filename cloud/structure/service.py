@@ -111,9 +111,10 @@ def _parse_word_date(raw: str) -> datetime.date | None:
 
 
 # A page carries the identity block when its type is a coarse manifest identity
-# label (cover/form) or the fine label the LLM refines them to.
+# label (cover/form) or the fine label the LLM refines them to. app_cover
+# retired (2026-06-12) — folded into application_form.
 _STRUCTURE_IDENTITY_TYPES: frozenset[str] = frozenset(
-    {"cover", "form", "app_cover", "application_form"}
+    {"cover", "form", "application_form"}
 )
 
 

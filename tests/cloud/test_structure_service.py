@@ -39,7 +39,7 @@ def test_rollup_prefers_identity_page_and_regex():
     by_page = [
         ("aadhaar", [Entity(type="registration_no", value="11111", confidence=0.9, source="llm")]),
         (
-            "app_cover",
+            "application_form",
             [Entity(type="registration_no", value="34903", confidence=0.9, source="regex")],
         ),
     ]
@@ -220,7 +220,7 @@ async def test_non_identity_page_skips_llm(monkeypatch):
     page_repo = MagicMock()
     page_repo.list_for_document = AsyncMock(return_value=[
         _page2(1, "aadhaar", "Government of India AADHAAR"),
-        _page2(2, "app_cover", "Applicant Name: Nidhi Toshniwal"),
+        _page2(2, "application_form", "Applicant Name: Nidhi Toshniwal"),
     ])
     page_repo.update_structured = AsyncMock()
     monkeypatch.setattr(structure_service, "DocumentRepository", lambda s: doc_repo)
@@ -229,12 +229,12 @@ async def test_non_identity_page_skips_llm(monkeypatch):
     called_with = []
     async def fake_llm(raw_text, **kw):
         called_with.append(kw["page_type"])
-        return "app_cover", [], {"name": "Nidhi Toshniwal", "registration_no": "34903"}
+        return "application_form", [], {"name": "Nidhi Toshniwal", "registration_no": "34903"}
     monkeypatch.setattr(structure_service, "llm_extract", fake_llm)
 
     await structure_service.structure_document("d", session=MagicMock())
 
-    assert called_with == ["app_cover"]            # aadhaar page skipped
+    assert called_with == ["application_form"]     # aadhaar page skipped
     page_repo.update_structured.assert_awaited_once()  # only the identity page
 
 

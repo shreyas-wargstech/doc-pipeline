@@ -164,6 +164,6 @@ async def test_llm_extract_real_api():
     page_type, entities, identity = await llm_extract(
         raw_text, document_category="practitioner", page_type="form"
     )
-    assert page_type in {"app_cover", "application_form", "other"}
+    assert page_type in {"application_form", "other"}
     assert isinstance(entities, list)
     assert isinstance(identity, dict)

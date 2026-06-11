@@ -32,7 +32,7 @@ def _is_text_page(page: Any) -> bool:
     return bool(((page.structured_json or {}).get("raw_text") or "").strip())
 
 
-_IDENTITY_PAGE_TYPES = frozenset({"app_cover", "application_form", "cover", "form"})
+_IDENTITY_PAGE_TYPES = frozenset({"application_form", "cover", "form"})
 
 
 def _is_identity_page(page: Any) -> bool:
