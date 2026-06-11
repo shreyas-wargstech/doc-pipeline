@@ -14,7 +14,8 @@ from cloud.match.service import match_document
 from shared.db import session_scope
 
 # Sentinel values — unmistakable, easy to clean up.
-REG_NO = 999000001
+# REG_NO must be <= 999_999 to pass parse_registration_no validation (phone#/PRN cap).
+REG_NO = 999000
 DOC_ID_EXACT = "test_match_exact_0000000000000000000000000000000000000"
 DOC_ID_FUZZY = "test_match_fuzzy_0000000000000000000000000000000000000"
 DOC_ID_NA = "test_match_na_00000000000000000000000000000000000000000"

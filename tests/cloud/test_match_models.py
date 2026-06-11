@@ -22,6 +22,9 @@ from cloud.match.models import (
         ("AMR-MCH", None),
         ("34903a", None),
         ("3490.3", None),
+        ("999999", 999999),
+        ("1000000", None),
+        ("1514253720", None),  # 10-digit mobile number, not a reg_no
     ],
 )
 def test_parse_registration_no(raw, expected):

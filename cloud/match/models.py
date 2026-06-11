@@ -66,13 +66,20 @@ class MatchResult:
 def parse_registration_no(value: str | None) -> int | None:
     """Parse documents.registration_no (TEXT) into an int for the
     reference_data.registration_no (INTEGER) lookup. Non-numeric / blank /
-    float-looking input → None (treated as 'no usable reg_no' → fuzzy)."""
+    float-looking input → None (treated as 'no usable reg_no' → fuzzy).
+
+    MCH registration numbers are <= 6 digits (observed max ~62044). A parsed
+    value > 999_999 is a phone / PRN / application number, not a reg_no ->
+    None, routing straight to the name+dob fuzzy path."""
     if value is None:
         return None
     s = value.strip()
     if not s:
         return None
     try:
-        return int(s)
+        result = int(s)
     except ValueError:
         return None
+    if result > 999_999:
+        return None
+    return result
