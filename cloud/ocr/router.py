@@ -186,6 +186,29 @@ class OcrRouter:
                 threshold=self._threshold,
             )
 
+        if best is None and vlm_first:
+            # VLM unavailable on the mixed-content form → fall back to Tesseract,
+            # which still extracts the printed registration_no (the authoritative
+            # key). This is a deliberate, narrow exception to the no-fall-back rule,
+            # which still holds for pure-handwritten pages (cover / handwritten).
+            t_tier = self._tiers[_LADDER[_TESSERACT_IDX]]
+            try:
+                fallback = await t_tier.run(
+                    image,
+                    document_id=msg.document_id,
+                    page_num=msg.page_num,
+                    language_hint=msg.language_hint,
+                )
+            except TierNotImplemented:
+                fallback = None
+            if fallback is not None:
+                fallback.low_conf_count = sum(
+                    1 for w in fallback.words if w.conf < self._threshold
+                )
+                best = fallback
+                log.info("ocr_form_vlm_fallback_tesseract",
+                         document_id=msg.document_id, page_num=msg.page_num)
+
         return best
 
     async def _resolve_page_type(

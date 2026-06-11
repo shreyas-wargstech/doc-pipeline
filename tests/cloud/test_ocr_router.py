@@ -328,3 +328,18 @@ async def test_identity_page_type_not_overwritten():
     await router.process_page(_msg_type("form"), b"img", repo)
     assert typer.calls == 0               # identity page → structure types it
     assert repo.saved[0]["page_type"] is None
+
+
+@pytest.mark.anyio
+async def test_form_vlm_unavailable_falls_back_to_tesseract():
+    """Offline / no OPENROUTER key: the form's VLM tier is unavailable. The form
+    is MIXED content, so Tesseract still extracts the printed registration_no —
+    fall back to it rather than failing the page (unlike pure-handwritten covers)."""
+    t = FakeTier("tesseract", mean_conf=72.0)
+    vlm = FakeTier("vlm", raises=True)
+    router = _router(t=t, vlm=vlm)
+    repo = FakeRepo()
+    res = await router.process_page(_msg_type("form"), b"img", repo)
+    assert res is not None and res.tier == "tesseract"  # fell back
+    assert t.calls == 1
+    assert repo.saved[0]["ocr_status"] == OCRStatus.DONE
