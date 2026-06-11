@@ -21,13 +21,18 @@ class ReferenceRepository:
 
     async def find_by_registration_no(self, reg_no: int) -> ReferenceMatch | None:
         """Exact lookup. Returns the row plus identity fields (name + dob) so the
-        Match stage can cross-check before trusting the number. None if no row."""
+        Match stage can cross-check before trusting the number, and the raw
+        name-part/gender columns for post-match back-fill. None if no row."""
         result = await self.session.execute(
             text(
                 "SELECT id, registration_no, "
                 "       COALESCE(fields_norm->>'full_name', '')   AS full_name, "
                 "       COALESCE(fields_norm->>'name_change', '') AS name_change, "
-                "       COALESCE(date_of_birth, '')               AS date_of_birth "
+                "       COALESCE(date_of_birth, '')               AS date_of_birth, "
+                "       COALESCE(f_name, '')                      AS f_name, "
+                "       COALESCE(m_name, '')                      AS m_name, "
+                "       COALESCE(l_name, '')                      AS l_name, "
+                "       COALESCE(gender, '')                      AS gender "
                 "FROM reference_data WHERE registration_no = :rn"
             ),
             {"rn": reg_no},
@@ -41,6 +46,44 @@ class ReferenceRepository:
             full_name=row.full_name,
             name_change=row.name_change,
             date_of_birth=row.date_of_birth,
+            f_name=row.f_name,
+            m_name=row.m_name,
+            l_name=row.l_name,
+            gender=row.gender,
+        )
+
+    async def find_by_id(self, ref_id: int) -> ReferenceMatch | None:
+        """Fetch the full identity row by reference_data.id. Used by the Match
+        stage to back-fill document identity columns after a *fuzzy* match
+        (the fuzzy path only carries a ReferenceCandidate, which lacks
+        dob/gender/name parts). None if no row."""
+        result = await self.session.execute(
+            text(
+                "SELECT id, registration_no, "
+                "       COALESCE(fields_norm->>'full_name', '')   AS full_name, "
+                "       COALESCE(fields_norm->>'name_change', '') AS name_change, "
+                "       COALESCE(date_of_birth, '')               AS date_of_birth, "
+                "       COALESCE(f_name, '')                      AS f_name, "
+                "       COALESCE(m_name, '')                      AS m_name, "
+                "       COALESCE(l_name, '')                      AS l_name, "
+                "       COALESCE(gender, '')                      AS gender "
+                "FROM reference_data WHERE id = :id"
+            ),
+            {"id": ref_id},
+        )
+        row = result.first()
+        if row is None:
+            return None
+        return ReferenceMatch(
+            id=row.id,
+            registration_no=row.registration_no,
+            full_name=row.full_name,
+            name_change=row.name_change,
+            date_of_birth=row.date_of_birth,
+            f_name=row.f_name,
+            m_name=row.m_name,
+            l_name=row.l_name,
+            gender=row.gender,
         )
 
     async def find_by_dob(self, dob_iso: str) -> list[ReferenceCandidate]:

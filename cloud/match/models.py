@@ -27,15 +27,21 @@ MatchStatus = Literal["matched", "unmatched", "not_applicable", "manual_review"]
 
 @dataclass(frozen=True)
 class ReferenceMatch:
-    """Result of an exact registration_no lookup, with identity fields for the
-    name+dob cross-check (the FALSE-MATCH guard). full_name / name_change come
-    pre-lowercased from fields_norm; date_of_birth is the registry TEXT value."""
+    """Result of an exact registration_no (or by-id) lookup, with identity
+    fields for the name+dob cross-check (the FALSE-MATCH guard) and for the
+    post-match back-fill. full_name / name_change come pre-lowercased from
+    fields_norm; f_name/m_name/l_name/gender/date_of_birth are the raw
+    registry column values (back-fill source of truth)."""
 
     id: int
     registration_no: int
     full_name: str = ""
     name_change: str = ""
     date_of_birth: str = ""
+    f_name: str = ""
+    m_name: str = ""
+    l_name: str = ""
+    gender: str = ""
 
 
 @dataclass(frozen=True)

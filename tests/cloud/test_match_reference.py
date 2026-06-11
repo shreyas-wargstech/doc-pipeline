@@ -17,6 +17,10 @@ async def test_find_by_registration_no_returns_identity_fields():
         full_name="nidhi sanjay toshniwal",
         name_change="",
         date_of_birth="1995-02-27",
+        f_name="Nidhi",
+        m_name="Sanjay",
+        l_name="Toshniwal",
+        gender="F",
     )
     result_obj = MagicMock()
     result_obj.first.return_value = row
@@ -42,3 +46,72 @@ async def test_find_by_registration_no_missing_returns_none():
 
     repo = ReferenceRepository(session)
     assert await repo.find_by_registration_no(99999) is None
+
+
+@pytest.mark.asyncio
+async def test_find_by_registration_no_includes_name_parts_and_gender():
+    row = SimpleNamespace(
+        id=9,
+        registration_no=34903,
+        full_name="manisha baban yewale",
+        name_change="",
+        date_of_birth="1979-03-09",
+        f_name="Manisha",
+        m_name="Baban",
+        l_name="Yewale",
+        gender="F",
+    )
+    result_obj = MagicMock()
+    result_obj.first.return_value = row
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result_obj)
+
+    repo = ReferenceRepository(session)
+    match = await repo.find_by_registration_no(34903)
+
+    assert match.f_name == "Manisha"
+    assert match.m_name == "Baban"
+    assert match.l_name == "Yewale"
+    assert match.gender == "F"
+
+
+@pytest.mark.asyncio
+async def test_find_by_id_returns_full_row():
+    row = SimpleNamespace(
+        id=7,
+        registration_no=34903,
+        full_name="nidhi sanjay toshniwal",
+        name_change="",
+        f_name="Nidhi",
+        m_name="Sanjay",
+        l_name="Toshniwal",
+        gender="F",
+        date_of_birth="1995-02-27",
+    )
+    result_obj = MagicMock()
+    result_obj.first.return_value = row
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result_obj)
+
+    repo = ReferenceRepository(session)
+    match = await repo.find_by_id(7)
+
+    assert match is not None
+    assert match.id == 7
+    assert match.registration_no == 34903
+    assert match.f_name == "Nidhi"
+    assert match.m_name == "Sanjay"
+    assert match.l_name == "Toshniwal"
+    assert match.gender == "F"
+    assert match.date_of_birth == "1995-02-27"
+
+
+@pytest.mark.asyncio
+async def test_find_by_id_missing_returns_none():
+    result_obj = MagicMock()
+    result_obj.first.return_value = None
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result_obj)
+
+    repo = ReferenceRepository(session)
+    assert await repo.find_by_id(999999) is None
