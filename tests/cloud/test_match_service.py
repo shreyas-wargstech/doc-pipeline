@@ -244,3 +244,58 @@ async def test_exact_hit_absent_name_dob_confirms_is_matched(monkeypatch):
     assert result.method == "exact"
     assert result.matched_on == "registration_no+dob"
     ref_repo.find_by_dob.assert_not_awaited()  # accepted on the exact path
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_all_signals_absent_is_matched(monkeypatch):
+    """reg_no exact-hits, no name, no dob → trust the unique number → matched
+    on registration_no alone (no manual_review)."""
+    doc = _doc(reg_no="34903", name=None, dob=None)
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(id=9, registration_no=34903,
+                             full_name="manisha baban yewale", date_of_birth=""),
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    assert result.reference_data_id == 9
+    assert result.matched_on == "registration_no"
+    ref_repo.find_by_dob.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_name_and_dob_confirm_provenance_is_name(monkeypatch):
+    """Both name (score 100 >= NAME_CONFIRM) and dob confirm → provenance favors
+    name (registration_no+name)."""
+    doc = _doc(reg_no="34903", name="manisha baban yewale",
+               dob=datetime.date(1979, 3, 9))
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(id=9, registration_no=34903,
+                             full_name="manisha baban yewale",
+                             date_of_birth="1979-03-09"),
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    assert result.matched_on == "registration_no+name"
+
+
+@pytest.mark.asyncio
+async def test_exact_hit_midband_name_absent_dob_is_matched(monkeypatch):
+    """Mid-band name (60..85) does not confirm and does not conflict; with no dob
+    it neither blocks nor labels — matched on registration_no alone."""
+    # token_sort_ratio("nidhi toshniwal","nidhi sanjay toshniwal") = 81.08 (mid-band)
+    doc = _doc(reg_no="34903", name="nidhi toshniwal", dob=None)
+    doc_repo, ref_repo = _wire(
+        monkeypatch,
+        doc,
+        exact=ReferenceMatch(id=9, registration_no=34903,
+                             full_name="nidhi sanjay toshniwal", date_of_birth=""),
+    )
+    result = await match_document("d", session=MagicMock())
+    assert result.match_status == "matched"
+    assert result.matched_on == "registration_no"
+    assert result.score < 85.0  # mid-band, did not reach NAME_CONFIRM
+    ref_repo.find_by_dob.assert_not_awaited()
