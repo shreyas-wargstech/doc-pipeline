@@ -1,18 +1,13 @@
-"""Persist SQS consumer / Lambda handler. One message == one document.
+"""Index SQS consumer / Lambda handler. One message == one document.
 
-On success, optionally chains the document to the Index queue (when
-sqs_index_queue_url is configured). persist_document flips documents.status to
-'processed' (preserves manual_review / never downgrades failed) and is
-idempotent, so redelivery of a failed message is safe.
+Terminal stage — no chaining after index.
 """
 from __future__ import annotations
 
 import anyio
 
+from cloud.index.handler import index_document
 from cloud.orchestration.models import StageMessage
-from cloud.orchestration.sqs import enqueue_stage
-from cloud.persist.service import persist_document
-from shared.config import get_settings
 from shared.db import session_scope
 from shared.logging import get_logger
 
@@ -23,13 +18,8 @@ async def process_record(body: str) -> None:
     """Process one stage message. Raises on failure (caller marks for redelivery)."""
     msg = StageMessage.model_validate_json(body)
     async with session_scope() as session:
-        await persist_document(msg.document_id, session=session)
-    # Chain to index stage if configured
-    index_url = get_settings().sqs_index_queue_url
-    if index_url:
-        await enqueue_stage(index_url, msg.document_id)
-        log.info("persist_consumer.chained_index", document_id=msg.document_id)
-    log.info("persist_consumer.done", document_id=msg.document_id)
+        await index_document(msg.document_id, session=session)
+    log.info("index_consumer.done", document_id=msg.document_id)
 
 
 async def _run_event_async(event: dict) -> dict:
@@ -39,7 +29,7 @@ async def _run_event_async(event: dict) -> dict:
         try:
             await process_record(record["body"])
         except Exception:  # noqa: BLE001 — record-scoped; isolate one bad doc
-            log.exception("persist_record_failed", message_id=msg_id)
+            log.exception("index_record_failed", message_id=msg_id)
             failures.append({"itemIdentifier": msg_id})
     return {"batchItemFailures": failures}
 

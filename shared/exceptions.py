@@ -58,20 +58,20 @@ class OrchestrationError(PipelineError):
 
 
 class IndexingError(PipelineError):
-    """Index stage failure (summarisation, keyword extraction, entity extraction, or write)."""
+    """Base for all index-stage errors."""
 
 
 class IndexSummarizationError(IndexingError):
-    """LLM summarisation failed and could not be recovered."""
+    """LLM summarisation failed or is unavailable."""
 
 
 class IndexKeywordError(IndexingError):
-    """Keyword extraction failed (both LLM and TF-IDF paths)."""
+    """Keyword extraction failed (LLM mode only — TF-IDF path never raises)."""
 
 
 class IndexEntityError(IndexingError):
-    """Entity extraction failed or produced unparseable output."""
+    """Entity extraction LLM call failed."""
 
 
 class IndexWriteError(IndexingError):
-    """DB or Neo4j write failure during indexing."""
+    """Failed to write index results to a datastore (Qdrant, Postgres, Neo4j)."""
