@@ -55,3 +55,23 @@ class MatchError(PipelineError):
 
 class OrchestrationError(PipelineError):
     """Raised by the inter-stage orchestration (sweeper / stage chaining)."""
+
+
+class IndexingError(PipelineError):
+    """Base for all index-stage errors."""
+
+
+class IndexSummarizationError(IndexingError):
+    """LLM summarisation failed or is unavailable."""
+
+
+class IndexKeywordError(IndexingError):
+    """Keyword extraction failed (LLM mode only — TF-IDF path never raises)."""
+
+
+class IndexEntityError(IndexingError):
+    """Entity extraction LLM call failed."""
+
+
+class IndexWriteError(IndexingError):
+    """Failed to write index results to a datastore (Qdrant, Postgres, Neo4j)."""
