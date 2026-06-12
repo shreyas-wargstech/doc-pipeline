@@ -76,4 +76,5 @@ testpaths = ["tests"]
 markers = [
     "integration: requires running services (run with `make test-integration`)",
     "openrouter: requires an OpenRouter API key (OPENROUTER_API_KEY set)",
+    "benchmark: retrieval quality benchmarks — opt-in only, requires indexed data",
 ]
