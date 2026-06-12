@@ -55,3 +55,23 @@ class MatchError(PipelineError):
 
 class OrchestrationError(PipelineError):
     """Raised by the inter-stage orchestration (sweeper / stage chaining)."""
+
+
+class IndexError(PipelineError):
+    """Index stage failure (summarisation, keyword extraction, entity extraction, or write)."""
+
+
+class IndexSummarizationError(IndexError):
+    """LLM summarisation failed and could not be recovered."""
+
+
+class IndexKeywordError(IndexError):
+    """Keyword extraction failed (both LLM and TF-IDF paths)."""
+
+
+class IndexEntityError(IndexError):
+    """Entity extraction failed or produced unparseable output."""
+
+
+class IndexWriteError(IndexError):
+    """DB or Neo4j write failure during indexing."""

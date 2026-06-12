@@ -111,6 +111,10 @@ CREATE TABLE IF NOT EXISTS documents (
     --   record   : {"book_title": "...", "year": 2024, "register_type": "..."}
     metadata             JSONB       NOT NULL DEFAULT '{}'::jsonb,
 
+    -- Retrieval index columns (populated by cloud/index/ stage)
+    document_summary     TEXT,
+    index_status         VARCHAR,
+
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -159,6 +163,12 @@ CREATE TABLE IF NOT EXISTS pages (
 
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Retrieval index columns (populated by cloud/index/ stage)
+    page_summary         TEXT,
+    search_keywords      JSONB           NOT NULL DEFAULT '[]'::jsonb,
+    index_entities       JSONB           NOT NULL DEFAULT '[]'::jsonb,
+    index_status         VARCHAR,
 
     UNIQUE (document_id, page_num)
 );
