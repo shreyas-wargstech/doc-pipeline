@@ -181,6 +181,8 @@ CREATE INDEX IF NOT EXISTS idx_pages_page_type
     ON pages (page_type) WHERE page_type IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pages_structured_json
     ON pages USING GIN (structured_json);
+CREATE INDEX IF NOT EXISTS idx_pages_search_keywords
+    ON pages USING GIN (search_keywords);
 
 
 -- -----------------------------------------------------------------------------
