@@ -64,6 +64,9 @@ class Settings(BaseSettings):
         "openrouter/free", alias="OPENROUTER_TEXT_MODEL"
     )
 
+    # Retrieval cascade
+    retrieval_min_results: int = Field(3, alias="RETRIEVAL_MIN_RESULTS")
+
     # Structure stage
     structure_max_chars: int = Field(6000, alias="STRUCTURE_MAX_CHARS")
 
