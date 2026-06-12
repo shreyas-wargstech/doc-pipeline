@@ -42,7 +42,7 @@ Text:
 Reply with ONLY: [{{"type":"...","value":"...","confidence":0.0}}]"""
 
 _MAX_CHARS = 3000
-_JSON_ARR = re.compile(r"\[.*\]", re.DOTALL)
+_JSON_ARR = re.compile(r"\[.*?\]", re.DOTALL)
 
 
 def _parse_entities(raw: str) -> list[IndexedEntity]:
