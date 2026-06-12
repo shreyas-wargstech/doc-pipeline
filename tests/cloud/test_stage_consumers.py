@@ -111,17 +111,21 @@ def mock_session_scope_persist():
 
 
 @pytest.mark.asyncio
-async def test_persist_consumer_is_terminal(mock_session_scope_persist):
+async def test_persist_consumer_chains_to_index(mock_session_scope_persist):
     from cloud.persist import consumer
 
     body = StageMessage(document_id="doc3").model_dump_json()
-    with patch.object(consumer, "persist_document", new_callable=AsyncMock) as pd:
+    with patch.object(consumer, "persist_document", new_callable=AsyncMock) as pd, \
+         patch.object(consumer, "enqueue_stage", new_callable=AsyncMock) as eq, \
+         patch.object(consumer, "get_settings",
+                      return_value=type("S", (), {"sqs_index_queue_url": "http://q/index.fifo"})()):
         await consumer.process_record(body)
 
     pd.assert_awaited_once()
     assert pd.call_args.args[0] == "doc3"
-    # No enqueue_stage import on a terminal consumer
-    assert not hasattr(consumer, "enqueue_stage")
+    eq.assert_awaited_once()
+    assert eq.call_args.args[0] == "http://q/index.fifo"
+    assert eq.call_args.args[1] == "doc3"
 
 
 def test_stage_worker_config_maps_each_stage():
