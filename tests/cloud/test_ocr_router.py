@@ -70,7 +70,7 @@ def _msg(content_type="typed", language_hint="latin"):
         page_num=1,
         s3_key="documents/doc1/pages/page_001.png",
         document_category="practitioner",
-        page_type="certificate",  # non-identity page (capped at Tesseract)
+        page_type="other",  # non-identity page (capped at Tesseract)
         content_type=content_type,
         language_hint=language_hint,
     )
@@ -107,13 +107,13 @@ async def test_typed_starts_tesseract_high_conf_done():
 @pytest.mark.anyio
 async def test_low_conf_non_identity_does_not_escalate_to_vlm():
     """Non-identity pages never escalate to VLM, even with low Tesseract confidence.
-    Escalation is only available for identity pages (form/cover), which are VLM-first."""
+    Escalation is only available for identity pages (form), which are VLM-first."""
     t = FakeTier("tesseract", mean_conf=40.0)
     vlm = FakeTier("vlm", mean_conf=88.0)
     router = _router(t=t, vlm=vlm)
     res = await router.route(_msg("typed"), b"img")
 
-    # Non-identity page (certificate) capped at Tesseract, no VLM escalation
+    # Non-identity page (other) capped at Tesseract, no VLM escalation
     assert t.calls == 1 and vlm.calls == 0
     assert res.tier == "tesseract" and res.mean_conf == 40.0
 
@@ -150,22 +150,15 @@ async def test_non_identity_handwritten_still_capped_at_tesseract():
 
 
 @pytest.mark.anyio
-async def test_form_vs_cover_vlm_unavailable_fallback():
-    """Form and cover are both VLM-first. Form gets Tesseract fallback if VLM
-    unavailable (mixed content). Cover does not (pure handwritten)."""
-    # Test form fallback
-    router1 = _router(t=FakeTier("tesseract", mean_conf=95.0), vlm=FakeTier("vlm", raises=True))
-    repo1 = FakeRepo()
-    res1 = await router1.process_page(_msg_type("form"), b"img", repo1)
-    assert res1 is not None and res1.tier == "tesseract"
-    assert repo1.saved[0]["ocr_status"] == OCRStatus.DONE
-
-    # Test cover no fallback
-    router2 = _router(t=FakeTier("tesseract", mean_conf=95.0), vlm=FakeTier("vlm", raises=True))
-    repo2 = FakeRepo()
-    res2 = await router2.process_page(_msg_type("cover"), b"img", repo2)
-    assert res2 is None
-    assert repo2.saved[0]["ocr_status"] == OCRStatus.FAILED
+async def test_form_vlm_unavailable_falls_back_to_tesseract_no_cover():
+    """Form is VLM-first but falls back to Tesseract if VLM is unavailable
+    (mixed content carries a printed registration_no even when handwriting
+    can't be read)."""
+    router = _router(t=FakeTier("tesseract", mean_conf=95.0), vlm=FakeTier("vlm", raises=True))
+    repo = FakeRepo()
+    res = await router.process_page(_msg_type("form"), b"img", repo)
+    assert res is not None and res.tier == "tesseract"
+    assert repo.saved[0]["ocr_status"] == OCRStatus.DONE
 
 
 @pytest.mark.anyio
@@ -253,7 +246,7 @@ async def test_non_identity_lowconf_does_not_escalate_to_vlm():
     t = FakeTier("tesseract", mean_conf=20.0)
     vlm = FakeTier("vlm", mean_conf=95.0)
     router = _router(t=t, vlm=vlm)
-    res = await router.route(_msg_type("certificate"), b"img")
+    res = await router.route(_msg_type("other"), b"img")
     assert t.calls == 1 and vlm.calls == 0  # capped at tesseract
     assert res.tier == "tesseract"
 
@@ -263,7 +256,7 @@ async def test_non_identity_handwritten_starts_tesseract_not_vlm():
     t = FakeTier("tesseract", mean_conf=30.0)
     vlm = FakeTier("vlm", mean_conf=95.0)
     router = _router(t=t, vlm=vlm)
-    res = await router.route(_msg_type("certificate", "handwritten"), b"img")
+    res = await router.route(_msg_type("other", "handwritten"), b"img")
     assert t.calls == 1 and vlm.calls == 0
     assert res.tier == "tesseract"
 
@@ -313,7 +306,7 @@ async def test_non_identity_page_type_from_keywords():
     t.run = run
     router = _router_typed(t=t, typer=FakeTyper())
     repo = FakeRepo()
-    await router.process_page(_msg_type("certificate"), b"img", repo)
+    await router.process_page(_msg_type("other"), b"img", repo)
     assert repo.saved[0]["page_type"] == "aadhaar"
 
 
@@ -323,7 +316,7 @@ async def test_non_identity_lowconf_keywords_escalate_to_typer():
     typer = FakeTyper("ssc")
     router = _router_typed(t=t, typer=typer)
     repo = FakeRepo()
-    await router.process_page(_msg_type("certificate"), b"img", repo)
+    await router.process_page(_msg_type("other"), b"img", repo)
     assert typer.calls == 1
     assert repo.saved[0]["page_type"] == "ssc"
 
@@ -355,27 +348,3 @@ async def test_form_vlm_unavailable_falls_back_to_tesseract():
     assert res.low_conf_count == 0  # mean_conf=72.0 > threshold=70.0 → no low-conf words
 
 
-@pytest.mark.anyio
-async def test_cover_starts_vlm_direct():
-    """A manifest 'cover' page now goes straight to VLM, like 'form' —
-    no Tesseract-first, no confidence gate."""
-    t = FakeTier("tesseract", mean_conf=95.0)
-    vlm = FakeTier("vlm", mean_conf=88.0)
-    router = _router(t=t, vlm=vlm)
-    res = await router.route(_msg_type("cover"), b"img")
-    assert t.calls == 0 and vlm.calls == 1
-    assert res.tier == "vlm"
-
-
-@pytest.mark.anyio
-async def test_cover_vlm_unavailable_fails_no_tesseract_fallback():
-    """Cover is pure-handwritten — if VLM is unavailable it fails clean,
-    unlike 'form' which gets a narrow Tesseract fallback (mixed content)."""
-    t = FakeTier("tesseract", mean_conf=95.0)
-    vlm = FakeTier("vlm", raises=True)
-    router = _router(t=t, vlm=vlm)
-    repo = FakeRepo()
-    res = await router.process_page(_msg_type("cover"), b"img", repo)
-    assert res is None
-    assert t.calls == 0  # no fall-back to Tesseract for cover
-    assert repo.saved[0]["ocr_status"] == OCRStatus.FAILED

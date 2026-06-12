@@ -27,7 +27,7 @@ VALID_MANIFEST = {
         {
             "page_num": 1,
             "s3_key": f"documents/{_DOC_ID}/pages/page_001.png",
-            "page_type": "cover",
+            "page_type": "form",
             "content_type": "typed",
             "language_hint": "latin",
         },
@@ -89,7 +89,7 @@ async def test_notify_calls_handle_manifest_with_correct_manifest(client: AsyncC
     manifest: Manifest = mock_hm.call_args.args[0]
     assert manifest.document_id == _DOC_ID
     assert len(manifest.pages) == 2
-    assert manifest.pages[0].page_type == "cover"
+    assert manifest.pages[0].page_type == "form"
     assert manifest.pages[0].content_type == "typed"
 
 

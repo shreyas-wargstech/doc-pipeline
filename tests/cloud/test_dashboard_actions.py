@@ -19,7 +19,7 @@ async def test_requeue_ocr_coerces_unknown_page_type_and_enqueues():
     doc = MagicMock()
     doc.document_category = "practitioner"
     pages = [
-        _fake_page(1, "documents/d/pages/page_001.png", "cover"),      # known literal
+        _fake_page(1, "documents/d/pages/page_001.png", "form"),        # known literal
         _fake_page(2, "documents/d/pages/page_002.png", "aadhaar"),    # unknown -> other
         _fake_page(3, "documents/d/pages/page_003.png", None),         # None -> other
     ]
@@ -36,7 +36,7 @@ async def test_requeue_ocr_coerces_unknown_page_type_and_enqueues():
         n = await actions.requeue_ocr("d", page_nums=None)
 
     assert n == 3
-    assert [m.page_type for m in enqueued_msgs] == ["cover", "other", "other"]
+    assert [m.page_type for m in enqueued_msgs] == ["form", "other", "other"]
     assert all(m.document_category == "practitioner" for m in enqueued_msgs)
     mark.assert_awaited_once_with("d", [1, 2, 3])
 
@@ -45,7 +45,7 @@ async def test_requeue_ocr_coerces_unknown_page_type_and_enqueues():
 async def test_requeue_ocr_selected_pages_only():
     doc = MagicMock()
     doc.document_category = "letter"
-    pages = [_fake_page(1, "k1", "cover"), _fake_page(2, "k2", "form")]
+    pages = [_fake_page(1, "k1", "form"), _fake_page(2, "k2", "form")]
 
     async def fake_enqueue(msg):
         return "mid"

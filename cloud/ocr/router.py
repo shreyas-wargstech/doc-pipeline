@@ -48,15 +48,14 @@ _START: dict[str, int] = {
 # Only these pages get the full Tesseract→VLM transcription ladder; every other
 # page is capped at Tesseract (no paid VLM transcription) — its page_type is
 # assigned by the keyword page-typer instead.
-_IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"cover", "form"})
+_IDENTITY_PAGE_TYPES: frozenset[str] = frozenset({"form"})
 _TESSERACT_IDX: int = _LADDER.index("tesseract")  # cap index for non-identity pages
 
 # Page types that go STRAIGHT to the VLM tier (no Tesseract-first, no conf gate).
 # The application form carries the handwritten identity fields (name, dob) that
-# Tesseract cannot read. The cover (manifest label "cover") also carries the
-# handwritten name + dob and is now VLM-first too (2026-06-12) — Tesseract
-# garbles handwriting on covers, so identity extraction was failing.
-_VLM_FIRST_PAGE_TYPES: frozenset[str] = frozenset({"form", "cover"})
+# Tesseract cannot read. "cover" was folded into "form" (2026-06-12, app_cover
+# retirement) — NAS now emits "form" for both.
+_VLM_FIRST_PAGE_TYPES: frozenset[str] = frozenset({"form"})
 _VLM_IDX: int = _LADDER.index("vlm")
 
 
@@ -134,9 +133,9 @@ class OcrRouter:
         return _START.get(content_type, 0)
 
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
-        """Run the tier ladder. Form pages (_VLM_FIRST_PAGE_TYPES) start directly
-        at VLM, skipping Tesseract. Other identity pages (cover) use the full
-        Tesseract→VLM ladder. Non-identity pages are capped at Tesseract only.
+        """Run the tier ladder. Identity pages (_IDENTITY_PAGE_TYPES, currently
+        just "form") start directly at VLM (_VLM_FIRST_PAGE_TYPES), skipping
+        Tesseract. Non-identity pages are capped at Tesseract only.
         Escalation only — never falls back to a lower tier (form gets a narrow
         Tesseract fallback in route() itself when VLM is unavailable). Returns the
         accepted result, or None if no tier produced one."""

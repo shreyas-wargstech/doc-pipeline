@@ -12,6 +12,6 @@ class OcrPageMessage(BaseModel):
     page_num: int
     s3_key: str             # documents/<doc_id>/pages/page_NNN.png
     document_category: str  # practitioner | letter | receipt | record
-    page_type: PageType          # cover | form | receipt | certificate | other
+    page_type: PageType     # blank | form | other
     content_type: ContentType = "unknown"   # typed | handwritten | unknown
     language_hint: LanguageHint = "unknown"  # latin | devanagari | mixed | unknown
