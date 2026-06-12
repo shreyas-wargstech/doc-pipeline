@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     sqs_structure_queue_url: str = Field("", alias="SQS_STRUCTURE_QUEUE_URL")
     sqs_match_queue_url: str = Field("", alias="SQS_MATCH_QUEUE_URL")
     sqs_persist_queue_url: str = Field("", alias="SQS_PERSIST_QUEUE_URL")
+    sqs_index_queue_url: str = Field("", alias="SQS_INDEX_QUEUE_URL")
+
+    # Index stage
+    index_keyword_mode: str = Field(
+        "llm_with_tfidf_fallback", alias="INDEX_KEYWORD_MODE"
+    )  # "llm" | "tfidf" | "llm_with_tfidf_fallback"
+
+    # Retrieval cascade
+    retrieval_min_results: int = Field(3, alias="RETRIEVAL_MIN_RESULTS")
 
     # OpenRouter (cloud OCR tier — VLM via OpenAI-compatible gateway)
     openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")
