@@ -58,6 +58,75 @@ def patched(monkeypatch):
     return imgs
 
 
+@pytest.fixture
+def patched_with_form(monkeypatch):
+    """3 pages: page 1 typed/latin not-blank (generic text), page 2 typed/latin
+    not-blank (application form text), page 3 blank."""
+    imgs = [
+        np.full((50, 50), 255, np.uint8),
+        np.full((50, 50), 254, np.uint8),
+        np.full((50, 50), 253, np.uint8),
+    ]
+    monkeypatch.setattr(svc, "render_pdf", lambda path, *, dpi: imgs)
+
+    results = [
+        PreprocessResult(image=imgs[0], triage=_triage()),
+        PreprocessResult(image=imgs[1], triage=_triage()),
+        PreprocessResult(image=imgs[2], triage=_triage()),
+    ]
+    calls = {"i": 0}
+
+    def fake_preprocess(img, config, **kw):
+        r = results[calls["i"]]
+        calls["i"] += 1
+        return r
+
+    monkeypatch.setattr(svc, "preprocess_page", fake_preprocess)
+    blanks = {id(imgs[0]): False, id(imgs[1]): False, id(imgs[2]): True}
+    monkeypatch.setattr(svc, "is_blank_page", lambda gray, **kw: blanks[id(gray)])
+
+    ocr_text = {
+        id(imgs[0]): "Some unrelated certificate text with no keywords",
+        id(imgs[1]): "APPLICATION FOR REGISTRATION\nForm A\nApplicant Name: ...",
+    }
+    ocr_calls: list[int] = []
+
+    def fake_image_to_string(gray, lang=None):
+        ocr_calls.append(id(gray))
+        return ocr_text[id(gray)]
+
+    monkeypatch.setattr(svc.pytesseract, "image_to_string", fake_image_to_string)
+    return imgs, ocr_calls
+
+
+async def test_form_page_detected_via_keyword_match(tmp_path, patched_with_form):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake bytes")
+    s3 = _FakeS3()
+    imgs, ocr_calls = patched_with_form
+
+    manifest = await svc.upload_document(pdf, category="practitioner", s3=s3)
+
+    p1, p2, p3 = manifest.pages
+    assert p1.page_type == "other"   # no application_form keywords
+    assert p2.page_type == "form"    # "Form A" / "application for registration"
+    assert p3.page_type == "blank"
+
+
+async def test_blank_page_skips_ocr(tmp_path, patched_with_form):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake bytes")
+    s3 = _FakeS3()
+    imgs, ocr_calls = patched_with_form
+
+    await svc.upload_document(pdf, category="practitioner", s3=s3)
+
+    # OCR ran for page 1 and page 2 (not blank) but not page 3 (blank)
+    assert id(imgs[0]) in ocr_calls
+    assert id(imgs[1]) in ocr_calls
+    assert id(imgs[2]) not in ocr_calls
+
+
 async def test_upload_document_uploads_expected_keys(tmp_path, patched):
     pdf = tmp_path / "x.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake bytes")

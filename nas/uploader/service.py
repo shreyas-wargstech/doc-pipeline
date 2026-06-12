@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import cv2
+import pytesseract
 import structlog
 
 from nas.manifest.models import Manifest, PageManifest
@@ -18,6 +19,7 @@ from nas.preprocess.triage import is_blank_page
 from nas.uploader.render import DEFAULT_DPI, render_pdf
 from shared.exceptions import UploaderError
 from shared.hashing import hash_bytes
+from shared.page_type import classify_page_type
 from shared.storage_s3 import S3Storage
 
 log = structlog.get_logger(__name__)
@@ -57,7 +59,14 @@ async def upload_document(
         result = preprocess_page(img, cfg)
         gray = result.image
 
-        page_type = "blank" if is_blank_page(gray) else "other"
+        if is_blank_page(gray):
+            page_type = "blank"
+        else:
+            # Throwaway OCR — used only to classify page_type; not persisted.
+            # Cloud OCR re-transcribes "form" pages per the locked tier-ladder.
+            raw_text = pytesseract.image_to_string(gray, lang="eng+mar+hin")
+            fine_type, _conf = classify_page_type(raw_text)
+            page_type = "form" if fine_type == "application_form" else "other"
 
         ok, buf = cv2.imencode(".png", gray)
         if not ok:
