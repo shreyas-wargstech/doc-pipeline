@@ -552,3 +552,23 @@
 - **Test result:** 45 unit tests green, 1 benchmark skipped, integration test deselected (needs `make up`).
 - **Commits:** `b762455`..`2c7401d` (19 commits total on branch).
 - **Next:** Create PR → merge to `main`; populate `LABELED_QUERIES` in benchmark scaffold after indexing real bundles; add `SQS_INDEX_QUEUE_URL` to `.env`; run `python -m scripts.apply_index_schema` once against live DB; AWS auto-trigger wiring (Structure→Match→Persist→Index chain).
+
+## 2026-06-12 (continued) — NAS-side page-type detection (FIX-041 closed)
+
+- **What was done:** Implemented `docs/superpowers/plans/2026-06-12-nas-page-type-detection.md`.
+  Moved `classify_page_type`/`PAGE_TYPE_CONF_NET`/`_KEYWORD_RULES` to `shared/page_type.py`
+  (cloud re-exports for `VlmPageTyper`/router). `nas/uploader/service.py` now runs a
+  throwaway `pytesseract.image_to_string` pass on non-blank pages and classifies via
+  `classify_page_type`; `application_form` (any confidence) → manifest `page_type="form"`.
+  Dropped unused `cover`/`receipt`/`certificate` from `PageType` Literal. Simplified
+  `cloud/ocr/router.py` `_IDENTITY_PAGE_TYPES`/`_VLM_FIRST_PAGE_TYPES`,
+  `cloud/persist/service.py::_IDENTITY_PAGE_TYPES`, `cloud/structure/service.py::_STRUCTURE_IDENTITY_TYPES`
+  from `{form,cover}`/`{...,cover,...}` to `{form}`/`{...,form,...}` (cover was already
+  folded into form via app_cover retirement, 2026-06-12 earlier session).
+- **Net:** Closes FIX-041 — NAS now produces `page_type="form"` for real, so the
+  cloud VLM-first identity-page routing fires on first-pass OCR for new documents
+  (previously dead code). Historical S3 manifests with `page_type="cover"` are
+  unaffected (out of scope, noted in design doc).
+- **Next:** AWS auto-trigger wiring (Structure→Match→Persist chain); threshold
+  calibration (labeled pairs needed); re-validate a fresh real bundle end-to-end
+  to confirm `form` pages now route VLM-first from the manifest.
