@@ -38,7 +38,6 @@ async def index_document(document_id: str, *, session: AsyncSession) -> None:
         return
 
     try:
-        _doc_repo = DocumentRepository(session)
         page_repo = PageRepository(session)
         pages = await page_repo.list_for_document(document_id)
         page_results: list[PageIndexResult] = []

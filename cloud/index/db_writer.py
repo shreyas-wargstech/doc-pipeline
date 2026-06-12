@@ -71,7 +71,7 @@ async def upsert_page_index(
 ) -> None:
     """Write index columns for one page. Idempotent — overwrites on re-run."""
     try:
-        await session.execute(
+        result = await session.execute(
             text(
                 "UPDATE pages SET "
                 "  page_summary = :summary, "
@@ -89,6 +89,8 @@ async def upsert_page_index(
                 "status": index_status,
             },
         )
+        if result.rowcount == 0:
+            log.warning("upsert_page_index_no_rows_updated", page_id=page_id)
         log.info(
             "page_index_upserted",
             page_id=page_id,
