@@ -29,6 +29,16 @@ def test_bare_number_is_not_registration_no():
     assert _values(ents, "registration_no") == []
 
 
+def test_bare_r_prefix_registration_no_strips_prefix():
+    ents = regex_extract("15\nR-34952\n01- 19/03/03")
+    assert "34952" in _values(ents, "registration_no")
+
+
+def test_bare_r_prefix_with_dot_separator():
+    ents = regex_extract("R.34952")
+    assert "34952" in _values(ents, "registration_no")
+
+
 def test_devanagari_date_with_cue_is_dob_iso():
     ents = regex_extract("जन्म: २६/०२/१९९६")
     assert "1996-02-26" in _values(ents, "date_of_birth")

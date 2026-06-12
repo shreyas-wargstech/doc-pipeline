@@ -26,6 +26,10 @@ _REG_NO_ALLOTTED_RE = re.compile(
     r"\b([A-Za-z]?-?\d{4,7})\s+\d+\.\s+Registration\s+No",
     re.IGNORECASE,
 )
+# Bare "R-12345" / "R.12345" handwritten registration number, no nearby
+# "Registration No" label. Strips the "R" prefix — MCH reg numbers are plain
+# digits in reference_data.
+_REG_NO_BARE_RE = re.compile(r"\bR[.\-]\s?(\d{4,6})\b")
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"\b[6-9]\d{9}\b")
 _PINCODE_RE = re.compile(r"\b\d{6}\b")
@@ -78,6 +82,9 @@ def regex_extract(raw_text: str) -> list[Entity]:
 
     for m in _REG_NO_ALLOTTED_RE.finditer(text):
         add("registration_no", m.group(1).strip(), 0.9)
+
+    for m in _REG_NO_BARE_RE.finditer(text):
+        add("registration_no", m.group(1).strip(), 0.75)
 
     for m in _EMAIL_RE.finditer(text):
         add("email", m.group(0), 0.95)

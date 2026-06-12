@@ -537,3 +537,10 @@
   - **c405e466 (AMR-MCH-26-A-22020):** ✅ Success. p1 now `application_form` → structured (previously skipped as `other`). Exact reg_no=34903 hit, name_score=72.7 (OCR "Yewale Mamaha" vs registry "Manisha Baban Yewale", above `NAME_CONFLICT_FLOOR=60`) → `matched`, `matched_on=registration_no`. Back-fill overwrote previously-NULL `applicant_name_raw`/`dob`/`gender` with registry values "MANISHA BABAN YEWALE"/1979-03-09/F; `ocr_extracted` preserved original.
 - **Net:** 2/3 bundles fully fixed (1 was already matched but now back-filled). The remaining unmatched bundle needs historical VLM re-OCR of its cover page (separate, out-of-scope task) to benefit from Task 6's routing fix.
 - **Next:** AWS auto-trigger wiring (Structure→Match→Persist chain); threshold calibration (needs labeled pairs); optional historical re-OCR queue for d2d803d4's cover page.
+
+## 2026-06-12 (continued) — VLM re-OCR of d2d803d4 cover + bare R-prefix reg_no regex (FIX-037)
+
+- **What was done:** Verified OpenRouter VLM tier is live (test call OK). Re-OCR'd d2d803d4 page 1 (cover) directly via `OcrRouter.process_page` with `page_type="cover"` → VLM tier, mean_conf=85.0, 256 words (much cleaner than Tesseract). Structure re-run extracted `registration_no="IID LIC"` (LLM garbage) despite raw text containing "R-34952". Added `_REG_NO_BARE_RE` regex (FIX-037) to catch bare `R-NNNNN`/`R.NNNNN` reg numbers, strip the `R` prefix. 330 unit green.
+- **Re-run result:** d2d803d4 now extracts `registration_no=34952`, name="SHAH Dr. Mrs. S YOJANA CHERAG", dob=1978-12-28 → **matched** (`registration_no+dob`, name_score=72.3, reference_data_id=43788). Persisted, status=processed.
+- **Net:** All 3 validation bundles (7812b969, c405e466, d2d803d4) now `matched`.
+- **Next:** AWS auto-trigger wiring (Structure→Match→Persist chain); threshold calibration (labeled pairs needed).

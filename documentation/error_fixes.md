@@ -788,3 +788,17 @@ Online portal application form has "Mobile No" field immediately before qualific
 **Fix (partial — NOT yet implemented):** Add a post-extraction filter or prompt instruction: "registration_no must be ≤ 6 digits; discard values ≥ 7 digits as they are likely phone/application numbers." Also consider adding `provisional_no` as a separate entity type in structure models so it is captured without being confused with the final reg_no.
 
 **Rule:** Validate numeric identity fields by expected length after extraction. Mobile = 10 digits, application_no has alpha prefix — registration_no should be a short integer (≤ 6 digits for MCH).
+
+---
+
+## 2026-06-12 — Bare "R-12345" handwritten reg_no not extracted (FIX-037)
+
+**Symptom:** d2d803d4 cover page raw text (after VLM re-OCR) contained "R-34952" — the practitioner's MCH registration number — but `rollup_identity` resolved `registration_no="IID LIC"` (LLM hallucination), so match stayed `unmatched`.
+
+**Root cause:** `_REG_NO_RE`/`_REG_NO_ALLOTTED_RE` both require a "Registration No" label near the number. Handwritten covers often write just `R-NNNNN` / `R.NNNNN` standalone, with no label — regex found nothing, LLM extraction filled the gap with garbage.
+
+**Fix:** Added `_REG_NO_BARE_RE = r"\bR[.\-]\s?(\d{4,6})\b"` to `cloud/structure/regex_extract.py`, confidence 0.75, captures only the digit group (strips `R` prefix so `parse_registration_no` gets a pure int string). Regex source still wins over LLM in `_pick` even at lower confidence.
+
+**Result:** d2d803d4 now extracts `registration_no=34952` → matched (`registration_no+dob`, name_score=72.3, reference_data_id=43788). All 3 validation bundles now `matched`.
+
+**Rule:** Application-form/cover handwritten reg numbers often appear as bare `R-NNNNN`/`R.NNNNN` with no label — add label-free regex fallbacks for identity fields before relying on LLM, and always strip non-digit prefixes so `parse_registration_no` (pure-int parser) can use the value.
