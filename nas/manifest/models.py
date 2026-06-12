@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-PageType = Literal["blank", "cover", "form", "receipt", "certificate", "other"]
+PageType = Literal["blank", "form", "other"]
 ContentType = Literal["typed", "handwritten", "unknown"]
 LanguageHint = Literal["latin", "devanagari", "mixed", "unknown"]
 
