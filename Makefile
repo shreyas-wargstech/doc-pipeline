@@ -7,7 +7,7 @@ install:  ## Install Python deps with uv
 	uv sync --extra dev
 
 up:  ## Start local services (postgres, minio, qdrant, neo4j)
-	docker compose up -d
+	docker compose up -d postgres minio neo4j qdrant elasticmq
 
 down:  ## Stop local services (keep data volumes)
 	docker compose down
