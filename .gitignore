@@ -41,3 +41,4 @@ data/
 dist/
 build/
 .superpowers/
+.worktrees/
