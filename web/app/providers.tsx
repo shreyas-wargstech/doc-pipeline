@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { ThemeModeProvider } from "./theme-mode";
 import { EmotionRegistry } from "./EmotionRegistry";
+import { ActionBarProvider } from "./action-bar";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: 1 } },
@@ -31,7 +32,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ThemeModeProvider>
       <EmotionRegistry>
         <QueryClientProvider client={qc}>
-          <ToastContext.Provider value={value}>{children}</ToastContext.Provider>
+          <ToastContext.Provider value={value}>
+            <ActionBarProvider>{children}</ActionBarProvider>
+          </ToastContext.Provider>
         </QueryClientProvider>
       </EmotionRegistry>
     </ThemeModeProvider>
