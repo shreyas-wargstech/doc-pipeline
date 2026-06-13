@@ -4,9 +4,9 @@ from __future__ import annotations
 from cloud.structure.document_type import DOCUMENT_TYPES, classify_document_type
 
 
-def test_document_types_has_53_entries():
-    assert len(DOCUMENT_TYPES) == 53
-    assert len(set(DOCUMENT_TYPES)) == 53  # no duplicates
+def test_document_types_has_54_entries():
+    assert len(DOCUMENT_TYPES) == 54
+    assert len(set(DOCUMENT_TYPES)) == 54  # no duplicates
 
 
 def test_fuzzy_exact_label_present():

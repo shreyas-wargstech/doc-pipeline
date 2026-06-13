@@ -2,13 +2,13 @@
 
 ## Problem
 `documents.document_type` (TEXT) exists in the schema but is never populated.
-Practitioner application bundles are submitted against one of ~53 MCH service
+Practitioner application bundles are submitted against one of ~54 MCH service
 types (Permanent Registration, Provisional Registration, Name Change, various
 NOC/Duplicate variants, etc.), and the application form prints/checks the
 applicable one. This is not yet extracted or surfaced.
 
 ## Enum
-The 53 canonical labels (exact strings, stored verbatim):
+The 54 canonical labels (exact strings, stored verbatim):
 
 ```python
 DOCUMENT_TYPES: tuple[str, ...] = (
@@ -82,7 +82,7 @@ DOCUMENT_TYPES: tuple[str, ...] = (
   `client` is not None, call the OpenRouter LLM (same transport/model as
   `cloud/structure/llm.py`) with the raw text + the full `DOCUMENT_TYPES` list,
   instructing it to respond with one label verbatim or `NONE`. Validate the
-  response is an exact (case-sensitive) match to one of the 53 labels;
+  response is an exact (case-sensitive) match to one of the 54 labels;
   anything else (including `NONE`, empty, or unrecognized text) -> `None`.
 - If pass 1 fails and `client` is `None` (or pass 2 returns `None`) ->
   overall result is `None`.

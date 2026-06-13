@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Populate `documents.document_type` for practitioner bundles by matching the application form's OCR text against the 53 canonical MCH service-type labels (fuzzy match first, LLM fallback second).
+**Goal:** Populate `documents.document_type` for practitioner bundles by matching the application form's OCR text against the 54 canonical MCH service-type labels (fuzzy match first, LLM fallback second).
 
-**Architecture:** New `cloud/structure/document_type.py` holds the 53-label enum and a two-pass classifier (rapidfuzz `partial_ratio`, then an LLM fallback helper added to `cloud/structure/llm.py`). `structure_document` calls it for each identity page of a practitioner document and writes the best result to `documents.document_type` (existing nullable TEXT column — no schema change).
+**Architecture:** New `cloud/structure/document_type.py` holds the 54-label enum and a two-pass classifier (rapidfuzz `partial_ratio`, then an LLM fallback helper added to `cloud/structure/llm.py`). `structure_document` calls it for each identity page of a practitioner document and writes the best result to `documents.document_type` (existing nullable TEXT column — no schema change).
 
 **Tech Stack:** Python 3.13, rapidfuzz (already a dependency), OpenAI SDK via OpenRouter (existing `cloud/structure/llm.py` patterns), pytest + pytest-asyncio.
 
@@ -26,9 +26,9 @@ from __future__ import annotations
 from cloud.structure.document_type import DOCUMENT_TYPES, classify_document_type
 
 
-def test_document_types_has_53_entries():
-    assert len(DOCUMENT_TYPES) == 53
-    assert len(set(DOCUMENT_TYPES)) == 53  # no duplicates
+def test_document_types_has_54_entries():
+    assert len(DOCUMENT_TYPES) == 54
+    assert len(set(DOCUMENT_TYPES)) == 54  # no duplicates
 
 
 def test_fuzzy_exact_label_present():
@@ -69,7 +69,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'cloud.structure.docum
 # cloud/structure/document_type.py
 """Classify a practitioner application's MCH service type (A3).
 
-documents.document_type is one of 53 canonical MCH service labels (printed
+documents.document_type is one of 54 canonical MCH service labels (printed
 on / checked on the application form). Two-pass classification:
 
 1. Fuzzy match (rapidfuzz partial_ratio) of each label against the page's
@@ -190,7 +190,7 @@ for each label before changing the tie-break logic.
 
 ```bash
 git add cloud/structure/document_type.py tests/cloud/test_structure_document_type.py
-git commit -m "feat(structure): A3 fuzzy document_type classification (53-label enum)"
+git commit -m "feat(structure): A3 fuzzy document_type classification (54-label enum)"
 ```
 
 ---
@@ -772,7 +772,7 @@ git commit -m "feat(structure): A3 set documents.document_type from application 
 In the backlog section listing A1-E1 (where A3 is mentioned, e.g. in the
 "Remaining sub-projects" / backlog notes), mark A3 as done with a one-line
 summary: `A3 DONE 2026-06-13 — documents.document_type classified via fuzzy
-match (rapidfuzz) + LLM fallback over the 53-label MCH service-type enum.
+match (rapidfuzz) + LLM fallback over the 54-label MCH service-type enum.
 See cloud/structure/document_type.py.`
 
 - [ ] **Step 2: Append a session_log.md entry**
@@ -785,7 +785,7 @@ Append (do not delete history) a new dated entry, capped ~15 lines, e.g.:
 - **What was done:** `documents.document_type` (existing nullable TEXT,
   unused) now populated for practitioner docs. New
   `cloud/structure/document_type.py::classify_document_type` — two-pass:
-  rapidfuzz `partial_ratio` against the 53-label MCH service-type enum
+  rapidfuzz `partial_ratio` against the 54-label MCH service-type enum
   (`DOCUMENT_TYPES` in `cloud/structure/models.py`,
   `DOCUMENT_TYPE_FUZZY_THRESHOLD=85`, uncalibrated), then LLM fallback
   (`classify_document_type_llm` in `cloud/structure/llm.py`, validates

@@ -1,6 +1,6 @@
 """Classify a practitioner application's MCH service type (A3).
 
-documents.document_type is one of 53 canonical MCH service labels (printed
+documents.document_type is one of 54 canonical MCH service labels (printed
 on / checked on the application form). Two-pass classification:
 
 1. Fuzzy match (rapidfuzz partial_ratio) of each label against the page's
@@ -63,6 +63,7 @@ DOCUMENT_TYPES: tuple[str, ...] = (
     "Duplicate NOC Pharmacology Course",
     "Duplicate NOC Permanent Registration",
     "Duplicate NOC Other Education",
+    "Duplicate NOC CCMP",
     "Duplicate NOC Adjunct OMS 1 Year",
     "Duplicate NOC Adjunct OMS 2 Year",
     "Duplicate NOC Adjunct OMS 3 Year",
