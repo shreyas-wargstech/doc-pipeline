@@ -14,6 +14,7 @@ import anyio
 import openai
 import structlog
 
+from cloud.structure.document_type import DOCUMENT_TYPES
 from cloud.structure.models import ENTITY_TYPES, PAGE_TYPES, Entity
 from shared.config import get_settings
 from shared.exceptions import StructureError
@@ -22,7 +23,27 @@ log = structlog.get_logger()
 
 _DEFAULT_MODEL = "openrouter/free"  # mirrors openrouter_text_model default
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-_IDENTITY_KEYS = ("name", "dob", "gender", "registration_no", "application_number")
+_IDENTITY_KEYS = (
+    "name", "dob", "gender", "registration_no",
+    "document_reference_no", "application_no",
+)
+
+_DOCUMENT_TYPE_SYSTEM_PROMPT = (
+    "You classify Maharashtra Council of Homoeopathy application forms into "
+    "one of a fixed list of service types. Reply with ONLY the exact label "
+    "text from the list, or the single word NONE if nothing fits — no "
+    "quotes, no explanation, no markdown."
+)
+
+_DOCUMENT_TYPE_USER_TEMPLATE = """\
+Pick the single best-matching service type for this application form from \
+this exact list (respond with one of these strings verbatim, or NONE):
+{label_list}
+
+Document text:
+---
+{raw_text}
+---"""
 
 # Keys returned in the identity dict.
 IdentityHints = dict[str, str]
@@ -51,7 +72,8 @@ Respond with ONLY this JSON object:
                "dob": "<YYYY-MM-DD or null>",
                "gender": "<M or F or null>",
                "registration_no": "<string or null>",
-               "application_number": "<string or null>"}}}}
+               "document_reference_no": "<string or null>",
+               "application_no": "<string or null>"}}}}
 
 Document text:
 ---
@@ -175,4 +197,61 @@ async def llm_extract(
             page_type=page_type,
             anchors=anchors,
         )
+    )
+
+
+def _classify_document_type_sync(
+    client: openai.OpenAI, model: str, raw_text: str
+) -> str | None:
+    prompt = _DOCUMENT_TYPE_USER_TEMPLATE.format(
+        label_list="\n".join(f"- {label}" for label in DOCUMENT_TYPES),
+        raw_text=raw_text,
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.0,
+            messages=[
+                {"role": "system", "content": _DOCUMENT_TYPE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+        )
+    except openai.OpenAIError as exc:
+        log.warning("structure_document_type_llm_failed", error=str(exc))
+        return None
+
+    raw = (response.choices[0].message.content or "").strip()
+    candidate = raw.strip().strip('"').strip("'")
+    if candidate == "NONE":
+        return None
+    if candidate in DOCUMENT_TYPES:
+        return candidate
+    log.warning("structure_document_type_llm_unrecognized", raw=raw[:200])
+    return None
+
+
+async def classify_document_type_llm(
+    raw_text: str, *, client: openai.OpenAI | None = None
+) -> str | None:
+    """LLM fallback for document_type classification (A3 pass 2).
+
+    Never raises — API errors, malformed output, or unrecognized labels all
+    return None (documents.document_type stays NULL).
+    """
+    if client is None:
+        settings = get_settings()
+        if not settings.openrouter_api_key:
+            return None
+        client = openai.OpenAI(
+            base_url=settings.openrouter_base_url,
+            api_key=settings.openrouter_api_key,
+        )
+        model = settings.openrouter_text_model
+        max_chars = settings.structure_max_chars
+    else:
+        model = _DEFAULT_MODEL
+        max_chars = 6000
+
+    return await anyio.to_thread.run_sync(
+        lambda: _classify_document_type_sync(client, model, raw_text[:max_chars])
     )

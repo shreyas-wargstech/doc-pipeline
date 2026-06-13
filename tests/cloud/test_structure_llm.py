@@ -31,7 +31,7 @@ def test_parse_good_response():
         '{"page_type":"aadhaar",'
         '"entities":[{"type":"person_name","value":"Ashish","confidence":0.9}],'
         '"identity":{"name":"Ashish","dob":"1996-02-26","gender":"M",'
-        '"registration_no":null,"application_number":null}}'
+        '"registration_no":null,"document_reference_no":null,"application_no":null}}'
     )
     pt, ents, ident = _parse_response(raw, fallback_page_type="other")
     assert pt == "aadhaar"
@@ -147,6 +147,48 @@ def _openrouter_configured() -> bool:
         return bool(get_settings().openrouter_api_key)
     except Exception:
         return False
+
+
+from cloud.structure.document_type import DOCUMENT_TYPES
+from cloud.structure.llm import classify_document_type_llm
+
+
+# ---- classify_document_type_llm (async) ------------------------------------
+
+@pytest.mark.asyncio
+async def test_classify_document_type_llm_valid_label():
+    client = _mock_client("Permanent Registration")
+    result = await classify_document_type_llm("some form text", client=client)
+    assert result == "Permanent Registration"
+
+
+@pytest.mark.asyncio
+async def test_classify_document_type_llm_strips_whitespace_and_quotes():
+    client = _mock_client('  "Name Change"\n')
+    result = await classify_document_type_llm("some form text", client=client)
+    assert result == "Name Change"
+
+
+@pytest.mark.asyncio
+async def test_classify_document_type_llm_none_response():
+    client = _mock_client("NONE")
+    result = await classify_document_type_llm("some form text", client=client)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_classify_document_type_llm_unrecognized_text_returns_none():
+    client = _mock_client("I think this is a birth certificate, not in your list")
+    result = await classify_document_type_llm("some form text", client=client)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_classify_document_type_llm_api_error_returns_none():
+    client = MagicMock()
+    client.chat.completions.create.side_effect = _FakeOpenAIError()
+    result = await classify_document_type_llm("some form text", client=client)
+    assert result is None
 
 
 @pytest.mark.integration
