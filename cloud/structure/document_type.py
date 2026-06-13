@@ -16,62 +16,10 @@ from __future__ import annotations
 import openai
 from rapidfuzz import fuzz
 
-DOCUMENT_TYPES: tuple[str, ...] = (
-    "Provisional Registration",
-    "Permanent Registration",
-    "OMS Permanent Registration",
-    "Name Change",
-    "Address Change",
-    "Council Certificate",
-    "Good Standing Certificate",
-    "No Pending Negligence Certificate",
-    "Transcript Certificate",
-    "Pharmacology Certificate",
-    "Verification of Qualification",
-    "NOC Adjunct OMS 1 Year",
-    "NOC Adjunct OMS 2 Year",
-    "NOC Adjunct OMS 3 Year",
-    "NOC Adjunct OMS 4 Year",
-    "NOC Adjunct OMS 5 Year",
-    "Adjunct Maharashtra 1 Year",
-    "Adjunct Maharashtra 2 Year",
-    "Adjunct Maharashtra 3 Year",
-    "Adjunct Maharashtra 4 Year",
-    "Adjunct Maharashtra 5 Year",
-    "NOC Permanent Registration",
-    "NOC Other Education",
-    "NOC Certificate Course of Modern Pharmacology",
-    "NOC Pharmacology Course",
-    "NOC MMC Registration",
-    "NOC Provisional Certificate",
-    "Duplicate Provisional Certificate",
-    "Duplicate Registration Certificate",
-    "Duplicate Diploma Certificate",
-    "Duplicate Marksheet",
-    "Duplicate Passing Certificate",
-    "Permanent Registration Out of State",
-    "Additional Qualification",
-    "Additional Qualification Out of State",
-    "Course of Modern Pharmacology Registration Certificate",
-    "Renewal of Registration",
-    "I Card",
-    "Discontinue of Registration",
-    "Provisional Extension Application",
-    "General Form",
-    "Duplicate NOC MMC Registration",
-    "Duplicate NOC Provisional Certificate",
-    "Duplicate NOC Pharmacology Course",
-    "Duplicate NOC Permanent Registration",
-    "Duplicate NOC Other Education",
-    "Duplicate NOC CCMP",
-    "Duplicate NOC Adjunct OMS 1 Year",
-    "Duplicate NOC Adjunct OMS 2 Year",
-    "Duplicate NOC Adjunct OMS 3 Year",
-    "Duplicate NOC Adjunct OMS 4 Year",
-    "Duplicate NOC Adjunct OMS 5 Year",
-    "Renewal NOC - Certificate Course in Modern Pharmacology",
-    "Duplicate Discontinue of Registration",
-)
+from cloud.structure.llm import classify_document_type_llm
+from cloud.structure.models import DOCUMENT_TYPES
+
+__all__ = ["DOCUMENT_TYPES", "DOCUMENT_TYPE_FUZZY_THRESHOLD", "classify_document_type"]
 
 # Uncalibrated — joins the existing uncalibrated-thresholds backlog item.
 DOCUMENT_TYPE_FUZZY_THRESHOLD = 85.0
@@ -96,11 +44,16 @@ def _fuzzy_match(raw_text: str) -> tuple[str | None, float]:
     return best_label, best_score
 
 
-def classify_document_type(
+async def classify_document_type(
     raw_text: str, *, client: openai.OpenAI | None
 ) -> str | None:
-    """Classify the MCH service type from one identity page's OCR text."""
+    """Classify the MCH service type from one identity page's OCR text.
+
+    Pass 1: fuzzy match against DOCUMENT_TYPES (rapidfuzz partial_ratio).
+    Pass 2: LLM fallback (classify_document_type_llm) if pass 1 doesn't
+    clear DOCUMENT_TYPE_FUZZY_THRESHOLD. Returns None if neither succeeds.
+    """
     label, score = _fuzzy_match(raw_text)
     if score >= DOCUMENT_TYPE_FUZZY_THRESHOLD:
         return label
-    return None
+    return await classify_document_type_llm(raw_text, client=client)

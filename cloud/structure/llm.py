@@ -14,8 +14,7 @@ import anyio
 import openai
 import structlog
 
-from cloud.structure.document_type import DOCUMENT_TYPES
-from cloud.structure.models import ENTITY_TYPES, PAGE_TYPES, Entity
+from cloud.structure.models import DOCUMENT_TYPES, ENTITY_TYPES, PAGE_TYPES, Entity
 from shared.config import get_settings
 from shared.exceptions import StructureError
 
