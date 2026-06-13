@@ -1,5 +1,16 @@
 # Session Log — Document Intelligence Pipeline
 
+## 2026-06-13 — Plan B: Document Workspace (page rail, viewer revamp, action-bar, MUI list) — DONE
+- Stage worked on: web (Next.js/MUI dashboard), builds on Plan A's MUI shell (merged `58795cb`).
+- Done: all 4 tasks implemented/reviewed/merged directly to `main` via subagent-driven-development.
+  - T1 (`f2b9bbd`): `PageRail.tsx` + shared `documents/[id]/layout.tsx` (persistent page rail w/ thumbnails, OCR status dots, active-page highlight).
+  - T2 (`a0c7970`): page-viewer revamp — MUI tabs (Summary/Structured/Raw), prev/next nav + keyboard arrows, copy-link, image prefetch.
+  - T3 (`63c7675`): overview page wires `ActionButtons` into action bar via `useSetActionBar`; deleted superseded `PageGrid.tsx`.
+  - T4 (`e523551`): `KpiCard`/`Filters`/`DocumentsTable`/`(dash)/page.tsx` converted to MUI (Card, native Select, Table, TablePagination).
+- Rule discovered: in this worktree, React 19 `use(params)` does NOT resolve synchronously under jsdom/RTL for a plain `Promise.resolve()` — pages needing `params` in tests must resolve via `useEffect`/`useState` (Skeleton fallback) instead, with `findBy*`/`waitFor` in tests. Used consistently across T2/T3.
+- `npx tsc --noEmit` clean, `npm run build` succeeds (12 routes). Minor non-blocking follow-ups noted by reviewers (TablePagination rows-per-page selector is a no-op single-option dropdown; Filters `Select native` + `labelId` redundancy) — not addressed, low priority polish.
+- Next step: none queued — Plan B complete. finishing-a-development-branch not needed (work committed directly to `main`, no feature branch).
+
 ## 2026-05-16 — Ingest v1 built, architecture revised mid-session
 - Stage worked on: ingest → architecture redesign (preprocess + persist scope expanded)
 - Done: Built ingest v1 (sha256 stream-hash, S3 `put_if_absent`, Postgres idempotent upsert via SQLAlchemy 2.0 async, structured logging, stage-specific exceptions). User then redesigned: NAS handles preprocessing + upload, S3 event drives cloud pipeline. Proposed 3-table Postgres schema (`documents` + `pages` + `reference_data`) and manifest.json contract.
@@ -647,3 +658,14 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Commit: `d0ea571`.
 - **A1-A4 all done.** Next step: flush+rerun (`make down-clean && make up &&
   make init`) on all sample bundles.
+
+
+## 2026-06-13 (continued) — flush+rerun paused, OpenRouter credits exhausted
+
+- Started flush+rerun: make down-clean && make up && make init (all green), load_reference_data (92,389 rows ok).
+- Started batch upload of 18 sample PDFs (HomoeoFiles_local/*.pdf) via scripts.upload_pdf, background task bl9rhl00h, log /tmp/upload_all.log.
+- Started OCR worker background task bmwl4er4c, log /tmp/ocr_worker.log.
+- Upload is slow: ~7min/doc just for render+Tesseract OSD triage per page (13pp doc).
+- PAUSED: user out of OpenRouter credits. VLM-tier (identity page OCR, structure LLM) will fail/hang without it.
+- **Resume:** top up OpenRouter credits, check bl9rhl00h/bmwl4er4c task status, then run sweeper + stage-workers (structure/match/persist) once OCR drains.
+
