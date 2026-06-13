@@ -1,6 +1,14 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { Table, type Column } from "@/components/ui/Table";
+import Box from "@mui/material/Box";
+import Paper from "@mui/material/Paper";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+import Typography from "@mui/material/Typography";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MatchBadge } from "@/components/ui/MatchBadge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
@@ -9,20 +17,53 @@ import type { DocRow } from "@/lib/types";
 
 export function DocumentsTable({ rows }: { rows: DocRow[] }) {
   const router = useRouter();
-  const columns: Column<DocRow>[] = [
-    { key: "registration_no", header: "Reg / File", className: "font-mono",
-      render: (r) => (
-        <div className="flex flex-col">
-          <span className="text-foreground">{r.registration_no ?? "—"}</span>
-          <span className="max-w-[18rem] truncate text-xs text-muted-fg">{r.original_filename}</span>
-        </div>
-      ) },
-    { key: "document_category", header: "Category", render: (r) => titleCase(r.document_category) },
-    { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status} /> },
-    { key: "match_status", header: "Match", render: (r) => <MatchBadge status={r.match_status} /> },
-    { key: "ocr", header: "OCR", render: (r) => <ProgressBar done={r.ocr_done} total={r.ocr_total} /> },
-    { key: "updated_at", header: "Updated", className: "tnum text-muted-fg", render: (r) => fmtDateTime(r.updated_at) },
-  ];
-  return <Table columns={columns} rows={rows} rowKey={(r) => r.document_id}
-    onRowClick={(r) => router.push(`/documents/${r.document_id}`)} empty="No documents match these filters." />;
+
+  if (rows.length === 0) {
+    return (
+      <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
+        <Typography color="text.secondary" variant="body2">No documents match these filters.</Typography>
+      </Paper>
+    );
+  }
+
+  return (
+    <TableContainer component={Paper} variant="outlined">
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Reg / File</TableCell>
+            <TableCell>Category</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell>Match</TableCell>
+            <TableCell>OCR</TableCell>
+            <TableCell>Updated</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow
+              key={r.document_id}
+              hover
+              onClick={() => router.push(`/documents/${r.document_id}`)}
+              sx={{ cursor: "pointer" }}
+            >
+              <TableCell sx={{ fontFamily: "var(--font-mono)" }}>
+                <Box sx={{ display: "flex", flexDirection: "column" }}>
+                  <Typography variant="body2">{r.registration_no ?? "—"}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: "18rem" }}>
+                    {r.original_filename}
+                  </Typography>
+                </Box>
+              </TableCell>
+              <TableCell>{titleCase(r.document_category)}</TableCell>
+              <TableCell><StatusBadge status={r.status} /></TableCell>
+              <TableCell><MatchBadge status={r.match_status} /></TableCell>
+              <TableCell><ProgressBar done={r.ocr_done} total={r.ocr_total} /></TableCell>
+              <TableCell className="tnum"><Typography variant="body2" color="text.secondary">{fmtDateTime(r.updated_at)}</Typography></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
 }

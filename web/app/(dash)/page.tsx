@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
+import Box from "@mui/material/Box";
+import TablePagination from "@mui/material/TablePagination";
 import { KpiCard } from "@/components/KpiCard";
 import { Filters } from "@/components/Filters";
 import { DocumentsTable } from "@/components/DocumentsTable";
-import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useDocuments, type DocFilters } from "@/hooks/useDocuments";
 import { useMetrics } from "@/hooks/useMetrics";
@@ -38,13 +39,17 @@ export default function DocumentsHome() {
         <DocumentsTable rows={docs.data!.documents} />
       )}
 
-      <div className="flex items-center justify-between text-sm text-muted-fg">
-        <span className="tnum">{total ? `${offset + 1}–${Math.min(offset + PAGE, total)} of ${total}` : "0"}</span>
-        <div className="flex gap-2">
-          <Button variant="secondary" disabled={offset === 0} onClick={() => setFilters({ ...filters, offset: Math.max(0, offset - PAGE) })}>Prev</Button>
-          <Button variant="secondary" disabled={offset + PAGE >= total} onClick={() => setFilters({ ...filters, offset: offset + PAGE })}>Next</Button>
-        </div>
-      </div>
+      <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+        <TablePagination
+          component="div"
+          count={total}
+          page={Math.floor(offset / PAGE)}
+          rowsPerPage={PAGE}
+          rowsPerPageOptions={[PAGE]}
+          onPageChange={(_, newPage) => setFilters({ ...filters, offset: newPage * PAGE })}
+          onRowsPerPageChange={() => {}}
+        />
+      </Box>
     </div>
   );
 }
