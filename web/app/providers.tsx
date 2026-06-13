@@ -2,6 +2,8 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { ThemeModeProvider } from "./theme-mode";
+import { EmotionRegistry } from "./EmotionRegistry";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: 1 } },
@@ -26,8 +28,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
   const value = useMemo(() => ({ toasts, push }), [toasts, push]);
   return (
-    <QueryClientProvider client={qc}>
-      <ToastContext.Provider value={value}>{children}</ToastContext.Provider>
-    </QueryClientProvider>
+    <ThemeModeProvider>
+      <EmotionRegistry>
+        <QueryClientProvider client={qc}>
+          <ToastContext.Provider value={value}>{children}</ToastContext.Provider>
+        </QueryClientProvider>
+      </EmotionRegistry>
+    </ThemeModeProvider>
   );
 }
