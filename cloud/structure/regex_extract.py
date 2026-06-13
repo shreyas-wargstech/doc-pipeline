@@ -14,7 +14,13 @@ from cloud.structure.models import Entity
 # Devanagari digits ०१२३४५६७८९ → ASCII 0-9
 _DEVANAGARI_DIGITS = {ord("०") + i: str(i) for i in range(10)}
 
-_APP_NO_RE = re.compile(r"AMR-MCH-\d{2}-[A-Z]-\d{3,6}", re.IGNORECASE)
+_DOC_REF_NO_RE = re.compile(r"AMR-MCH-\d{2}-[A-Z]-\d{3,6}", re.IGNORECASE)
+# Registry's numeric "Application No." (distinct from registration_no, which
+# identifies the practitioner). Labeled "Application No"/"App No"/"AppNo" + digits.
+_APPLICATION_NO_RE = re.compile(
+    r"app(?:lication)?\.?\s*(?:no|number)\.?\s*[:.\-]?\s*(\d{4,7})",
+    re.IGNORECASE,
+)
 _REG_NO_RE = re.compile(
     r"(?:reg(?:istration)?\.?\s*(?:no|number)\.?|नोंदणी)"
     r"\s*[:.\-]?\s*([A-Za-z]?-?\d{4,7})",
@@ -30,6 +36,11 @@ _REG_NO_ALLOTTED_RE = re.compile(
 # "Registration No" label. Strips the "R" prefix — MCH reg numbers are plain
 # digits in reference_data.
 _REG_NO_BARE_RE = re.compile(r"\bR[.\-]\s?(\d{4,6})\b")
+# "R1NNNNN" (6 digits, leading "1") — OCR misreads a "|" or "-" separator as
+# "1" (e.g. "R|92008"/"R-92008" -> "R192008"). No real MCH registration_no is
+# 6 digits (max ~92389), so a leading "1" here is always the misread
+# separator; strip it to recover the genuine 5-digit number.
+_REG_NO_BARE_OCR1_RE = re.compile(r"\bR1(\d{5})\b")
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"\b[6-9]\d{9}\b")
 _PINCODE_RE = re.compile(r"\b\d{6}\b")
@@ -74,8 +85,11 @@ def regex_extract(raw_text: str) -> list[Entity]:
             seen.add(key)
             out.append(Entity(type=etype, value=value, confidence=conf, source="regex"))
 
-    for m in _APP_NO_RE.finditer(text):
-        add("application_number", m.group(0).upper(), 0.97)
+    for m in _DOC_REF_NO_RE.finditer(text):
+        add("document_reference_no", m.group(0).upper(), 0.97)
+
+    for m in _APPLICATION_NO_RE.finditer(text):
+        add("application_no", m.group(1).strip(), 0.85)
 
     for m in _REG_NO_RE.finditer(text):
         add("registration_no", m.group(1).strip(), 0.9)
@@ -85,6 +99,9 @@ def regex_extract(raw_text: str) -> list[Entity]:
 
     for m in _REG_NO_BARE_RE.finditer(text):
         add("registration_no", m.group(1).strip(), 0.75)
+
+    for m in _REG_NO_BARE_OCR1_RE.finditer(text):
+        add("registration_no", m.group(1).strip(), 0.7)
 
     for m in _EMAIL_RE.finditer(text):
         add("email", m.group(0), 0.95)

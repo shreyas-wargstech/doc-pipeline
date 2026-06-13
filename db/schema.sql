@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS documents (
             ('received', 'processing', 'structuring', 'processed', 'failed', 'manual_review')),
 
     -- ---- Practitioner-only fields (nullable for other categories) ----------
-    application_number   TEXT,                             -- AMR-MCH-26-A-XXXXX
+    document_reference_no TEXT,                            -- AMR-MCH-26-A-XXXXX (portal/QR code, == filename)
+    application_no       BIGINT,                           -- registry's numeric Application No (reference_data.app_no)
     registration_no      TEXT,                             -- join key to reference_data
     applicant_name_raw   TEXT,                             -- as OCR'd, before normalization
     dob                  DATE,
@@ -126,8 +127,10 @@ CREATE INDEX IF NOT EXISTS idx_documents_status
 -- Partial indexes — only practitioner docs have these fields populated
 CREATE INDEX IF NOT EXISTS idx_documents_registration_no
     ON documents (registration_no) WHERE registration_no IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_documents_application_number
-    ON documents (application_number) WHERE application_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_document_reference_no
+    ON documents (document_reference_no) WHERE document_reference_no IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_application_no
+    ON documents (application_no) WHERE application_no IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_metadata
     ON documents USING GIN (metadata);
 
@@ -208,6 +211,7 @@ INSERT INTO page_types (name, description) VALUES
     ('provisional_reg',   'Provisional registration certificate'),
     ('form_e',            'Form E (name change / renewal)'),
     ('marriage_cert',     'Marriage certificate'),
+    ('birth_certificate', 'Birth certificate'),
     ('sbi_receipt',       'SBI e-receipt / challan'),
     ('photo_id',          'Photo identity document (PAN / driving licence / passport)'),
     ('letter_body',       'Official correspondence body'),

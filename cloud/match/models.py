@@ -39,6 +39,7 @@ class ReferenceMatch:
 
     id: int
     registration_no: int
+    app_no: int | None = None
     full_name: str = ""
     name_change: str = ""
     date_of_birth: str = ""

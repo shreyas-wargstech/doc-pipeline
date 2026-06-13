@@ -13,7 +13,7 @@ from cloud.match.reference import ReferenceRepository
 async def test_find_by_registration_no_returns_identity_fields():
     row = SimpleNamespace(
         id=7,
-        registration_no=34903,
+        registration_no=34903, app_no=89958,
         full_name="nidhi sanjay toshniwal",
         name_change="",
         date_of_birth="1995-02-27",
@@ -52,7 +52,7 @@ async def test_find_by_registration_no_missing_returns_none():
 async def test_find_by_registration_no_includes_name_parts_and_gender():
     row = SimpleNamespace(
         id=9,
-        registration_no=34903,
+        registration_no=34903, app_no=12345,
         full_name="manisha baban yewale",
         name_change="",
         date_of_birth="1979-03-09",
@@ -79,7 +79,7 @@ async def test_find_by_registration_no_includes_name_parts_and_gender():
 async def test_find_by_id_returns_full_row():
     row = SimpleNamespace(
         id=7,
-        registration_no=34903,
+        registration_no=34903, app_no=89958,
         full_name="nidhi sanjay toshniwal",
         name_change="",
         f_name="Nidhi",

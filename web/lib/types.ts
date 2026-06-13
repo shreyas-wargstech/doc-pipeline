@@ -29,6 +29,7 @@ export interface PageRow {
   structured_json: Record<string, unknown> | null;
   confidence_score: number | null;
   language_detected: string | null;
+  page_summary: string | null;
   ocr_status: OcrStatus;
   created_at: string;
   updated_at: string;
@@ -43,13 +44,15 @@ export interface DocFull {
   s3_key_pdf: string;
   page_count: number;
   status: DocStatus;
-  application_number: string | null;
+  document_reference_no: string | null;
+  application_no: number | null;
   registration_no: string | null;
   applicant_name_raw: string | null;
   dob: string | null;
   gender: string | null;
   reference_data_id: number | null;
   match_status: MatchStatus;
+  document_summary: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;

@@ -28,6 +28,7 @@ async def main() -> int:
         s.sqs_structure_queue_url,
         s.sqs_match_queue_url,
         s.sqs_persist_queue_url,
+        s.sqs_index_queue_url,
     ]
     session = aioboto3.Session()
     async with session.client(

@@ -8,10 +8,15 @@ def _values(ents, etype):
     return [e.value for e in ents if e.type == etype]
 
 
-def test_application_number_extracted_and_uppercased():
+def test_document_reference_no_extracted_and_uppercased():
     ents = regex_extract("Form amr-mch-26-a-07723 submitted")
-    assert _values(ents, "application_number") == ["AMR-MCH-26-A-07723"]
+    assert _values(ents, "document_reference_no") == ["AMR-MCH-26-A-07723"]
     assert all(e.source == "regex" for e in ents)
+
+
+def test_application_no_extracted_from_label():
+    ents = regex_extract("Application No: 89958")
+    assert "89958" in _values(ents, "application_no")
 
 
 def test_registration_no_context_anchored():
@@ -37,6 +42,15 @@ def test_bare_r_prefix_registration_no_strips_prefix():
 def test_bare_r_prefix_with_dot_separator():
     ents = regex_extract("R.34952")
     assert "34952" in _values(ents, "registration_no")
+
+
+def test_r1_prefix_is_ocr_pipe_misread_strips_leading_1():
+    # "R192008" is OCR misreading "R|92008" / "R-92008" — the "1" is a
+    # misread separator, not part of the registration number (no real MCH
+    # reg_no is 6 digits; max is ~92389).
+    ents = regex_extract("D/o Umesh Khedkar 1999 Yashwant Colony Shirur\nR192008\n17/2/2016")
+    assert "92008" in _values(ents, "registration_no")
+    assert "192008" not in _values(ents, "registration_no")
 
 
 def test_devanagari_date_with_cue_is_dob_iso():
@@ -83,7 +97,7 @@ def test_empty_text_returns_empty_list():
 
 def test_duplicate_values_deduped():
     ents = regex_extract("AMR-MCH-26-A-07723 ... AMR-MCH-26-A-07723")
-    assert _values(ents, "application_number") == ["AMR-MCH-26-A-07723"]
+    assert _values(ents, "document_reference_no") == ["AMR-MCH-26-A-07723"]
 
 
 def test_calendar_invalid_day_dropped():

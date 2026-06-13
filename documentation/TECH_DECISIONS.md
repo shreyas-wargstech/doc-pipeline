@@ -443,10 +443,15 @@ handwritten-Devanagari go through the same call — no per-script fan-out.
 | Embedding dimensions | **384** | Locked (model choice) | Changing requires full re-embed of all vectors. Do not change without planning a migration. |
 | Qdrant distance metric | **Cosine** | Locked (collection init) | Changing requires recreating the collection and re-upserting all vectors. |
 | Schema version (manifest) | **1** | `Manifest.schema_version` | Increment when manifest structure changes; enables migration path. |
-| Blank page skip threshold | **TBD** | Config (`BLANK_PAGE_VARIANCE_THRESHOLD`) | Pixel variance below this → skip OCR. Value not yet determined; needs calibration on sample scans. |
-| Fuzzy match threshold | **TBD** | Config (`FUZZY_MATCH_THRESHOLD`) | `rapidfuzz` score above this → accept substitution. Needs calibration. |
+| Triage handwritten thresholds | **h_cv≥1.10 AND s_cv≥1.80** | Calibrated 2026-06-11 (FIX-035) on real scans | AND logic (replaced weighted blend); one metric over → UNKNOWN → Tesseract + 70-net escalation. `height_weight` removed. Files: `nas/preprocess/triage.py`, `cloud/eval/content_type.py`. |
+| Fuzzy match — `FUZZY_MATCH_HIGH` | **90.0** | `cloud/match/models.py` | `>=` → `matched` (dob-fuzzy recovery path). Uncalibrated (no labeled pairs). |
+| Fuzzy match — `FUZZY_REVIEW_LOW` | **65.0** (was 75) | Revised 2026-06-12 | `[LOW, HIGH)` → `manual_review`; `<LOW` → `unmatched`. Lowered to recover more dob-fuzzy candidates given reg_no-authoritative policy. Uncalibrated. |
+| Match — `NAME_CONFIRM` | **85.0** | `cloud/match/models.py`, added 2026-06-11 | Name score ≥ this on an exact reg_no hit → `matched_on` gains `+name`. Uncalibrated. |
+| Match — `NAME_CONFLICT_FLOOR` | **60.0** | `cloud/match/models.py`, added 2026-06-11 | Name present AND score < this on an exact reg_no hit → conflict → dob-fuzzy recovery, else `manual_review`. Uncalibrated. |
+| Match — DOB fuzzy tolerance | **±1 day** | Added 2026-06-12 | `timedelta(days=delta) for delta in (-1, 1)` recovery when exact dob differs by one day (common OCR/typo); capped at `manual_review` even on a high name score — never auto-promotes to `matched`. |
+| Index — `retrieval_min_results` | **3** | Config (`shared/config.py`), added 2026-06-12 | Retrieval cascade (§20) falls through keyword→graph→vector tiers until this many hits accumulate. |
 | Tier-escalation confidence gate | **70** (same as OCR) | Derived | If a tier's page-average confidence < 70, escalate to the next OCR tier (§8). May need independent tuning. |
-| Vector search top-k | **TBD** | Query time | How many Qdrant results to return before Neo4j re-ranking. |
+| Vector search top-k | **TBD** | Query time | How many Qdrant results to return in the vector tier (§20). |
 
 ---
 
@@ -567,3 +572,39 @@ Postgres, gated to verified owners (`documents.match_status='matched'`).
 | Visual-only page typing (no OCR) | Truly $0 but brittle across document variety (SSC vs HSC marksheets look alike) and needs training/calibration. |
 | Drop Qdrant entirely (pure structured) | Tempting (the example query needs no vectors), but rejected to keep a semantic backup for unanticipated queries on applicant data. |
 | Trust the exact `registration_no` match without identity check (original) | The FALSE-MATCH bug — provisional/permanent number-space collisions silently mis-attribute a whole bundle. |
+
+### Addendum 2026-06-12 — Retrieval-first transition (3-tier cascade + index stage)
+
+The `owner × page_type` filter (above) remains correct for its query shape but
+assumes the caller already knows the owner's name/reg_no and the desired
+`page_type`. To answer more open-ended natural-language queries without falling
+back to "embed everything" (the cost problem §20 exists to avoid), a new
+**index** stage (`cloud/index/`) runs after persist and adds three cheap,
+already-partially-built signals per document/page: a short LLM **summary**
+(`document_summary`/`page_summary`), **keywords** (TF-IDF or LLM, mode-selectable
+via `index_keyword_mode`, stored in `search_keywords JSONB` + GIN index), and a
+6-type **entity** list (`index_entities JSONB` — practitioner/organization/
+vendor/government_body/educational_institute/hospital; deliberately a different
+column from `pages.structured_json["entities"]` to avoid shadowing the
+identity-page entity extraction from §5.7).
+
+`cloud/retrieval/service.py` then runs a **3-tier cascade** for `GET /search`:
+keyword tier (Postgres `search_keywords @>` containment, cheapest) → graph tier
+(Neo4j traversal over the now-summary/keyword/entity-enriched `Person`/`Entity`/
+`Page` nodes) → vector tier (existing Qdrant identity-page embeddings, §5/§7).
+Tiers run in order until `retrieval_min_results` (default 3) hits accumulate;
+`_merge_hits` dedupes on `document_id`, keeping the highest-tier hit.
+`query_parser.py` (LLM-first, keyword-split fallback) turns the NL query into a
+`QueryIntent`; `explainer.py` attaches a tier-specific explanation to each
+`RetrievalHit`.
+
+**Why a cascade and not "always vector":** the keyword/graph tiers are free
+(Postgres/Neo4j, already-written data) and resolve the majority of practical
+queries (named entity + document type); vector search is reserved for the
+residual unanticipated-query case the original §20 design called out. This
+keeps the "Qdrant = light semantic backup" framing intact while giving the
+admin a single `GET /search` entry point instead of requiring `owner × page_type`
+inputs up front.
+
+**Status:** implemented on `claude/confident-albattani-b184b8` (16 tasks, 45 unit
+green, integration + benchmark scaffolds gated), not yet merged to `main`.

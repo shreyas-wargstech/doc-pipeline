@@ -36,6 +36,29 @@ def test_form_a_keyword_classifies_application_form():
     assert conf >= PAGE_TYPE_CONF_NET
 
 
+def test_form_e_undertaking_classifies_as_form_e_not_internship_cert():
+    # Form E checklist mentions "University/College Internship Cert." as
+    # checklist line items, not as the page's own subject — the page is the
+    # Form E undertaking itself.
+    ptype, conf = classify_page_type(
+        'FORM "E" {Rules 4(2) and 5(2)} I hereby given an undertaking that I '
+        "shall not use any degree, diploma licence... Indian Medical Council "
+        "Act, 1956... submitted the following copies for registration ... "
+        "i)College Internship Cert."
+    )
+    assert ptype == "form_e"
+    assert conf >= PAGE_TYPE_CONF_NET
+
+
+def test_birth_certificate_keywords():
+    ptype, conf = classify_page_type(
+        "Health Department FORM No.5 Birth Certificate "
+        "(Issued under Section 12/17 Registration of Birth and Death Act, 1969)"
+    )
+    assert ptype == "birth_certificate"
+    assert conf >= PAGE_TYPE_CONF_NET
+
+
 def test_app_cover_rule_removed_falls_to_other():
     # Text that previously matched the now-deleted app_cover rule
     # ("form of application" + "homoeopathy act" + "under sub-section" +

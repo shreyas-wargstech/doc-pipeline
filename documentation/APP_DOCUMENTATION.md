@@ -1,6 +1,6 @@
 # Document Intelligence Pipeline — Full Application Documentation
 
-> **Version:** 2.0 · **Last updated:** 2026-06-10 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→retrieve); validated on a real 13-page bundle. `main` local-only, ahead of origin.
+> **Version:** 2.1 · **Last updated:** 2026-06-12 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→index→retrieve); validated on 3 real practitioner bundles, all `matched`. Retrieval-first transition (`cloud/index/` + 3-tier `cloud/retrieval/` cascade + `GET /search`) implemented on `claude/confident-albattani-b184b8`, not yet merged to `main`. `main` local-only, ahead of origin.
 
 ---
 
@@ -91,9 +91,10 @@ root/
 │   │   ├── page_type.py            # keyword page-typer + VLM-classify escalation (lean retrieval)
 │   │   └── consumer.py             # SQS/Lambda record handler → process_page
 │   ├── structure/                  # regex_extract.py + llm.py + service.py (identity-page entity extraction)
-│   ├── match/                      # fuzzy.py + reference.py + service.py (verified-exact match)
+│   ├── match/                      # fuzzy.py + reference.py + service.py (reg_no-authoritative match)
 │   ├── persist/                    # summary.py + embeddings.py + qdrant_writer.py + graph.py + service.py
-│   ├── retrieval/                  # service.py — find_pages(owner × page_type)
+│   ├── index/                      # models.py + summarizer.py + keywords.py + entities.py + db_writer.py + neo4j_writer.py + handler.py + consumer.py
+│   ├── retrieval/                  # query_parser.py + explainer.py + service.py — 3-tier cascade (keyword/graph/vector)
 │   ├── eval/                       # content_type.py — pure threshold-sweep scoring (DASH-3)
 │   └── dashboard/                  # api.py (JSON /api/*) + session.py (signed-cookie auth) + sse.py
 │                                   #   + queries.py + actions.py + audit.py + eval_queries.py
@@ -432,15 +433,15 @@ Writes `match_status` + `reference_data_id` + `metadata.match` provenance (`matc
 ### 6.1 Manifest (`nas/manifest/models.py`)
 
 ```python
-# Literal aliases (single source of truth — OcrPageMessage imports these)
-PageType     = Literal["blank", "cover", "form", "receipt", "certificate", "other"]
+# Literal aliases (single source of truth — OcrPageMessage imports these; shared/page_type.py re-exports the typer)
+PageType     = Literal["blank", "form", "other"]
 ContentType  = Literal["typed", "handwritten", "unknown"]      # triage
 LanguageHint = Literal["latin", "devanagari", "mixed", "unknown"]  # triage OSD
 
 class PageManifest(BaseModel):
     page_num: int                          # 1-indexed
     s3_key: str                            # documents/<doc_id>/pages/page_NNN.png
-    page_type: PageType = "other"          # triage / classifier page label
+    page_type: PageType = "other"          # NAS-side classify_page_type() result
     content_type: ContentType = "unknown"  # typed vs handwritten → OCR tier routing
     language_hint: LanguageHint = "unknown"  # dominant script (triage OSD)
 
@@ -455,6 +456,18 @@ class Manifest(BaseModel):
 > `content_type` + `language_hint` are produced by NAS-side triage (§9 / triage.py)
 > and drive the proactive OCR tier router (`typed`→T1 Tesseract, `handwritten`→T2
 > Vision). `width`/`height`/`sha256` were dropped from the slim contract.
+>
+> **NAS-side page typing (FIX-041, 2026-06-12):** `nas/uploader/service.py` runs a
+> throwaway `pytesseract.image_to_string` pass on non-blank pages and calls the
+> shared `classify_page_type()` (now in `shared/page_type.py`, re-exported by
+> `cloud/ocr/page_type.py` for `VlmPageTyper`/router). Any page classified
+> `application_form` (any confidence) → manifest `page_type="form"`. This makes
+> `form` real at upload time, so the cloud VLM-first identity-page routing
+> (§5.5/§5.7/§5.9) fires on first-pass OCR. `cover`/`receipt`/`certificate` were
+> dropped from `PageType` — `cover` was folded into `form` (app_cover retirement,
+> 2026-06-12); identity-page sets across `cloud/ocr/router.py`,
+> `cloud/structure/service.py`, `cloud/persist/service.py` are now simply `{form}`.
+> Historical S3 manifests with `page_type="cover"` are unaffected (out of scope).
 
 ### 6.2 Postgres Schema (`db/schema.sql`)
 
@@ -473,7 +486,11 @@ class Manifest(BaseModel):
 | `gender` | `TEXT` | nullable |
 | `match_status` | `TEXT CHECK` | NULL (not-yet-matched) \| matched \| unmatched \| not_applicable \| manual_review — match stage owns this column |
 | `reference_data_id` | `INTEGER FK` | nullable; → reference_data(id) |
-| `metadata` | `JSONB` | category-specific fields |
+| `metadata` | `JSONB` | category-specific fields; `metadata.match.ocr_extracted` preserves pre-back-fill OCR values |
+| `document_summary` | `TEXT` | nullable; index stage (`cloud/index/summarizer.py`) |
+| `search_keywords` | `JSONB` | nullable; TF-IDF / keyword-mode terms, GIN indexed — keyword-tier retrieval |
+| `index_entities` | `JSONB` | nullable; 6-type LLM entity list (practitioner/organization/vendor/government_body/educational_institute/hospital) — distinct from `pages.structured_json["entities"]` |
+| `index_status` | `TEXT CHECK` | pending \| done \| failed — index stage status |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | auto-managed |
 
 **`pages`**
@@ -484,11 +501,15 @@ class Manifest(BaseModel):
 | `document_id` | `TEXT FK` | → documents |
 | `page_num` | `INT` | |
 | `s3_key` | `TEXT` | PNG location |
-| `page_type` | `TEXT` | triage/classifier label (e.g. cover, form, certificate, blank) |
+| `page_type` | `TEXT` | classifier label (e.g. form, application_form, aadhaar, blank — see `page_types` catalogue) |
 | `language_detected` | `TEXT` | eng \| mar \| hin \| mixed |
 | `ocr_status` | `TEXT CHECK` | pending \| queued \| done \| failed \| skipped |
 | `structured_json` | `JSONB` | LLM/OCR structured output |
+| `page_summary` | `TEXT` | nullable; index stage per-page summary |
+| `index_status` | `TEXT CHECK` | pending \| done \| failed — index stage status |
 | `created_at` / `updated_at` | `TIMESTAMPTZ` | |
+
+**`page_types`** — reference catalogue (17 seed rows, no FK on `pages.page_type` — kept free TEXT). Added 2026-06-11.
 
 **`reference_data`**
 
@@ -678,11 +699,40 @@ make test-integration    # integration (requires make up + make init)
 
 ---
 
-## 14. Retrieval Design — Lean Ownership Propagation
+## 14. Retrieval Design — Lean Ownership Propagation + Indexing Cascade
 
-> **Decided 2026-06-09, shipped 2026-06-10** (`feat/lean-ownership-retrieval`). Full
-> rationale in TECH_DECISIONS §20. This replaces the original "embed every page →
-> Neo4j filter → Qdrant re-rank" flow.
+> **Owner-propagation decided 2026-06-09, shipped 2026-06-10** (`feat/lean-ownership-retrieval`).
+> **Retrieval-first transition (3-tier cascade + `cloud/index/`) implemented
+> 2026-06-12** on `claude/confident-albattani-b184b8` (16-task plan, not yet
+> merged to `main`). Full rationale in TECH_DECISIONS §20. The owner-propagation
+> flow below remains the base case; the cascade adds keyword/graph/vector tiers
+> on top via a new **index** stage that runs after persist.
+>
+> **New index stage** (`cloud/index/`, chained from persist consumer →
+> `SQS_INDEX_QUEUE_URL`): per-document `summarizer.py` (document/page summaries),
+> `keywords.py` (TF-IDF or LLM keyword extraction, mode = `index_keyword_mode`),
+> `entities.py` (6-type LLM entity extraction → `index_entities`), `db_writer.py`
+> (writes `document_summary`/`page_summary`/`search_keywords`/`index_entities`/
+> `index_status`, FIX-029-style guarded status), `neo4j_writer.py` (MERGEs
+> summary/keyword/entity data onto existing `Document`/`Page` nodes).
+>
+> **Retrieval cascade** (`cloud/retrieval/service.py`, `GET /search`):
+> `query_parser.py` turns a natural-language query into a `QueryIntent`
+> (LLM-first, keyword-split fallback). `service.py` then tries tiers in order
+> until `retrieval_min_results` (default 3) hits are found:
+> 1. **Keyword tier** — Postgres `search_keywords @> :terms` (JSONB containment).
+> 2. **Graph tier** — Neo4j traversal over `Person`/`Entity`/`Page` for
+>    structural matches the keyword tier missed.
+> 3. **Vector tier** — Qdrant semantic search over identity-page embeddings
+>    (existing §5 collection).
+>
+> `_merge_hits` deduplicates on `document_id`, keeping the first (highest-tier)
+> hit. `explainer.py` builds a `RetrievalHit` per result with a tier-specific
+> explanation. `GET /search/{doc_id}/pages` returns the page-level detail for a
+> hit. A benchmark scaffold (precision@5/recall@5/MRR/top-1) exists with an empty
+> `LABELED_QUERIES` list — populate after indexing real bundles.
+
+### Base case: owner × page_type (unchanged)
 
 **The query:** *"the Aadhaar document of Niraj Chopda (+ optional registration number)"* → return the page(s)/PDF.
 
@@ -754,11 +804,15 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 
 | Item | Priority | Notes |
 |---|---|---|
-| **AWS auto-trigger wiring** | High | Structure→Match→Persist chaining (Lambda-per-stage+SQS vs Step Functions UNDECIDED); Lambda container images for Tesseract/OpenCV/PyMuPDF; Terraform vs SAM/CDK. The next pipeline milestone. |
-| **Triage calibration** (over-classifies `handwritten`) | High | Thresholds (`height_cv .35`/`stroke_cv .45`) uncalibrated on real scans. Eval lab (DASH-3) is BUILT to unblock it — operator enrols+labels real scans → reads recommended thresholds → hand-applies to triage defaults. De-risked (over-classify only escalates to VLM, not fatal). |
-| **Match fuzzy thresholds** uncalibrated | Medium | `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` — no labeled pairs yet. |
-| Wire `OPENROUTER_API_KEY` | Medium | The sole cloud-OCR credential. Set it to exercise the skipped openrouter integration test. |
+| **Merge retrieval-first transition to `main`** | High | `claude/confident-albattani-b184b8` (16 tasks, 45 unit green) — `cloud/index/`, `cloud/retrieval/{query_parser,explainer}.py`, `GET /search` + `GET /search/{doc_id}/pages`. Needs PR + merge. |
+| **Wire index stage end-to-end** | High | Add `SQS_INDEX_QUEUE_URL` to `.env`; run `python -m scripts.apply_index_schema` once against live DB (adds `document_summary`/`page_summary`/`search_keywords`/`index_entities`/`index_status` + GIN index). Persist consumer already chains to it post-merge. |
+| **AWS auto-trigger wiring** | High | Structure→Match→Persist→Index chaining (Lambda-per-stage+SQS vs Step Functions UNDECIDED); Lambda container images for Tesseract/OpenCV/PyMuPDF; Terraform vs SAM/CDK. The next pipeline milestone. |
+| **Populate `LABELED_QUERIES`** for retrieval benchmark | Medium | Benchmark scaffold exists (precision@5/recall@5/MRR/top-1), marked `skip`. Populate after indexing real bundles. |
+| **Triage calibration** (over-classifies `handwritten`) | Medium (de-risked, FIX-035 closed) | AND-logic thresholds (h_cv≥1.10 / s_cv≥1.80) calibrated on real scans 2026-06-11; one-metric-over → UNKNOWN → Tesseract. Eval lab (DASH-3) still useful for fine-tuning with more labeled data. |
+| **Match fuzzy thresholds** uncalibrated | Medium | `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=65`/`NAME_CONFIRM=85`/`NAME_CONFLICT_FLOOR=60` (revised 2026-06-11/12) — still no labeled pairs. |
+| Wire `OPENROUTER_API_KEY` | Medium | Confirmed live 2026-06-12 (test call OK); sole cloud-OCR/LLM credential. Default text model is `openrouter/free` (FIX-037, auto-routing). |
 | Manual dashboard smoke | Medium | Not yet run end-to-end: needs `make up` + `make serve` + `make web-dev` + seeded user (`scripts/add_dashboard_user.py`). |
+| Historical re-OCR queue for old `page_type="cover"` manifests | Low | One-off: pages OCR'd before FIX-041 still carry pre-`form` typing; Task 6's cover→VLM-first fix only applies going forward. Not a regression. |
 | Push `main` to origin | Low | `main` is local-only, ahead of origin by many commits (user's choice). |
 | DASH-2 (cost/usage tracking) | Planned | Add `ocr_tier` to `pages`; instrument OCR tiers + `classifier/llm.py` → `cost_events` table; cost views. Blocked on that plumbing. TECH_DECISIONS §19. |
 | Multi-owner by-person retrieval (letters/record books) | Low | Out of current scope (single-owner practitioner bundles only); a heavier per-mention path if ever needed. §14. |
@@ -766,4 +820,6 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 | Heavy dep split (torch/sentence-transformers) | Low | ~2GB install; revisit before Lambda packaging. |
 | Pre-commit hooks; residual ruff debt in classifier/ingest/ocr/nas | Low | Deferred (pre-existing, out of scope of recent stages). |
 
-**Done since v1.0** (was TBD, now built): `load_reference_data` (92K rows), `cloud/{classifier,ocr,structure,match,persist,retrieval}/`, NAS uploader + local elasticmq end-to-end, schema (`queued` status, `app_no` BIGINT, `eval_content_type` table), Next.js dashboard + JSON API + eval lab.
+**Done since v1.0** (was TBD, now built): `load_reference_data` (92K rows), `cloud/{classifier,ocr,structure,match,persist,retrieval}/`, NAS uploader + local elasticmq end-to-end, schema (`queued` status, `app_no` BIGINT, `eval_content_type`, `page_types` tables), Next.js dashboard + JSON API + eval lab, NAS-side page-type detection (FIX-041 — `shared/page_type.py`).
+
+**Done since v2.0 (2026-06-12 session):** 12 pipeline-accuracy fixes (reg_no length cap, `app_cover` retirement, cover→VLM-first, registry back-fill with `ocr_extracted` audit trail, FUZZY_REVIEW_LOW 75→65, DOB ±1day fuzzy), bare `R-NNNNN` regex (FIX-037-bare), full `cloud/index/` + `cloud/retrieval/` 3-tier cascade (16 tasks, branch not merged), NAS-side `classify_page_type` → manifest `page_type="form"` (FIX-041). 3-bundle re-validation: all `matched`.

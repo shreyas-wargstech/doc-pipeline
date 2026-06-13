@@ -20,6 +20,7 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Date,
     DateTime,
     Float,
@@ -111,13 +112,17 @@ class Document(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default=DocumentStatus.RECEIVED)
 
     # Practitioner-only fields
-    application_number: Mapped[str | None] = mapped_column(Text)
+    document_reference_no: Mapped[str | None] = mapped_column(Text)
+    application_no: Mapped[int | None] = mapped_column(BigInteger)
     registration_no: Mapped[str | None] = mapped_column(Text)
     applicant_name_raw: Mapped[str | None] = mapped_column(Text)
     dob: Mapped[date | None] = mapped_column(Date)
     gender: Mapped[str | None] = mapped_column(Text)
     reference_data_id: Mapped[int | None] = mapped_column(Integer)
     match_status: Mapped[str | None] = mapped_column(Text)
+
+    document_summary: Mapped[str | None] = mapped_column(Text)
+    index_status: Mapped[str | None] = mapped_column(Text)
 
     # Category-specific flexible payload.
     # NOTE: column name is `metadata` in SQL, but `metadata` is reserved by
@@ -148,6 +153,9 @@ class Page(Base):
     confidence_score: Mapped[float | None] = mapped_column(Float)
     language_detected: Mapped[str | None] = mapped_column(Text)
 
+    page_summary: Mapped[str | None] = mapped_column(Text)
+    index_status: Mapped[str | None] = mapped_column(Text)
+
     ocr_status: Mapped[str] = mapped_column(Text, nullable=False, default=OCRStatus.PENDING)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -175,7 +183,8 @@ class DocumentRepository:
             "status",
             "registration_no",
             "applicant_name_raw",
-            "application_number",
+            "document_reference_no",
+            "application_no",
             "dob",
             "gender",
             "reference_data_id",
@@ -196,7 +205,8 @@ class DocumentRepository:
         document_type: str | None = None,
         qr_content: str | None = None,
         status: str = DocumentStatus.RECEIVED,
-        application_number: str | None = None,
+        document_reference_no: str | None = None,
+        application_no: int | None = None,
         registration_no: str | None = None,
         applicant_name_raw: str | None = None,
         dob: date | None = None,
@@ -226,7 +236,8 @@ class DocumentRepository:
             "s3_key_pdf": s3_key_pdf,
             "page_count": page_count,
             "status": status,
-            "application_number": application_number,
+            "document_reference_no": document_reference_no,
+            "application_no": application_no,
             "registration_no": registration_no,
             "applicant_name_raw": applicant_name_raw,
             "dob": dob,

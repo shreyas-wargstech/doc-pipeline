@@ -54,6 +54,8 @@ def _build_backfill(
     if row.date_of_birth:
         with contextlib.suppress(ValueError):
             overwrite["dob"] = date.fromisoformat(row.date_of_birth)
+    if row.app_no is not None:
+        overwrite["application_no"] = row.app_no
 
     existing_match = (doc.metadata_ or {}).get("match") or {}
     ocr_extracted: dict[str, Any] | None = None
@@ -63,6 +65,7 @@ def _build_backfill(
             "applicant_name_raw": doc.applicant_name_raw,
             "dob": doc.dob.isoformat() if doc.dob else None,
             "gender": doc.gender,
+            "application_no": doc.application_no,
         }
     return overwrite, ocr_extracted
 

@@ -33,12 +33,16 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
           <Field k="Category" v={titleCase(doc.document_category)} />
           <Field k="Type" v={titleCase(doc.document_type)} />
           <Field k="Applicant" v={doc.applicant_name_raw ?? "—"} />
-          <Field k="App no." v={doc.application_number ?? "—"} mono />
+          <Field k="Doc ref." v={doc.document_reference_no ?? "—"} mono />
+          <Field k="Application no." v={doc.application_no?.toString() ?? "—"} mono />
           <Field k="DOB" v={doc.dob ?? "—"} />
           <Field k="OCR" v={`${ocr_done}/${doc.page_count}`} />
           <Field k="Structured" v={`${structured_done}/${doc.page_count}`} />
           <Field k="Updated" v={fmtDateTime(doc.updated_at)} />
         </dl>
+        {doc.document_summary && (
+          <p className="text-sm text-muted-fg">{doc.document_summary}</p>
+        )}
         <ActionButtons documentId={doc.document_id} />
       </Card>
 

@@ -802,3 +802,29 @@ Online portal application form has "Mobile No" field immediately before qualific
 **Result:** d2d803d4 now extracts `registration_no=34952` → matched (`registration_no+dob`, name_score=72.3, reference_data_id=43788). All 3 validation bundles now `matched`.
 
 **Rule:** Application-form/cover handwritten reg numbers often appear as bare `R-NNNNN`/`R.NNNNN` with no label — add label-free regex fallbacks for identity fields before relying on LLM, and always strip non-digit prefixes so `parse_registration_no` (pure-int parser) can use the value.
+
+---
+
+## 2026-06-13 — "R1NNNNN" OCR misread of "R|92008"/"R-92008" (FIX-042)
+
+**Symptom:** c85718d0... reg_no extracted as `227160801033` (garbage); raw text contains `R192008` (no separator).
+
+**Root cause:** OCR reads the `|` or `-` separator in handwritten `R|92008`/`R-92008` as digit `1`, producing `R192008`. `_REG_NO_BARE_RE` requires a `.`/`-` separator so it didn't match; LLM then hallucinated a 12-digit value from elsewhere on the page.
+
+**Fix:** Added `_REG_NO_BARE_OCR1_RE = r"\bR1(\d{5})\b"` (conf 0.7) to `cloud/structure/regex_extract.py` — strips the leading "1" since no real MCH `registration_no` is 6 digits (max ~92389).
+
+**Cascading effect:** this single fix resolved 5 previously-broken documents on re-run (`make structure && make match`): c85718d0... (C1), ace66f74... (C2, full identity backfill), 5761dad5... (C3, also fixed a wrong-page dob hallucination — SBI receipt page was misclassified `application_form` and contributed `date_of_birth`/`registration_no` that lost to page 1 once page 1's regex hit existed), 06ad7ba9... and bfab5a4d... (D1, exact-match path now succeeds instead of falling to low-score fuzzy → `manual_review`).
+
+**Rule:** When OCR garbles a registration_no into an out-of-range value (>6 digits, or 6 digits with implausible leading digit), check raw text for `R<digit><known-good-length-digits>` patterns before falling back to LLM — bounds on registration_no (≤92389) make these safe to pattern-match.
+
+---
+
+## 2026-06-13 — Document/Page ORM missing `*_summary`/`index_status` columns (FIX-043)
+
+**Symptom:** Index stage populates `documents.document_summary`, `pages.page_summary`, `*.index_status` (db/schema.sql), but dashboard never shows them — frontend has no summary fields.
+
+**Root cause:** `Document`/`Page` ORM classes in `cloud/ingest/storage_db.py` didn't declare these columns. `cloud/dashboard/api.py::_to_dict()` serializes via `sa_inspect(obj).mapper.column_attrs` — columns not mapped on the ORM class are invisible to the API regardless of DB content.
+
+**Fix:** Added `document_summary`/`index_status` to `Document`, `page_summary`/`index_status` to `Page`. Wired into `web/lib/types.ts` (`DocFull.document_summary`, `PageRow.page_summary`) and rendered in document-detail and page-detail views.
+
+**Rule:** When schema.sql gains a column meant to surface via the dashboard API, also add it to the matching ORM model in `storage_db.py` — `_to_dict()` silently drops unmapped columns, no error.

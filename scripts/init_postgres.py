@@ -22,9 +22,10 @@ from sqlalchemy import text
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from shared.db import get_engine          # noqa: E402
-from shared.logging import configure_logging  # noqa: E402
 from sys import exit
+
+from shared.db import get_engine  # noqa: E402
+from shared.logging import configure_logging  # noqa: E402
 
 log = structlog.get_logger()
 
@@ -50,7 +51,7 @@ EXPECTED: dict[str, list[str]] = {
         "document_id", "document_category", "document_type",
         "original_filename", "qr_content", "s3_key_pdf", "page_count",
         "status",
-        "application_number", "registration_no", "applicant_name_raw",
+        "document_reference_no", "application_no", "registration_no", "applicant_name_raw",
         "dob", "gender", "reference_data_id", "match_status",
         "metadata", "created_at", "updated_at",
     ],
@@ -73,7 +74,8 @@ EXPECTED_INDEXES: list[str] = [
     "idx_documents_category",
     "idx_documents_status",
     "idx_documents_registration_no",
-    "idx_documents_application_number",
+    "idx_documents_document_reference_no",
+    "idx_documents_application_no",
     "idx_documents_metadata",
     "idx_pages_document_id",
     "idx_pages_ocr_status",

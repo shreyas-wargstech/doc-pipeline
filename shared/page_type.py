@@ -36,14 +36,21 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("marks_statement", ("statement of marks", "marks statement", "marksheet",
                           "mark sheet")),
     ("passing_cert", ("passing certificate", "degree certificate", "convocation")),
-    ("internship_cert", ("internship",  # broad; rotatory/compulsory rotating anchor it
+    ("internship_cert", ("certificate of internship", "completed internship",
+                        "internship completion",
                         "rotatory", "compulsory rotating")),
     ("provisional_reg", ("provisional registration", "provisional certificate")),
     ("sbi_receipt", ("state bank of india", "e-receipt",
                     "challan",  # broad; state-bank/transaction-reference anchor it
                     "transaction reference")),
     ("marriage_cert", ("marriage certificate", "marriage registration")),
-    ("form_e", ("form e ", "form-e")),
+    ("birth_certificate", ("birth certificate", "जन्म प्रमाणपत्र",
+                          "registration of birth")),
+    # Form E (rules 4(2)/5(2) undertaking) — checklist text inside it mentions
+    # "Internship Cert." as a line item, so anchor on the undertaking's own
+    # statutory reference rather than "form e " which OCR often garbles
+    # (e.g. FORM "E", FORME).
+    ("form_e", ("form e ", "form-e", "indian medical council act")),
     ("photo_id", ("permanent account number", "driving licence", "passport no",
                   "election commission")),
 )

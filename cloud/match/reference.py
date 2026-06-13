@@ -25,7 +25,7 @@ class ReferenceRepository:
         name-part/gender columns for post-match back-fill. None if no row."""
         result = await self.session.execute(
             text(
-                "SELECT id, registration_no, "
+                "SELECT id, registration_no, app_no, "
                 "       COALESCE(fields_norm->>'full_name', '')   AS full_name, "
                 "       COALESCE(fields_norm->>'name_change', '') AS name_change, "
                 "       COALESCE(date_of_birth, '')               AS date_of_birth, "
@@ -43,6 +43,7 @@ class ReferenceRepository:
         return ReferenceMatch(
             id=row.id,
             registration_no=row.registration_no,
+            app_no=row.app_no,
             full_name=row.full_name,
             name_change=row.name_change,
             date_of_birth=row.date_of_birth,
@@ -59,7 +60,7 @@ class ReferenceRepository:
         dob/gender/name parts). None if no row."""
         result = await self.session.execute(
             text(
-                "SELECT id, registration_no, "
+                "SELECT id, registration_no, app_no, "
                 "       COALESCE(fields_norm->>'full_name', '')   AS full_name, "
                 "       COALESCE(fields_norm->>'name_change', '') AS name_change, "
                 "       COALESCE(date_of_birth, '')               AS date_of_birth, "
@@ -77,6 +78,7 @@ class ReferenceRepository:
         return ReferenceMatch(
             id=row.id,
             registration_no=row.registration_no,
+            app_no=row.app_no,
             full_name=row.full_name,
             name_change=row.name_change,
             date_of_birth=row.date_of_birth,

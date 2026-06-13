@@ -18,6 +18,7 @@ from typing import Any
 
 import aioboto3
 
+from cloud.index.consumer import process_record as index_proc
 from cloud.match.consumer import process_record as match_proc
 from cloud.persist.consumer import process_record as persist_proc
 from cloud.structure.consumer import process_record as structure_proc
@@ -31,6 +32,7 @@ _STAGES: dict[str, tuple[str, Callable[[str], Awaitable[None]]]] = {
     "structure": ("sqs_structure_queue_url", structure_proc),
     "match": ("sqs_match_queue_url", match_proc),
     "persist": ("sqs_persist_queue_url", persist_proc),
+    "index": ("sqs_index_queue_url", index_proc),
 }
 
 

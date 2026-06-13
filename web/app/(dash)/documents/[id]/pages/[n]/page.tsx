@@ -39,6 +39,12 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
           <img src={imageUrl(id, pageNum)} alt={`Page ${pageNum}`} className="w-full" />
         </Card>
         <div className="flex flex-col gap-3">
+          {page.page_summary && (
+            <div className="rounded-lg border bg-card">
+              <div className="border-b px-3 py-2 text-sm font-medium text-foreground">summary</div>
+              <p className="px-3 py-2 text-sm text-muted-fg">{page.page_summary}</p>
+            </div>
+          )}
           <JsonViewer data={structured_json} />
           <div className="rounded-lg border bg-card">
             <div className="border-b px-3 py-2 text-sm font-medium text-foreground">raw_text</div>

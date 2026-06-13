@@ -19,6 +19,7 @@ def _doc(category="practitioner", *, reg_no=None, dob=None, name=None, gender=No
         dob=dob,
         applicant_name_raw=name,
         gender=gender,
+        application_no=None,
         metadata_=metadata or {},
     )
 
@@ -383,6 +384,7 @@ async def test_exact_match_backfills_identity_from_registry(monkeypatch):
         "applicant_name_raw": "Nidhi Sanjay",
         "dob": None,
         "gender": None,
+        "application_no": None,
     }
 
 
