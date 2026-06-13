@@ -96,6 +96,20 @@ async def upload_document(
         logger.info("uploader.page", page_num=idx, page_type=page_type,
                     content_type=content_type, language_hint=language_hint)
 
+    # "Earliest wins": only the first application_form-typed page carries the
+    # handwritten identity block that needs VLM. Demote any later "form" pages
+    # (continuation pages, or a second application form for a different
+    # purpose) to "other" — Tesseract is sufficient for them, and Structure's
+    # keyword typer still fine-types them from the Tesseract text.
+    seen_form = False
+    for i, page in enumerate(pages):
+        if page.page_type != "form":
+            continue
+        if seen_form:
+            pages[i] = page.model_copy(update={"page_type": "other"})
+            logger.info("uploader.form_page_demoted", page_num=page.page_num)
+        seen_form = True
+
     manifest = Manifest(
         document_id=document_id,
         original_s3_key=original_key,
