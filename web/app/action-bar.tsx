@@ -27,12 +27,17 @@ export function useActionBarContent(): ReactNode {
 /**
  * Publish contextual action-bar content for as long as the calling
  * component is mounted. Pass `null` to clear without unmounting.
+ *
+ * `node` is a dependency: an inline JSX element is a new reference on
+ * every render, so memoize it (`useMemo`) if the calling component
+ * re-renders frequently, to avoid redundant context updates.
  */
 export function useSetActionBar(node: ReactNode): void {
   const { setContent } = useActionBarCtx();
   useEffect(() => {
     setContent(node);
     return () => setContent(null);
+    // setContent is stable (from context); node is the intentional trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node]);
 }
