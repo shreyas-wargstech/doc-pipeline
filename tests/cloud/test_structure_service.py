@@ -109,14 +109,14 @@ async def test_structure_document_happy(monkeypatch):
     _, kw = page_repo.update_structured.call_args
     assert kw["page_type"] == "application_form"
     types = {e["type"] for e in kw["structured_json"]["entities"]}
-    assert {"registration_no", "application_number", "person_name"} <= types
+    assert {"registration_no", "document_reference_no", "person_name"} <= types
 
     # one update_fields call carrying identity + status
     sent = {}
     for c in doc_repo.update_fields.await_args_list:
         sent.update(c.kwargs)
     assert sent["registration_no"] == "34903"
-    assert sent["application_number"] == "AMR-MCH-26-A-07723"
+    assert sent["document_reference_no"] == "AMR-MCH-26-A-07723"
     assert sent["applicant_name_raw"] == "Ashish"
     assert sent["gender"] == "M"
     assert sent["status"] == "processing"
@@ -236,6 +236,58 @@ async def test_non_identity_page_skips_llm(monkeypatch):
 
     assert called_with == ["application_form"]     # aadhaar page skipped
     page_repo.update_structured.assert_awaited_once()  # only the identity page
+
+
+@pytest.mark.asyncio
+async def test_structure_document_sets_document_type_from_fuzzy_match(monkeypatch):
+    page = _page(
+        1,
+        "Maharashtra Council of Homoeopathy\n"
+        "Application for: Permanent Registration\n"
+        "Name: Test Applicant\n"
+        "Registration No: 12345\n"
+        "DOB: 01/01/1990",
+    )
+    llm_ret = ("application_form", [], {})
+    doc_repo, _ = _wire(monkeypatch, _doc(), [page], llm_ret)
+
+    client = MagicMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(
+            content='{"page_type":"application_form","entities":[],"identity":{}}'
+        ))]
+    )
+
+    await structure_document("doc1", session=MagicMock(), client=client)
+
+    sent = {}
+    for c in doc_repo.update_fields.await_args_list:
+        sent.update(c.kwargs)
+    assert sent["document_type"] == "Permanent Registration"
+
+
+@pytest.mark.asyncio
+async def test_structure_document_no_match_leaves_document_type_null(monkeypatch):
+    page = _page(
+        1,
+        "Name: Test Applicant\nRegistration No: 12345\nDOB: 01/01/1990",
+    )
+    llm_ret = ("application_form", [], {})
+    doc_repo, _ = _wire(monkeypatch, _doc(), [page], llm_ret)
+
+    client = MagicMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(
+            content='{"page_type":"application_form","entities":[],"identity":{}}'
+        ))]
+    )
+
+    await structure_document("doc1", session=MagicMock(), client=client)
+
+    sent = {}
+    for c in doc_repo.update_fields.await_args_list:
+        sent.update(c.kwargs)
+    assert "document_type" not in sent
 
 
 @pytest.mark.asyncio

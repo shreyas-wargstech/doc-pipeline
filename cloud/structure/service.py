@@ -15,6 +15,11 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud.ingest.storage_db import DocumentRepository, PageRepository
+from cloud.structure.document_type import (
+    DOCUMENT_TYPE_FUZZY_THRESHOLD,
+    _fuzzy_match,
+    classify_document_type,
+)
 from cloud.structure.llm import IdentityHints, llm_extract
 from cloud.structure.models import IDENTITY_PAGE_TYPES, Entity, normalize_value
 from cloud.structure.regex_extract import regex_extract
@@ -181,9 +186,13 @@ def rollup_identity(
     """Resolve the documents practitioner columns. Returns only resolved keys."""
     fields: dict[str, str] = {}
 
-    app_no = _pick(entities_by_page, "application_number", prefer_source="regex")
-    if app_no:
-        fields["application_number"] = app_no
+    doc_ref_no = _pick(entities_by_page, "document_reference_no", prefer_source="regex")
+    if doc_ref_no:
+        fields["document_reference_no"] = doc_ref_no
+
+    app_no = _pick(entities_by_page, "application_no", prefer_source="regex")
+    if app_no and app_no.isdigit():
+        fields["application_no"] = app_no
 
     reg_no = (
         _pick(entities_by_page, "registration_no", prefer_source="regex")
@@ -239,6 +248,8 @@ async def structure_document(
 
     entities_by_page: list[tuple[str, list[Entity]]] = []
     identity_hints: list[IdentityHints] = []
+    best_document_type: str | None = None
+    best_document_type_score: float = -1.0
 
     pages = await page_repo.list_for_document(document_id)
     for page in pages:
@@ -261,6 +272,15 @@ async def structure_document(
         )
         merged = merge_entities(regex_ents, llm_ents)
 
+        if doc.document_category == "practitioner":
+            dt_label, dt_score = _fuzzy_match(raw_text)
+            if dt_score < DOCUMENT_TYPE_FUZZY_THRESHOLD:
+                dt_label = await classify_document_type(raw_text, client=client)
+                dt_score = 100.0 if dt_label else -1.0
+            if dt_label and dt_score > best_document_type_score:
+                best_document_type = dt_label
+                best_document_type_score = dt_score
+
         new_json = {**sj, "entities": [e.model_dump() for e in merged]}
         await page_repo.update_structured(
             document_id,
@@ -282,6 +302,10 @@ async def structure_document(
     fields: dict[str, Any] = {}
     if doc.document_category == "practitioner":
         fields = dict(rollup_identity(entities_by_page, identity_hints))
+        if best_document_type:
+            fields["document_type"] = best_document_type
+        if "application_no" in fields:
+            fields["application_no"] = int(fields["application_no"])
         if "dob" in fields:
             raw_dob: str = fields["dob"]
             parsed: datetime.date | None = None
