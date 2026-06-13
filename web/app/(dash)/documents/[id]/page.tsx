@@ -1,23 +1,40 @@
 "use client";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { use } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActionButtons } from "@/components/ActionButtons";
-import { PageGrid } from "@/components/PageGrid";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MatchBadge } from "@/components/ui/MatchBadge";
 import { useDocument } from "@/hooks/useDocument";
+import { useSetActionBar } from "@/app/action-bar";
 import { fmtDateTime, titleCase } from "@/lib/format";
 
 export default function DocumentDetail({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+  const [resolved, setResolved] = useState<{ id: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    params.then((p) => {
+      if (!cancelled) setResolved(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [params]);
+
+  const id = resolved?.id ?? "";
   const q = useDocument(id);
 
-  if (q.isLoading) return <Skeleton className="h-64 w-full" />;
+  const actionBarContent = useMemo(
+    () => (q.data ? <ActionButtons documentId={q.data.doc.document_id} /> : null),
+    [q.data?.doc.document_id],
+  );
+  useSetActionBar(actionBarContent);
+
+  if (!resolved || q.isLoading) return <Skeleton className="h-64 w-full" />;
   if (q.isError || !q.data) return <p className="text-sm text-danger">Failed to load document.</p>;
-  const { doc, pages, ocr_done, structured_done } = q.data;
+  const { doc, ocr_done, structured_done } = q.data;
 
   return (
     <div className="flex flex-col gap-4">
@@ -43,10 +60,7 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
         {doc.document_summary && (
           <p className="text-sm text-muted-fg">{doc.document_summary}</p>
         )}
-        <ActionButtons documentId={doc.document_id} />
       </Card>
-
-      <PageGrid documentId={doc.document_id} pages={pages} />
     </div>
   );
 }
