@@ -572,3 +572,63 @@
 - **Next:** AWS auto-trigger wiring (Structure→Match→Persist chain); threshold
   calibration (labeled pairs needed); re-validate a fresh real bundle end-to-end
   to confirm `form` pages now route VLM-first from the manifest.
+
+## 2026-06-13 — D2: split documents.application_number into document_reference_no + application_no
+
+- **What was done:** User flagged 8 issues from real-run output (AMR-MCH code mislabeled as "App no.", misclassifications, OCR/match bugs, missing summaries). Decomposed into sub-projects A-E; tackled D2 first. `documents.application_number` (AMR-MCH-26-A-XXXXX, the portal/QR doc code) was misleadingly labeled "App no." in the frontend — the real registry Application No (`reference_data.app_no`, numeric) was never surfaced. Spec: `docs/superpowers/specs/2026-06-13-application-number-fields-design.md`.
+- **Changes:** Renamed `documents.application_number`→`document_reference_no`; added `documents.application_no` BIGINT. New regex `_APPLICATION_NO_RE` extracts labeled "Application No: NNNN" from form text (`cloud/structure/regex_extract.py`). `ReferenceMatch` gains `app_no`; match backfill (`_build_backfill`) overwrites `application_no` from registry on match, audits prior OCR value in `metadata.match.ocr_extracted.application_no`. Migration `scripts/rename_application_number_field.py` (idempotent). Frontend shows both "Doc ref." and "Application no.".
+- **Verify:** 321 unit tests green (tests/cloud), ruff clean, tsc clean. (1 pre-existing unrelated failure in `tests/test_config_index.py::test_index_defaults` — env var leak, not touched.)
+- **Remaining sub-projects (not started):** A1 (birth cert misclassified "other"), A2 (Form E → internship_cert), A3 (document_type enum classification), A4 (multi-application-form VLM page selection), B1 (c405e466/p1 Tesseract vs VLM), C1-C3 (reg_no/backfill extraction bugs on specific docs), D1 (matched docs showing "review" in frontend), E1 (page/doc summaries missing in frontend).
+- **Next:** run `scripts/rename_application_number_field.py` against live DB; pick next sub-project (A3 document_type classification suggested as next self-contained piece).
+
+## 2026-06-13 (continued) — Issue backlog for next session (pre flush-and-rerun)
+
+User wants to fix all known issues, then `make down-clean && make up && make init` (flush all 4 datastores) and re-run the full pipeline on all sample bundles.
+
+**BLOCKING (new):** `GET /api/documents/{id}` returns 500 even after migration + backend restart. Direct python call to `cloud.dashboard.api.doc_detail()` works fine (returns correct dict with `document_reference_no`/`application_no`), so the bug is NOT in the ORM/route logic itself. Suspect: a different/stale process on :8000, `.next` cache, or Next.js-side error before reaching backend. Debug via actual uvicorn logs + browser response body (not just status code) first.
+
+**Backlog (from user's real-run review):**
+- A1: `a1d84d47e9b83c2bb38cb21244d0852c0af19dfa762a2479048874e210c0d884/pages/4` misclassified "other" → should be birth certificate
+- A2: `form_e` pages misclassified as `internship_cert` — `b5bf1fe5.../12`, `bfab5a4d.../15`, `c85718d0.../12`, `bdb1d98f.../14`. `form_e` is already a valid PageType — likely keyword-rule weight fix
+- A3: classify `document_type` into full enum (Permanent/Provisional/OMS Registration, Name/Address Change, ~40 more types — list given by user) and store on `documents.document_type`. Sample bundles are mostly "Permanent Registration"
+- A4: multiple application-form-like pages per bundle — VLM only the correct one (usually page 1, but must handle when page 1 isn't the form)
+- B1: `c405e466.../pages/1` used Tesseract not VLM (page 19 correctly used VLM) — why didn't VLM-first identity routing fire on p1?
+- C1: `c85718d01f7c8de2951d717aeb11d8ecdb2cdd1a83da526842467d35f9b72bcc` — reg_no garbled to `227160801033`; page 1 form actually has `R192008`/`92008` (OCR `|`→`1`). app_no extracted correctly already
+- C2: `ace66f74904dab305e851bd3d2547cdbcaf873a93d62f0548d550386d0e9a8dc/pages/1` has full identity info, should backfill but doesn't
+- C3: `5761dad578e6a800e2b04d6b5eca7a70e8546b20e710e5ad860e60e695d9c91b` unmatched despite reg_no=89958 + name matching reference_data; OCR dob wrong → blocks match. Needs dob-fuzzy review
+- D1: `06ad7ba91d73c4973da008c408294d746fe992b22e4e42553cf0034161274311`, `bfab5a4d21fe19ade3e642278bf1bccd02581a231b9cdc9871dc452dc7d279b5` — already matched but dashboard shows "review"
+- E1: page/document summaries not shown in dashboard despite index stage generating them — confirm free-text model wiring
+
+**Next:** fix 500 first, then brainstorm A1→E1 one at a time, then flush+rerun full pipeline on all sample bundles.
+
+## 2026-06-13 (continued 2) — 500 fixed, A1/A2/B1 done, C1-C3/D1/E1 done
+
+- **500 bug**: stale uvicorn process (PID 26576, pre-D2-migration code) + leftover :8001 dev instance — killed both, fresh `uvicorn cloud.app:app --reload :8000`. Confirmed 200.
+- **A1**: added `birth_certificate` PageType (models.py Literal, `shared/page_type.py` keyword rule + db/schema.sql `page_types` seed) + test. Fixed live page row.
+- **A2**: `internship_cert`'s bare "internship" keyword matched Form E's checklist text before `form_e` could win. Tightened `internship_cert` to specific phrases; added `"indian medical council act"` as a robust `form_e` anchor (survives OCR garbling of `FORM "E"`/`FORME`).
+- **B1**: investigated, NOT a bug. OCR routing uses MANIFEST `page_type` (NAS-assigned), not structure-stage page_type. `c405e466.../1` is a blank cover template (manifest type "other", conf 71.94≥70 → Tesseract correct); `/19` is the filled form (manifest "form" → VLM correct).
+- **C1/C2/C3/D1**: all root-caused to ONE fix — `_REG_NO_BARE_OCR1_RE = r"\bR1(\d{5})\b"` in `cloud/structure/regex_extract.py` (FIX-042, see error_fixes.md). OCR misreads `R|92008`/`R-92008` as `R192008`; since no real MCH reg_no is 6 digits (max ~92389), strip the leading "1". Re-ran `make structure && make match` on c85718d0... (C1, →92008 matched), ace66f74... (C2, →84622 matched, full identity backfilled), 5761dad5... (C3, →89958 matched, dob now correct from page1 not SBI-receipt page2), 06ad7ba9... and bfab5a4d... (D1, both →matched, exact path now succeeds instead of falling to low-score fuzzy/manual_review).
+- **E1**: root cause — `Document`/`Page` ORM models (`cloud/ingest/storage_db.py`) didn't map `document_summary`/`page_summary`/`index_status` columns (exist in db/schema.sql, populated by index stage), so `_to_dict()` never returned them to the dashboard API. Added the 3 mapped columns; wired `doc.document_summary` into document detail page and `page.page_summary` into page detail view. tsc clean, 383 unit tests pass (1 pre-existing unrelated failure: `test_config_index.py::test_index_defaults` — env has `SQS_INDEX_QUEUE_URL` set, test expects empty default).
+- **New minor finding (not fixed)**: ace66f74.../page1 LLM `refined_type` returned `provisional_reg` instead of `application_form` despite keyword typer correctly saying `application_form` (0.8) — LLM classify call disagreement, low priority.
+- **Remaining backlog**: A3 (document_type ~40-value enum), A4 (multi-form-page VLM selection). Then flush+rerun (`make down-clean && make up && make init`) on all sample bundles.
+- Also noted: OpenRouter `openai` SDK client has no request timeout — `run_structure` hung 10+ min once on a single LLM call; retry succeeded. Consider adding `timeout=` to client construction if recurs.
+
+## 2026-06-13 (continued 3) — A3: document_type classification
+
+- **What was done:** `documents.document_type` (existing nullable TEXT, unused)
+  now populated for practitioner docs. New
+  `cloud/structure/document_type.py::classify_document_type` — two-pass:
+  rapidfuzz `partial_ratio` against the 54-label MCH service-type enum
+  (`DOCUMENT_TYPES` in `cloud/structure/models.py`,
+  `DOCUMENT_TYPE_FUZZY_THRESHOLD=85`, uncalibrated), then LLM fallback
+  (`classify_document_type_llm` in `cloud/structure/llm.py`, validates
+  against the same enum, never raises). `structure_document` runs this per
+  identity page, keeps the best-scoring result across pages, writes to
+  `fields["document_type"]` in the practitioner rollup.
+- **No schema change** — column already existed, NULL by default.
+- **Spec:** `docs/superpowers/specs/2026-06-13-document-type-classification-design.md`.
+- **Verify:** 399 unit tests pass (1 pre-existing unrelated failure:
+  `test_config_index.py::test_index_defaults`).
+- **Remaining backlog:** A4 (multi-application-form-page VLM selection), then
+  flush+rerun (`make down-clean && make up && make init`) on all sample
+  bundles.
