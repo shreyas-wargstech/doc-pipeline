@@ -632,3 +632,18 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Remaining backlog:** A4 (multi-application-form-page VLM selection), then
   flush+rerun (`make down-clean && make up && make init`) on all sample
   bundles.
+
+## 2026-06-13 (continued 4) — A4: multi-application-form-page VLM selection
+
+- **What was done:** `nas/uploader/service.py::upload_document` post-process
+  step — among pages keyword-classified `page_type=="form"`
+  (application_form), only the first (by page_num) is kept as `"form"`;
+  later ones demoted to `"other"`. "Earliest wins" — naturally handles a
+  blank/other first page too. Ensures only the primary identity-bearing form
+  page routes to VLM-first OCR.
+- New test `test_only_first_form_page_kept_as_form` + `patched_with_two_forms`
+  fixture in `tests/nas/test_uploader_service.py`.
+- **Spec:** `docs/superpowers/specs/2026-06-13-multi-form-page-vlm-selection-design.md`.
+- Commit: `d0ea571`.
+- **A1-A4 all done.** Next step: flush+rerun (`make down-clean && make up &&
+  make init`) on all sample bundles.
