@@ -53,6 +53,10 @@
   - **Do NOT use the folder runner at this scale** — it collapses NAS + cloud into one sequential in-process call; no fan-out, no durability.
   - Correct flow: NAS batch script → S3 (original + pages + manifest) → S3 event → SQS → Lambda (parallel per-document cloud processing).
 
+- [ ] **Start NAS batch from dashboard** — `POST /pipelines/batch` endpoint + Pipelines page trigger. Assumes dashboard server can reach the NAS folder (mounted drive / shared path); server runs the NAS batch script in-process, manifests go to S3, Lambda fan-out fires automatically. Stream progress via SSE (same pattern as folder runner). If NAS is a separate machine, NAS needs its own lightweight HTTP API (`POST /upload/start`) that the dashboard calls instead. Fan-out control (pause/resume/cancel) is a follow-on (see below).
+
+- [ ] **Fan-out control from dashboard** — Pipelines page pause/resume/cancel for the SQS→Lambda fan-out. Simplest implementation: `PUT /pipelines/batch/pause` + `/resume` toggle the Lambda `EventSourceMapping` enabled flag via boto3 (no worker code changes). Per-stage throttle (hold structure/match/persist until approved) requires a feature-flag row in Postgres that stage consumers check. Only relevant once AWS infra (P2) is wired up; local `make stage-worker` already gives manual control.
+
 ## P2 — AWS orchestration (next pipeline milestone)
 
 - [ ] **AWS infra (sub-project E)** — S3 event → SQS → Lambda per stage. Open decisions:
