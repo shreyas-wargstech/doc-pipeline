@@ -19,6 +19,12 @@ export const useToast = () => {
   return c;
 };
 
+/** Like useToast, but returns a no-op push() instead of throwing when used outside a provider (e.g. in tests). */
+export const useToastSafe = (): ToastCtx["push"] => {
+  const c = useContext(ToastContext);
+  return c?.push ?? (() => {});
+};
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const idRef = useRef(0);
