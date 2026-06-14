@@ -46,6 +46,13 @@
 - [ ] **`retrieval_min_results=3` cascade tier mix uncalibrated** — keyword/graph/vector ordering + cutoff is a starting point; populate the `LABELED_QUERIES` benchmark scaffold to tune. Files: `cloud/retrieval/service.py`, benchmark scaffold.
 - [ ] **`DOCUMENT_TYPE_FUZZY_THRESHOLD=85` uncalibrated** — A3 document_type classification fuzzy cutoff (rapidfuzz `partial_ratio` vs 54-label enum) is a guess. Tune once labeled doc-type data exists. Files: `cloud/structure/document_type.py`.
 
+## P2 — NAS batch ingestion (scale path for 20k docs)
+
+- [ ] **NAS batch uploader script** — `scripts/batch_upload.py` (or `Makefile` target): loop over a directory of PDFs, call `nas/uploader/service.py` per file, log progress + errors, skip already-uploaded (check S3 manifest existence). This is the only missing piece for 20k-doc ingestion; once manifests land in S3 the Lambda fan-out handles the rest in parallel automatically.
+  - NAS is the bottleneck (~7 min/doc for render + Tesseract OSD); parallelism limited by NAS CPU/RAM.
+  - **Do NOT use the folder runner at this scale** — it collapses NAS + cloud into one sequential in-process call; no fan-out, no durability.
+  - Correct flow: NAS batch script → S3 (original + pages + manifest) → S3 event → SQS → Lambda (parallel per-document cloud processing).
+
 ## P2 — AWS orchestration (next pipeline milestone)
 
 - [ ] **AWS infra (sub-project E)** — S3 event → SQS → Lambda per stage. Open decisions:

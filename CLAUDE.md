@@ -115,6 +115,7 @@ Active threads:
 - **Persisted run history (Approach B)** — **BLOCKER before 200-doc run.** In-memory `RunRegistry` loses state on restart; a ~23h run can't tolerate that. Build before the large batch.
 - **RunTable scale** — 200 docs × 13 pages ≈ 2,600 SSE events; current table unusable at that volume. Needs virtual scroll or summary-only mode.
 - **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production folder runs; currently only `LocalFolderSource` exists.
+- **NAS batch ingestion (scale path)** — for 200–20k docs, do NOT use the folder runner (sequential, no fan-out). Correct path: `nas/uploader/service.py` batch-loops the directory → S3 manifests → S3 event → SQS → Lambda fan-out. Missing piece: `scripts/batch_upload.py` wrapper (loop + skip-if-uploaded + progress log).
 
 Local run needs: tesseract on PATH (`eng+mar+hin`+`osd`); `make up` (elasticmq + DBs); `.env` SQS block + `OPENROUTER_API_KEY` (sole cloud-OCR credential). `make serve` = uvicorn :8000; `/pipeline/notify` → 202, `handle_manifest()` in background. **New (2026-06-10):** add `SQS_STRUCTURE_QUEUE_URL`, `SQS_MATCH_QUEUE_URL`, `SQS_PERSIST_QUEUE_URL` to `.env` (see `.env.example`); run `python -m scripts.apply_status_structuring` once against live DB to widen the status CHECK; `make stage-worker STAGE=structure|match|persist` drains a queue; `make sweep` runs one fan-in pass.
 
