@@ -1,33 +1,30 @@
 import type { Config } from "tailwindcss";
 
+const c = (name: string) => `rgb(var(--color-${name}) / <alpha-value>)`;
+
 const config: Config = {
-  darkMode: "class",
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        background: "rgb(var(--color-background) / <alpha-value>)",
-        foreground: "rgb(var(--color-foreground) / <alpha-value>)",
-        primary: {
-          DEFAULT: "rgb(var(--color-primary) / <alpha-value>)",
-          fg: "rgb(var(--color-on-primary) / <alpha-value>)",
-        },
-        secondary: "rgb(var(--color-secondary) / <alpha-value>)",
-        accent: "rgb(var(--color-accent) / <alpha-value>)",
-        muted: {
-          DEFAULT: "rgb(var(--color-muted) / <alpha-value>)",
-          fg: "rgb(var(--color-muted-fg) / <alpha-value>)",
-        },
-        border: "rgb(var(--color-border) / <alpha-value>)",
-        card: "rgb(var(--color-card) / <alpha-value>)",
-        destructive: "rgb(var(--color-destructive) / <alpha-value>)",
-        ring: "rgb(var(--color-ring) / <alpha-value>)",
-        ok: "rgb(var(--color-ok) / <alpha-value>)",
-        warn: "rgb(var(--color-warn) / <alpha-value>)",
-        danger: "rgb(var(--color-danger) / <alpha-value>)",
-        info: "rgb(var(--color-info) / <alpha-value>)",
+        background: c("background"),
+        foreground: c("foreground"),
+        surface: c("surface"),
+        "surface-alt": c("surface-alt"),
+        card: c("surface"),
+        primary: { DEFAULT: c("primary"), fg: c("on-primary"), hover: c("primary-hover"), tint: c("primary-tint") },
+        muted: { DEFAULT: c("surface-alt"), fg: c("muted-fg") },
+        "tertiary-fg": c("tertiary-fg"),
+        border: { DEFAULT: c("border"), strong: c("border-strong") },
+        destructive: c("danger"),
+        ring: c("primary"),
+        ok: c("ok"),
+        warn: c("warn"),
+        danger: c("danger"),
+        info: c("info"),
       },
       fontFamily: {
+        display: ["var(--font-display)", "Georgia", "serif"],
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
