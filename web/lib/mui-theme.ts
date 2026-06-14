@@ -43,10 +43,14 @@ export const theme: Theme = createTheme({
     MuiButton: {
       defaultProps: { disableElevation: true },
       styleOverrides: {
-        root: { borderRadius: radii.base, textTransform: "none", fontWeight: 600 },
-        containedPrimary: {
-          boxShadow: warm.md,
-          "&:hover": { backgroundColor: rgb("primary-hover"), boxShadow: warm.lg },
+        root: {
+          borderRadius: radii.base,
+          textTransform: "none",
+          fontWeight: 600,
+          "&.MuiButton-containedPrimary": {
+            boxShadow: warm.md,
+            "&:hover": { backgroundColor: rgb("primary-hover"), boxShadow: warm.lg },
+          },
         },
         outlined: {
           borderColor: rgb("border-strong"),
