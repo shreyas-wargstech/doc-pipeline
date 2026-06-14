@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 
 from cloud.dashboard import api as dashboard_api
 from cloud.ingest.service import handle_manifest
+from cloud.pipeline_run import api as pipeline_run_api
 from cloud.retrieval.query_parser import parse_query
 from cloud.retrieval.service import find_pages, retrieve_documents
 from nas.manifest.models import Manifest
@@ -63,6 +64,7 @@ app = FastAPI(
 # web/ (one origin via Next rewrites). The legacy HTMX dashboard + HTTP Basic
 # auth were removed in the Next.js cutover; FastAPI serves /api only.
 app.include_router(dashboard_api.router, prefix="/api")
+app.include_router(pipeline_run_api.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
