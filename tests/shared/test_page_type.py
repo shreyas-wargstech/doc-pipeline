@@ -83,6 +83,26 @@ def test_letter_body_keywords_classify_high_conf():
     assert conf >= PAGE_TYPE_CONF_NET
 
 
+def test_letter_body_devanagari_classifies():
+    # Real council letters are OCR'd Marathi/Devanagari — English anchors never
+    # survive. Anchor on the dispatch-no prefix + विषय/संदर्भ furniture.
+    ptype, conf = classify_page_type(
+        "महाराष्ट्र कौन्सिल ऑफ होमिओपॅथी कृ.महोप-अस्था -२०२५/ प्रति, "
+        "विषय - नोंदणी करणे बाबत संदर्भ -"
+    )
+    assert ptype == "letter_body"
+    assert conf >= PAGE_TYPE_CONF_NET
+
+
+def test_applicant_name_alone_no_longer_forces_application_form():
+    # "Applicant Name" appears on council payment receipts too — dropping it as
+    # a solo anchor stops the silent receipt → application_form mislabel.
+    ptype, _ = classify_page_type(
+        "Ossieray Payment Receipt Applicant Name: ... Payment Status Amount"
+    )
+    assert ptype != "application_form"
+
+
 def test_invoice_keywords_classify_high_conf():
     ptype, conf = classify_page_type(
         "TAX INVOICE\nInvoice No. 88\nGSTIN: 27ABCDE1234F1Z5\nHSN 4901"

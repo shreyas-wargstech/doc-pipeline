@@ -832,3 +832,9 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Diagnosis (per-page replay): 3 causes — (1) `letter_body`/`invoice`/`blank` had NO keyword rule → always escalate; 23 stored blank pages each paid a VLM call; (2) education-cert ambiguity (0.4 multi-match) — left as-is (needs calibration); (3) genuinely garbled OCR — VLM legitimately earns keep.
 - Fix: blank short-circuit (`_BLANK_CHAR_FLOOR=5` → `("blank",0.9)`) + `invoice`/`letter_body` keyword rules (listed last). TDD: 4 failing tests first → green. Fixed `test_ocr_router` fixture (`words=1`→`8`; "x" now reads as blank). Verified 414→all green relevant suites (`tests/shared` + `tests/cloud` 414 pass pre-fix-of-fixture, then 31 affected green; full unit run clean bar known env failures).
 - Anchors UNCALIBRATED — tune via content-type eval lab. Ambiguity-penalty softening + `application_form` "applicant name" mislabel (silent SBI→application_form) deferred.
+
+## 2026-06-15 — page-type eval harness + anchor calibration (FIX-047b)
+- Built `cloud/eval/page_type.py` (pure scorer) + `scripts/eval_page_type.py` (live `pages` table, VLM page_type as noisy truth). Metrics: accuracy / escalation_rate (cost lever) / silent_mislabel_rate / per-label P-R / confident_wrong.
+- First run (n=36) killed 2 FIX-047 guesses: `letter_body` English anchors inert (real letters = Devanagari) → replaced with `महोप`/`संदर्भ`/`प्रति,` (recall 0→1.0); `विषय` rejected (collides with marksheet "subject" → HSC false positive). `"applicant name"` dropped from application_form (silently mislabelled a council payment receipt) → silent_mislabel 8.3%→5.6%.
+- Tradeoff accepted: application_form keyword recall 0.80→0.40, escalation 41.7%→44.4% (safe VLM escalation > silent-wrong).
+- Verified: 471 unit green (shared+cloud+nas, integration deselected). Commits: harness `ffec864`, calibration next.

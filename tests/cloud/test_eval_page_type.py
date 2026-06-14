@@ -13,8 +13,8 @@ def _rows() -> list[EvalRow]:
         EvalRow(raw_text="   ", label="blank"),
         # escalation: real text, no keyword match → low conf
         EvalRow(raw_text="xxxxxxxx yyyyy zzzz", label="hsc"),
-        # silent mislabel: keyword confidently wrong
-        EvalRow(raw_text="Applicant Name: ...", label="sbi_receipt"),
+        # silent mislabel: keyword confidently picks application_form, truth differs
+        EvalRow(raw_text="FORM A application for registration", label="form_e"),
     ]
 
 
@@ -33,8 +33,8 @@ def test_confident_wrong_surfaced():
     assert len(rep.confident_wrong) == 1
     snippet, predicted, true = rep.confident_wrong[0]
     assert predicted == "application_form"
-    assert true == "sbi_receipt"
-    assert "applicant" in snippet.lower()
+    assert true == "form_e"
+    assert "form a" in snippet.lower()
 
 
 def test_per_label_precision_recall():
@@ -43,8 +43,8 @@ def test_per_label_precision_recall():
     # aadhaar: 1 true, 1 predicted, 1 correct → p=r=1
     assert by["aadhaar"].precision == 1.0
     assert by["aadhaar"].recall == 1.0
-    # sbi_receipt: 1 true, 0 predicted, 0 correct → recall 0, precision 0
-    assert by["sbi_receipt"].recall == 0.0
+    # form_e: 1 true, 0 predicted (this row predicts application_form) → recall 0
+    assert by["form_e"].recall == 0.0
 
 
 def test_empty_rows_safe():

@@ -885,3 +885,16 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 **Files:** `shared/page_type.py`, `tests/shared/test_page_type.py`, `tests/cloud/test_ocr_router.py` (fixture used `raw_text="x"` to mean "no keywords" — 1 char now classifies as blank; bumped to 8 chars to represent a real low-confidence page).
 
 **Rule:** Before paying an LLM for a fallback, exhaust the free path — short-circuit trivially-classifiable inputs (empty/blank) and make sure every output label the cheap classifier *can* emit has at least one cheap rule. A 0.0-confidence "I don't know" that forces a paid call is a coverage gap, not a hard case. `letter_body`/`invoice` keyword anchors are UNCALIBRATED (no labeled letter/invoice text yet) — tune against the content-type eval lab.
+
+### FIX-047b · page-type anchors calibrated against real scans (eval-harness loop)
+
+**Context:** Built `cloud/eval/page_type.py` (pure scorer over `classify_page_type`: accuracy, escalation_rate, silent_mislabel_rate, per-label P/R, confident_wrong list) + `scripts/eval_page_type.py` (scores the live `pages` table, VLM-assigned `page_type` as noisy ground truth). First run (n=36) immediately invalidated two FIX-047 guesses:
+
+- **`letter_body` English anchors were inert (recall 0/2).** Real council letters OCR as Marathi/Devanagari; the English furniture (`subject:`, `yours faithfully`) never appears. Replaced with Devanagari anchors from the actual text: `महोप` (council dispatch-no prefix `कृ.महोप-अस्था`), `संदर्भ` ("reference"), `प्रति,` ("to"). → recall/precision 1.0. **Rejected `विषय` ("subject")**: it collides with the academic *subject* column on Devanagari marksheets (caused an HSC→letter_body false positive in the harness).
+- **`"applicant name"` silently mislabelled a council payment receipt as `application_form`** (the receipt has an "Applicant Name" field). Dropped the anchor. → silent_mislabel 8.3%→5.6% (remaining 2 are `form` coarse-label ground-truth noise, not real errors).
+
+**Tradeoff (accepted):** dropping `"applicant name"` lowered `application_form` keyword recall (0.80→0.40 on this set — portal printouts that only had that label now escalate) and nudged escalation_rate 41.7%→44.4%. Converting a silent-wrong into a safe VLM escalation is the right call; cost impact is small.
+
+**Files:** `shared/page_type.py`, `cloud/eval/page_type.py`, `scripts/eval_page_type.py`, `tests/shared/test_page_type.py`, `tests/cloud/test_eval_page_type.py`.
+
+**Rule:** Keyword anchors are hypotheses until scored against real OCR text. Build the eval harness BEFORE trusting hand-written rules — especially for non-Latin scripts (Tesseract Devanagari garbles tokens; `विषय`→`वेषय`) and for generic words that collide across doc types ("subject" = letter-subject AND marksheet-subject). Ground truth from the `pages` table is noisy/partly circular — read escalation_rate + confident_wrong, not raw accuracy.

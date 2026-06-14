@@ -29,8 +29,10 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # garbled ("FORM ?A?"); the VLM page-typer is the fallback for cases where
     # even "form a" doesn't survive OCR. app_cover retired (2026-06-12) — every
     # page it caught is the application form.
+    # "applicant name" REMOVED (FIX-047 follow-up): it also appears on council
+    # payment receipts → silently mislabelled them application_form (eval harness
+    # confident_wrong, n=1). Real forms still anchor on the phrases below.
     ("application_form", ("application for registration",
-                          "applicant name",       # online portal printout label
                           "qualification details",
                           "for use at the council",
                           "form a")),
@@ -63,11 +65,19 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("invoice", ("tax invoice", "invoice no", "invoice number", "gstin",
                  "gst no", "hsn", "purchase order")),
     # Government / council letters. Generic body, so listed LAST — any specific
-    # document rule above wins priority on a multi-match. Anchored on the
-    # letterhead / dispatch / salutation furniture of an official letter.
+    # document rule above wins priority on a multi-match. English anchors are the
+    # letterhead/dispatch/salutation furniture; the Devanagari anchors are what
+    # actually fire on the real council letters, which OCR as Marathi (the eval
+    # harness showed the English anchors never matched). "महोप" = the council's
+    # establishment-dept dispatch-no prefix (कृ.महोप-अस्था -२०२५/); संदर्भ =
+    # "reference"; प्रति = "to" (salutation). NOTE: "विषय" (subject) was tried and
+    # removed — it collides with the academic "subject" column on Devanagari
+    # marksheets (HSC false positive in the eval harness). Tesseract Devanagari is
+    # noisy, so these are best-effort — truly garbled letters still escalate.
     ("letter_body", ("outward no", "inward no", "with reference to your",
                      "subject:", "sub:-", "sub :-", "yours faithfully",
-                     "yours sincerely", "office of the registrar")),
+                     "yours sincerely", "office of the registrar",
+                     "महोप", "संदर्भ", "प्रति,")),
 )
 
 
