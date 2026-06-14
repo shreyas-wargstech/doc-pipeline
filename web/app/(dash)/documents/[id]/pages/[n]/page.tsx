@@ -12,12 +12,15 @@ import Typography from "@mui/material/Typography";
 import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
 import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
 import { JsonViewer } from "@/components/JsonViewer";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { PageRailToggle } from "@/app/(dash)/documents/[id]/layout";
 import { imageUrl } from "@/lib/api";
 import { titleCase } from "@/lib/format";
 import { useDocument } from "@/hooks/useDocument";
 import { usePage } from "@/hooks/usePage";
+import { useCollapsible } from "@/hooks/useCollapsible";
 import { useToast } from "@/app/providers";
 
 export default function PageDetail({ params }: { params: Promise<{ id: string; n: string }> }) {
@@ -40,6 +43,7 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
   const q = usePage(id, pageNum);
   const docQuery = useDocument(id);
   const [tab, setTab] = useState<number | null>(null);
+  const dataPanel = useCollapsible("page-data-panel", false);
 
   const pageCount = docQuery.data?.doc.page_count ?? null;
   const hasPrev = pageNum > 1;
@@ -68,7 +72,20 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          flexWrap: "wrap",
+          position: "sticky",
+          top: 0,
+          zIndex: 1,
+          bgcolor: "background.default",
+          py: 1,
+        }}
+      >
+        <PageRailToggle />
         <IconButton
           component={Link}
           href={hasPrev ? `/documents/${id}/pages/${pageNum - 1}` : `/documents/${id}/pages/${pageNum}`}
@@ -82,7 +99,7 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
         >
           <ArrowBackIosNewIcon fontSize="small" />
         </IconButton>
-        <Typography variant="h6" component="h1" sx={{ fontFamily: "var(--font-mono)" }}>
+        <Typography variant="h6" component="h1" sx={{ fontFamily: "var(--font-display)", fontWeight: 600 }}>
           Page {page.page_num}
         </Typography>
         <IconButton
@@ -108,12 +125,28 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
           </Typography>
         )}
 
-        <IconButton aria-label="Copy link" size="small" onClick={copyLink} sx={{ ml: "auto" }}>
-          <ContentCopyIcon fontSize="small" />
-        </IconButton>
+        <Box sx={{ ml: "auto", display: "flex", gap: 0.5 }}>
+          <IconButton aria-label="Copy link" size="small" onClick={copyLink}>
+            <ContentCopyIcon fontSize="small" />
+          </IconButton>
+          <IconButton
+            aria-label={dataPanel.collapsed ? "Show data panel" : "Hide data panel"}
+            size="small"
+            color={dataPanel.collapsed ? "default" : "primary"}
+            onClick={dataPanel.toggle}
+          >
+            <ViewSidebarIcon fontSize="small" />
+          </IconButton>
+        </Box>
       </Box>
 
-      <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" } }}>
+      <Box
+        sx={{
+          display: "grid",
+          gap: 2,
+          gridTemplateColumns: dataPanel.collapsed ? "1fr" : { xs: "1fr", lg: "1fr 1fr" },
+        }}
+      >
         <Paper sx={{ overflow: "hidden" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={imageUrl(id, pageNum)} alt={`Page ${pageNum}`} style={{ width: "100%", display: "block" }} />
@@ -128,30 +161,32 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
           <img src={imageUrl(id, pageNum + 1)} alt="" aria-hidden style={{ display: "none" }} />
         )}
 
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <Tabs value={activeTab} onChange={(_, v) => setTab(v)} aria-label="Page content">
-            <Tab label="Summary" />
-            <Tab label="Structured" />
-            <Tab label="Raw text" />
-          </Tabs>
-          {activeTab === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
-              {page.page_summary ?? "No summary available."}
-            </Typography>
-          )}
-          {activeTab === 1 && <JsonViewer data={structured_json} />}
-          {activeTab === 2 && (
-            <Paper variant="outlined" sx={{ p: 1, maxHeight: "40vh", overflow: "auto" }}>
-              <Typography
-                component="pre"
-                variant="body2"
-                sx={{ fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap", m: 0 }}
-              >
-                {raw_text ?? "—"}
+        {!dataPanel.collapsed && (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <Tabs value={activeTab} onChange={(_, v) => setTab(v)} aria-label="Page content">
+              <Tab label="Summary" />
+              <Tab label="Structured" />
+              <Tab label="Raw text" />
+            </Tabs>
+            {activeTab === 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
+                {page.page_summary ?? "No summary available."}
               </Typography>
-            </Paper>
-          )}
-        </Box>
+            )}
+            {activeTab === 1 && <JsonViewer data={structured_json} />}
+            {activeTab === 2 && (
+              <Paper variant="outlined" sx={{ p: 1, maxHeight: "40vh", overflow: "auto" }}>
+                <Typography
+                  component="pre"
+                  variant="body2"
+                  sx={{ fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap", m: 0 }}
+                >
+                  {raw_text ?? "—"}
+                </Typography>
+              </Paper>
+            )}
+          </Box>
+        )}
       </Box>
     </Box>
   );
