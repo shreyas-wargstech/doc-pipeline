@@ -18,7 +18,8 @@ _LIST_SQL = text(
            d.match_status, d.page_count, d.original_filename,
            d.registration_no, d.updated_at,
            COALESCE(p.done, 0)  AS ocr_done,
-           COALESCE(p.total, 0) AS ocr_total
+           COALESCE(p.total, 0) AS ocr_total,
+           (b.username IS NOT NULL) AS bookmarked
     FROM documents d
     LEFT JOIN (
         SELECT document_id,
@@ -27,13 +28,19 @@ _LIST_SQL = text(
         FROM pages
         GROUP BY document_id
     ) p ON p.document_id = d.document_id
+    LEFT JOIN document_bookmarks b
+        ON b.document_id = d.document_id AND b.username = :me
     WHERE (CAST(:category AS text)     IS NULL OR d.document_category = :category)
       AND (CAST(:status AS text)       IS NULL OR d.status            = :status)
       AND (CAST(:match_status AS text) IS NULL OR d.match_status      = :match_status)
       AND (CAST(:search AS text)       IS NULL
            OR d.registration_no   ILIKE :search_like
            OR d.original_filename ILIKE :search_like)
-    ORDER BY d.updated_at DESC
+      AND (CAST(:bookmarked AS boolean) IS NULL
+           OR (b.username IS NOT NULL) = :bookmarked)
+    ORDER BY
+      CASE WHEN CAST(:bookmarked AS boolean) IS TRUE THEN b.created_at END DESC NULLS LAST,
+      d.updated_at DESC
     LIMIT :limit OFFSET :offset
     """
 )
@@ -42,37 +49,45 @@ _COUNT_SQL = text(
     """
     SELECT count(*) AS n
     FROM documents d
+    LEFT JOIN document_bookmarks b
+        ON b.document_id = d.document_id AND b.username = :me
     WHERE (CAST(:category AS text)     IS NULL OR d.document_category = :category)
       AND (CAST(:status AS text)       IS NULL OR d.status            = :status)
       AND (CAST(:match_status AS text) IS NULL OR d.match_status      = :match_status)
       AND (CAST(:search AS text)       IS NULL
            OR d.registration_no   ILIKE :search_like
            OR d.original_filename ILIKE :search_like)
+      AND (CAST(:bookmarked AS boolean) IS NULL
+           OR (b.username IS NOT NULL) = :bookmarked)
     """
 )
 
 
-def _filter_params(category, status, match_status, search) -> dict[str, Any]:
+def _filter_params(username, category, status, match_status, search, bookmarked) -> dict[str, Any]:
     return {
+        "me": username,
         "category": category,
         "status": status,
         "match_status": match_status,
         "search": search,
         "search_like": f"%{search}%" if search else None,
+        "bookmarked": bookmarked,
     }
 
 
 async def list_documents(
     session: AsyncSession,
     *,
+    username: str,
     category: str | None = None,
     status: str | None = None,
     match_status: str | None = None,
     search: str | None = None,
+    bookmarked: bool | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    params = _filter_params(category, status, match_status, search)
+    params = _filter_params(username, category, status, match_status, search, bookmarked)
     params.update({"limit": limit, "offset": offset})
     result = await session.execute(_LIST_SQL, params)
     return [dict(r) for r in result.mappings().all()]
@@ -81,12 +96,14 @@ async def list_documents(
 async def count_documents(
     session: AsyncSession,
     *,
+    username: str,
     category: str | None = None,
     status: str | None = None,
     match_status: str | None = None,
     search: str | None = None,
+    bookmarked: bool | None = None,
 ) -> int:
-    params = _filter_params(category, status, match_status, search)
+    params = _filter_params(username, category, status, match_status, search, bookmarked)
     result = await session.execute(_COUNT_SQL, params)
     return int(result.scalar_one())
 
