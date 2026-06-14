@@ -315,3 +315,27 @@ CREATE TABLE IF NOT EXISTS document_bookmarks (
 
 CREATE INDEX IF NOT EXISTS idx_bookmarks_username
     ON document_bookmarks (username, created_at DESC);
+
+-- -----------------------------------------------------------------------------
+-- cost_events: one row per OpenRouter LLM call (DASH-2 cost/usage tracking).
+-- document_id is nullable (e.g. retrieval has none) and intentionally has NO FK
+-- so cost history survives document purges.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cost_events (
+    id                BIGSERIAL        PRIMARY KEY,
+    ts                TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+    stage             TEXT             NOT NULL,    -- ocr_vlm | classifier | structure | ...
+    model             TEXT             NOT NULL,
+    document_id       TEXT,                          -- nullable, no FK
+    page_num          INTEGER,
+    prompt_tokens     INTEGER          NOT NULL DEFAULT 0,
+    completion_tokens INTEGER          NOT NULL DEFAULT 0,
+    total_tokens      INTEGER          NOT NULL DEFAULT 0,
+    cost              DOUBLE PRECISION NOT NULL DEFAULT 0,   -- USD credits charged
+    status            TEXT             NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
+    detail            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cost_events_ts       ON cost_events (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_cost_events_stage    ON cost_events (stage);
+CREATE INDEX IF NOT EXISTS idx_cost_events_document ON cost_events (document_id);
