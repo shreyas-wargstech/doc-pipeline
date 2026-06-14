@@ -687,3 +687,32 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - PAUSED: user out of OpenRouter credits. VLM-tier (identity page OCR, structure LLM) will fail/hang without it.
 - **Resume:** top up OpenRouter credits, check bl9rhl00h/bmwl4er4c task status, then run sweeper + stage-workers (structure/match/persist) once OCR drains.
 
+
+
+## 2026-06-14 (continued) — Frontend foundation redesign (warm-editorial), merged to main
+
+- **What:** Full web design-system revamp foundation. New visual language =
+  Mono-Minimal restraint + warm editorial warmth + single teal accent.
+  Light-only (dark mode + toggle removed). Fonts: Fraunces (display) / Inter
+  (sans) / JetBrains Mono (mono).
+- **How:** Canonical token module `web/lib/tokens.ts` is the single source —
+  feeds the `:root` CSS vars (injected from `layout.tsx`, read by Tailwind)
+  AND the real `rgb()` values for the MUI theme (MUI can't parse `var()`).
+  Rewrote `mui-theme.ts` to one warm light theme (palette, editorial type
+  scale, warm-tinted shadows, component overrides). Restyled shell (teal
+  logomark + "Docintel" wordmark), primitives (Button/Input/Card/Badge), new
+  `PageHeader`, two-panel editorial login (`LoginBrandPanel` + page).
+- **Scope:** foundation + shell + login only. Feature pages inherit the theme,
+  NOT individually redesigned. Tailwind kept (reads same tokens) — not ripped.
+- **Verified:** tsc 0 errors; 24 files / 68 web tests pass; `next build` exit 0.
+  `__tests__/action-bar.test.tsx` crashes the vitest tinypool worker in this
+  env (imports only `@/app/action-bar`, untouched) — pre-existing/environmental.
+- Spec `docs/superpowers/specs/2026-06-14-frontend-foundation-design.md`,
+  plan `docs/superpowers/plans/2026-06-14-frontend-foundation-redesign.md`.
+- Built via subagent-driven dev (8 tasks, 2-stage review each). Final review
+  caught one regression: the `bg-secondary`→`bg-muted` reconciliation made
+  progress/metric-bar fill == track (invisible); fixed → `bg-primary` (5611a68).
+- **Merged to local `main`** (ff, 7e3ef91..5611a68); feature branch deleted.
+  `main` still local-only (not pushed, per prior choice).
+- **Next (UX roadmap):** feature-page redesigns on the new foundation —
+  document viewer first, then evaluation/retrieval/pipelines/observability/admin.
