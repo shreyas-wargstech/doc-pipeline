@@ -8,13 +8,17 @@ function shortId(id: string): string {
 }
 
 export function DetailPanel({ documentId }: { documentId: string | null }) {
-  const { data, isLoading } = useSearchDocPages(documentId);
+  const { data, isLoading, isError } = useSearchDocPages(documentId);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden rounded-panel border border-border bg-surface">
       {documentId === null ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-fg">
           <p className="text-sm">Select a result to see its pages.</p>
+        </div>
+      ) : isError ? (
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-red-600">Failed to load pages.</p>
         </div>
       ) : isLoading || !data ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-fg" aria-busy="true">

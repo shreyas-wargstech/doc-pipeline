@@ -10,7 +10,7 @@
 
 ## P0 — FINISH TODAY (the active thread)
 
-- [ ] **Flush + full rerun on all 18 sample bundles** — PAUSED 2026-06-13 (OpenRouter credits exhausted; VLM-tier OCR + structure LLM hang/fail without them). **Resume sequence:**
+- [ ] **Flush + full run on 200-document directory** — PAUSED (OpenRouter credits exhausted). Scale-up from 18 → 200 docs; `LocalFolderSource` handles any directory size already. **Before starting:** (1) build Approach B persisted run history (server restart at hour 20 of a ~23h run = lost state), (2) top up OpenRouter credits (~300 VLM calls for identity pages). **Resume sequence:**
   1. Top up OpenRouter credits; confirm a live VLM test call OK.
   2. `make down-clean && make up && make init` (rebuilds all 4 datastores from `db/schema.sql` — authoritative, 8 tables incl. `document_bookmarks`/`eval_content_type`/index cols, so the `apply_*` scripts are NOT needed after a flush).
   3. `python -m scripts.load_reference_data` (92,389 rows).
@@ -20,8 +20,8 @@
   - Prior background tasks (may be stale): upload `bl9rhl00h` (`/tmp/upload_all.log`), OCR worker `bmwl4er4c` (`/tmp/ocr_worker.log`) — check/kill before relaunch.
 
 - [ ] **Implement the 4 stub feature pages** (currently 16-17 line placeholders under `web/app/(dash)/`):
-  - [ ] **Retrieval / search** (`retrieval/page.tsx`) — surface the live `GET /search` 3-tier cascade (keyword→graph→vector) + `GET /search/{doc_id}/pages`. Currently API-only.
-  - [x] **Pipelines** (`pipelines/page.tsx`) — DONE (2026-06-14, `feat/pipeline-folder-runner`): `RunForm` + live SSE `RunTable`; `POST /pipelines/run`, `GET /pipelines/run/{id}/events`. Replaces ComingSoon stub.
+  - [x] **Retrieval / search** (`retrieval/page.tsx`) — DONE 2026-06-15, on local `main`. Split-view search workspace: `SearchBar` + `ResultsList` (380px) + `DetailPanel`. Backend routes extracted to `/api` prefix. 8 frontend + 3 backend tests green.
+  - [x] **Pipelines** (`pipelines/page.tsx`) — DONE, merged to `main` (2026-06-14, `feat/pipeline-folder-runner`): `RunForm` + live SSE `RunTable`; `POST /pipelines/run`, `GET /pipelines/run/{id}/events`. Replaces ComingSoon stub.
   - [ ] **Observability** (`observability/page.tsx`) — overview metrics, time-ranges; reuse shared filtering patterns.
   - [ ] **Admin** (`admin/page.tsx`) — users management (ties into Auth/RBAC, P2 below).
 
@@ -45,6 +45,17 @@
 - [ ] **Triage/preprocess params uncalibrated** — denoise h=10, projection step 0.5°, Sauvola win 25, blank `min_components=5`. Tune on real scans. Files: `nas/preprocess/{pipeline,triage}.py`.
 - [ ] **`retrieval_min_results=3` cascade tier mix uncalibrated** — keyword/graph/vector ordering + cutoff is a starting point; populate the `LABELED_QUERIES` benchmark scaffold to tune. Files: `cloud/retrieval/service.py`, benchmark scaffold.
 - [ ] **`DOCUMENT_TYPE_FUZZY_THRESHOLD=85` uncalibrated** — A3 document_type classification fuzzy cutoff (rapidfuzz `partial_ratio` vs 54-label enum) is a guess. Tune once labeled doc-type data exists. Files: `cloud/structure/document_type.py`.
+
+## P2 — NAS batch ingestion (scale path for 20k docs)
+
+- [ ] **NAS batch uploader script** — `scripts/batch_upload.py` (or `Makefile` target): loop over a directory of PDFs, call `nas/uploader/service.py` per file, log progress + errors, skip already-uploaded (check S3 manifest existence). This is the only missing piece for 20k-doc ingestion; once manifests land in S3 the Lambda fan-out handles the rest in parallel automatically.
+  - NAS is the bottleneck (~7 min/doc for render + Tesseract OSD); parallelism limited by NAS CPU/RAM.
+  - **Do NOT use the folder runner at this scale** — it collapses NAS + cloud into one sequential in-process call; no fan-out, no durability.
+  - Correct flow: NAS batch script → S3 (original + pages + manifest) → S3 event → SQS → Lambda (parallel per-document cloud processing).
+
+- [ ] **Start NAS batch from dashboard** — `POST /pipelines/batch` endpoint + Pipelines page trigger. Assumes dashboard server can reach the NAS folder (mounted drive / shared path); server runs the NAS batch script in-process, manifests go to S3, Lambda fan-out fires automatically. Stream progress via SSE (same pattern as folder runner). If NAS is a separate machine, NAS needs its own lightweight HTTP API (`POST /upload/start`) that the dashboard calls instead. Fan-out control (pause/resume/cancel) is a follow-on (see below).
+
+- [ ] **Fan-out control from dashboard** — Pipelines page pause/resume/cancel for the SQS→Lambda fan-out. Simplest implementation: `PUT /pipelines/batch/pause` + `/resume` toggle the Lambda `EventSourceMapping` enabled flag via boto3 (no worker code changes). Per-stage throttle (hold structure/match/persist until approved) requires a feature-flag row in Postgres that stage consumers check. Only relevant once AWS infra (P2) is wired up; local `make stage-worker` already gives manual control.
 
 ## P2 — AWS orchestration (next pipeline milestone)
 
@@ -71,7 +82,8 @@
 
 ## P2 — Pipeline folder runner follow-ups
 
-- [ ] **Persisted run history (Approach B)** — in-memory `RunRegistry` (Approach A) is ephemeral; run state is lost on server restart. Approach B = persist to Postgres (`pipeline_runs` / `pipeline_run_items` tables) so history survives restarts.
+- [ ] **Persisted run history (Approach B)** — **BLOCKER for 200-doc runs.** In-memory `RunRegistry` (Approach A) loses all state on server restart. A 200-doc run takes ~23 hours; a restart at hour 20 loses everything. Approach B = persist to Postgres (`pipeline_runs` / `pipeline_run_items` tables); skip-if-processed already works, but the run dashboard goes blank. Build before attempting large batches.
+- [ ] **RunTable virtualisation / summary view** — 200 docs × ~13 pages ≈ 2,600 SSE row-update events; the current `RunTable` becomes unusable at this scale. Needs either virtual scrolling or a summary-only mode (total counts + per-doc status, not per-page rows).
 - [ ] **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production runs (enumerate PDFs under an S3 prefix instead of a local folder). File: `cloud/pipeline_run/source.py`.
 - [ ] **Place `tests/fixtures/sample_bundle.pdf`** — the gated integration test in `tests/cloud/test_pipeline_run_integration.py` is skipped without this fixture; add a real sample PDF to unblock it.
 
@@ -96,7 +108,7 @@
 
 ## Done (recent stages — context only)
 
-- [x] **Pipeline folder runner** — built on `feat/pipeline-folder-runner` 2026-06-14. `cloud/pipeline_run/` (source/registry/orchestrator/runner/api); `prepare_ingest()` extracted as shared ingest core; Pipelines page replaces ComingSoon stub with live SSE progress. 441 backend + 90/92 web green.
+- [x] **Pipeline folder runner** — built on `feat/pipeline-folder-runner` 2026-06-14, **merged to `main`** (branch deleted). `cloud/pipeline_run/` (source/registry/orchestrator/runner/api); `prepare_ingest()` extracted as shared ingest core; Pipelines page replaces ComingSoon stub with live SSE progress. 441 backend + 90/92 web green.
 - [x] **Document bookmarks (Spec 2)** — merged → `main` 2026-06-14. `document_bookmarks` table, `POST/DELETE /documents/{id}/bookmark`, per-user `bookmarked` LEFT-JOIN injection, `BookmarkStar`, `/bookmarks` page + nav. `python -m scripts.apply_bookmarks` for live (no-flush) DB. 416 backend + 79 web green.
 - [x] **Document viewer redesign** — merged → `main` 2026-06-14. All 3 surfaces restyled, `useCollapsible`, collapsible sidebar/rail/data-panel, `react-zoom-pan-pinch` zoom/pan.
 - [x] **Frontend foundation redesign (warm-editorial)** — merged → `main` 2026-06-14. Canonical tokens, single warm light theme (light-only), restyled shell + primitives + login.

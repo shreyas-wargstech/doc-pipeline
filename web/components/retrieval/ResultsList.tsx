@@ -6,12 +6,14 @@ export function ResultsList({
   selectedId,
   onSelect,
   isLoading,
+  isError,
   query,
 }: {
   hits: RetrievalHit[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   isLoading: boolean;
+  isError?: boolean;
   query: string;
 }) {
   if (!query) {
@@ -19,11 +21,16 @@ export function ResultsList({
   }
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-1.5" aria-busy="true">
+      <div className="flex flex-col gap-1.5" aria-busy="true" aria-label="Loading search results">
         {[0, 1, 2].map((i) => (
           <div key={i} className="h-20 animate-pulse rounded-panel border border-border bg-surface-alt" />
         ))}
       </div>
+    );
+  }
+  if (isError) {
+    return (
+      <p className="text-sm text-red-600 px-1">Search failed. Please try again.</p>
     );
   }
   if (hits.length === 0) {

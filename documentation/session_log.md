@@ -770,5 +770,29 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Frontend:** `web/lib/types.ts` (RunItem/RunState/RunEvent), `web/lib/pipeline-reducer.ts`, `web/hooks/useRunPipeline.ts`, `web/components/pipelines/{RunForm,RunSummary,RunTable}.tsx`, `web/app/(dash)/pipelines/page.tsx` — replaces the ComingSoon stub with a live SSE progress table.
 - **Tests:** backend unit tests for all 5 modules + 1 gated integration test; frontend reducer tests + page rendering tests.
 - **Test counts:** 441 backend unit pass (1 pre-existing env-dependent failure `test_config_index.py::test_index_defaults`); 90/92 web pass (1 pre-existing tinypool worker crash on action-bar, 1 unrelated).
-- **Branch:** `feat/pipeline-folder-runner` (not yet merged).
+- **Branch:** `feat/pipeline-folder-runner` — merged to local `main` (branch deleted).
+
+## 2026-06-15 — Doc sync: confirmed pipeline folder runner already merged
+- Verified `cloud/pipeline_run/` + Pipelines page commits (24a5f79..29469c6) are ancestors of `main` HEAD (`a0ec513`); branch already deleted. TASKS.md/session_log.md updated to reflect merged status. No code changes — retrieval redesign in progress concurrently on `main`, left untouched.
 - **Next:** merge branch; then retrieval/observability/admin UX stub pages; persisted run history (Approach B) if needed.
+
+## 2026-06-15 (continued) — Retrieval search UI — DONE
+
+- **What:** Built the `/retrieval` live search workspace surfacing the existing 3-tier cascade (keyword→graph→vector). Split-view layout: fixed 380px results panel + flex-1 detail panel. Selected result loads its pages list.
+- **Backend fix (prerequisite):** `/search` and `/search/{id}/pages` were at app root (outside `/api` prefix) — unreachable from Next.js proxy. Extracted into `cloud/retrieval/api.py` `APIRouter`, mounted under `/api` in `cloud/app.py`. Old root routes removed. Tests relocated from `tests/cloud/test_app_search.py` → `tests/cloud/retrieval/test_api.py` with corrected patches.
+- **New files:**
+  - `cloud/retrieval/api.py` — FastAPI router (2 routes)
+  - `web/lib/types.ts` — 4 new interfaces (`RetrievalHit`, `SearchResponse`, `SearchPageHit`, `SearchPagesResponse`)
+  - `web/hooks/useSearch.ts` — `useSearch` + `useSearchDocPages` (React Query, `keepPreviousData`)
+  - `web/components/retrieval/SearchBar.tsx` — controlled form input, fires on submit only
+  - `web/components/retrieval/ResultCard.tsx` — tier badge (1=Keyword/teal, 2=Graph/blue, 3=Vector/muted), score bar, `aria-pressed`
+  - `web/components/retrieval/ResultsList.tsx` — 4 states: loading skeleton, empty, no-results, hits list
+  - `web/components/retrieval/PageRow.tsx` — thumb placeholder, page-type chip, summary, entity chips (stable `type:value` keys)
+  - `web/components/retrieval/DetailPanel.tsx` — empty/loading/error/populated states, "Open in viewer" Link
+  - `web/app/(dash)/retrieval/page.tsx` — replaces ComingSoon; `submittedQuery` + `selectedId` state, `h-[calc(100vh-8rem)]` layout
+- **Tests:** `tests/cloud/retrieval/test_api.py` (3), `web/__tests__/retrieval-result-card.test.tsx` (4), `web/__tests__/retrieval-detail-panel.test.tsx` (2), `web/__tests__/retrieval-page.test.tsx` (2). All TDD (red→green).
+- **Quality fixes:** `isError` surfaces to `ResultsList` + `DetailPanel`; safe `TIER[t] ?? fallback` in `ResultCard`; accessible skeleton `aria-label`.
+- **Verified:** backend 22/23 green (1 unrelated skip); retrieval frontend 8/8 green; tsc clean; `next build` clean (`/retrieval` in output, 3.44 kB).
+- **Commits:** `e25e9e1`..`3261a5b` (15 commits on `main`, local-only).
+- **Spec:** `docs/superpowers/specs/2026-06-15-retrieval-search-ui-design.md`. Plan: `docs/superpowers/plans/2026-06-15-retrieval-search-ui.md`.
+- **Next (UX roadmap):** observability + admin stub pages; manual dashboard smoke; push to origin.

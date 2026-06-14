@@ -9,7 +9,7 @@ import { useSearch } from "@/hooks/useSearch";
 export default function RetrievalPage() {
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { data, isLoading } = useSearch(submittedQuery);
+  const { data, isLoading, isError } = useSearch(submittedQuery);
 
   const handleSearch = (q: string) => {
     setSubmittedQuery(q);
@@ -30,6 +30,7 @@ export default function RetrievalPage() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             isLoading={isLoading}
+            isError={isError}
             query={submittedQuery}
           />
         </div>
