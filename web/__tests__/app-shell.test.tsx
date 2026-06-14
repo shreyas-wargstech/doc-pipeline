@@ -33,4 +33,14 @@ describe("AppShell", () => {
     expect(screen.getByText("page content")).toBeInTheDocument();
     expect(screen.getByText("Docintel")).toBeInTheDocument();
   });
+
+  it("toggles the desktop sidebar collapsed state", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    usePathname.mockReturnValue("/");
+    window.localStorage.clear();
+    render(<AppShell><div>content</div></AppShell>);
+    const toggle = screen.getByRole("button", { name: /collapse sidebar/i });
+    await userEvent.click(toggle);
+    expect(window.localStorage.getItem("collapse:app-sidebar")).toBe("true");
+  });
 });

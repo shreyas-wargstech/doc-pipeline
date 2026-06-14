@@ -14,9 +14,12 @@ import IconButton from "@mui/material/IconButton";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
+import Tooltip from "@mui/material/Tooltip";
 import MenuIcon from "@mui/icons-material/Menu";
 import LogoutIcon from "@mui/icons-material/Logout";
 import AccountCircleIcon from "@mui/icons-material/AccountCircle";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DescriptionIcon from "@mui/icons-material/Description";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
 import AccountTreeIcon from "@mui/icons-material/AccountTree";
@@ -26,8 +29,10 @@ import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useActionBarContent } from "@/app/action-bar";
 import { useLogout } from "@/hooks/useAuth";
+import { useCollapsible } from "@/hooks/useCollapsible";
 
 const DRAWER_WIDTH = 240;
+const COLLAPSED_WIDTH = 64;
 
 const NAV_ITEMS = [
   { href: "/", label: "Documents", icon: DescriptionIcon },
@@ -44,24 +49,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const actionBarContent = useActionBarContent();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuAnchor, setUserMenuAnchor] = useState<HTMLElement | null>(null);
+  const { collapsed, toggle } = useCollapsible("app-sidebar", false);
+  const sidebarWidth = collapsed ? COLLAPSED_WIDTH : DRAWER_WIDTH;
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   const navList = (
     <List>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => (
-        <ListItemButton
-          key={href}
-          component={Link}
-          href={href}
-          selected={isActive(href)}
-          aria-current={isActive(href) ? "page" : undefined}
-        >
-          <ListItemIcon>
-            <Icon />
-          </ListItemIcon>
-          <ListItemText primary={label} />
-        </ListItemButton>
+        <Tooltip key={href} title={collapsed ? label : ""} placement="right">
+          <ListItemButton
+            component={Link}
+            href={href}
+            selected={isActive(href)}
+            aria-current={isActive(href) ? "page" : undefined}
+            sx={{ justifyContent: collapsed ? "center" : "flex-start", px: collapsed ? 1.5 : 2 }}
+          >
+            <ListItemIcon sx={{ minWidth: collapsed ? 0 : undefined }}>
+              <Icon />
+            </ListItemIcon>
+            {!collapsed && <ListItemText primary={label} />}
+          </ListItemButton>
+        </Tooltip>
       ))}
     </List>
   );
@@ -137,19 +146,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         variant="permanent"
         sx={{
           display: { xs: "none", sm: "block" },
-          width: DRAWER_WIDTH,
+          width: sidebarWidth,
           flexShrink: 0,
-          "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box", display: "flex", flexDirection: "column" },
+          whiteSpace: "nowrap",
+          "& .MuiDrawer-paper": {
+            width: sidebarWidth,
+            boxSizing: "border-box",
+            display: "flex",
+            flexDirection: "column",
+            overflowX: "hidden",
+            transition: (theme) =>
+              theme.transitions.create("width", { duration: theme.transitions.duration.shorter }),
+          },
         }}
       >
         <Toolbar />
-        {navList}
-        <Box sx={{ mt: "auto", p: 2, fontSize: 11, color: "text.secondary", fontFamily: "var(--font-mono)" }}>
-          92,431 registry rows
+        <Box sx={{ display: "flex", justifyContent: collapsed ? "center" : "flex-end", px: 1, py: 0.5 }}>
+          <IconButton
+            onClick={toggle}
+            size="small"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+          </IconButton>
         </Box>
+        {navList}
+        {!collapsed && (
+          <Box sx={{ mt: "auto", p: 2, fontSize: 11, color: "text.secondary", fontFamily: "var(--font-mono)" }}>
+            92,431 registry rows
+          </Box>
+        )}
       </Drawer>
 
-      <Box component="main" sx={{ flexGrow: 1, p: 2, width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` } }}>
+      <Box component="main" sx={{ flexGrow: 1, p: 2, width: { sm: `calc(100% - ${sidebarWidth}px)` } }}>
         <Toolbar />
         {actionBarContent && <Toolbar variant="dense" />}
         {children}
