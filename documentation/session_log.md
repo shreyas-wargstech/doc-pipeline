@@ -743,3 +743,16 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Key quirk: `react-zoom-pan-pinch` uses browser APIs incompatible with jsdom — mocked at test level.
 - **Document viewer redesign COMPLETE.** Merged commits on local `main` (not pushed).
 - **Next (UX roadmap):** Spec 2 — server-side per-user bookmarks (DB table, API, star toggle, list filter). After that: evaluation/retrieval/pipelines/observability/admin redesigns.
+
+## 2026-06-14 (continued) — Document bookmarks (Spec 2) — built on feat/document-bookmarks
+
+- **Stage:** web + backend (UX roadmap Spec 2). Brainstormed → spec → 10-task TDD plan → subagent-driven development.
+- **Decisions locked:** dedicated `/bookmarks` nav page + inline star in table rows + detail header star. Option A (LEFT JOIN injection into existing documents queries). Private per-user (username always from `require_session`, never body). Most-recently-bookmarked-first order on Bookmarks page. No audit logging for bookmark actions.
+- **DB:** `document_bookmarks(username TEXT FK CASCADE, document_id TEXT FK CASCADE, created_at TIMESTAMPTZ)` — composite PK `(username, document_id)`. Index `idx_bookmarks_username (username, created_at DESC)`. Migration script `scripts/apply_bookmarks.py` (run once against live DB).
+- **Backend:** `cloud/dashboard/bookmarks.py::BookmarkRepository` (add/remove, both idempotent). `list_documents`/`count_documents` now require `username: str`, gain `bookmarked: bool | None` filter — LEFT JOIN injects `(b.username IS NOT NULL) AS bookmarked`. `POST/DELETE /documents/{id}/bookmark` endpoints. `doc_detail` returns `bookmarked` via `SELECT EXISTS`. asyncpg nullable cast rule: nullable filter params need `CAST(:x AS boolean)` to avoid `AmbiguousParameterError`.
+- **Frontend:** `web/hooks/useBookmarks.ts::useToggleBookmark` (mutation, POST/DELETE, invalidates `["documents"]` + `["document", id]`). `web/components/BookmarkStar.tsx` (optimistic local state, `useEffect` sync, `stopPropagation`, lucide `Bookmark` filled/outline, `aria-label`/`aria-pressed`). Star column added to `DocumentsTable`. `BookmarkStar` replaces disabled slot in document detail header. `web/app/(dash)/bookmarks/page.tsx` + Bookmarks nav entry in `AppShell`. `apiDelete` added to `web/lib/api.ts`.
+- **Key fix during implementation:** 5 existing integration test calls to `list_documents`/`count_documents` missing `username=` — fixed in Task 5. `test_doc_detail_returns_doc_pages_and_counts` required extended `session_scope` mock to cover new EXISTS query.
+- **Verified:** tsc 0, 79 web tests, 416 backend unit green (1 pre-existing unrelated `test_config_index.py` failure), `next build` ok. Integration test `test_bookmarked_flag_is_per_user` proves per-user isolation (skipped without Docker).
+- **Spec:** `docs/superpowers/specs/2026-06-14-document-bookmarks-design.md`. Plan: `docs/superpowers/plans/2026-06-14-document-bookmarks.md`.
+- **Branch:** `feat/document-bookmarks` — not yet merged; `finishing-a-development-branch` pending.
+- **Next:** merge bookmarks branch; then eval/retrieval/pipelines UX redesigns.
