@@ -106,3 +106,38 @@ async def match_status_counts(session: AsyncSession) -> dict[str, int]:
         )
     )
     return {r["k"]: int(r["n"]) for r in result.mappings().all()}
+
+
+_REVIEW_QUEUE_SQL = text(
+    """
+    SELECT d.document_id, d.document_type, d.applicant_name_raw,
+           d.registration_no, d.application_no, d.document_reference_no,
+           d.dob, d.gender, d.status, d.match_status, d.updated_at
+    FROM documents d
+    WHERE d.document_category = 'practitioner'
+      AND (d.status = 'manual_review' OR d.match_status = 'manual_review')
+    ORDER BY d.updated_at DESC
+    LIMIT :limit OFFSET :offset
+    """
+)
+
+_REVIEW_QUEUE_COUNT_SQL = text(
+    """
+    SELECT count(*) AS n
+    FROM documents d
+    WHERE d.document_category = 'practitioner'
+      AND (d.status = 'manual_review' OR d.match_status = 'manual_review')
+    """
+)
+
+
+async def list_review_queue(
+    session: AsyncSession, *, limit: int = 50, offset: int = 0
+) -> list[dict[str, Any]]:
+    result = await session.execute(_REVIEW_QUEUE_SQL, {"limit": limit, "offset": offset})
+    return [dict(r) for r in result.mappings().all()]
+
+
+async def count_review_queue(session: AsyncSession) -> int:
+    result = await session.execute(_REVIEW_QUEUE_COUNT_SQL)
+    return int(result.scalar_one())
