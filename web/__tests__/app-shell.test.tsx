@@ -13,10 +13,10 @@ vi.mock("@/app/action-bar", () => ({
 }));
 
 describe("AppShell", () => {
-  it("renders all six top-level nav groups", () => {
+  it("renders all seven top-level nav groups", () => {
     usePathname.mockReturnValue("/");
     render(<AppShell><div>content</div></AppShell>);
-    for (const label of ["Documents", "Evaluation", "Pipelines", "Retrieval", "Observability", "Admin"]) {
+    for (const label of ["Documents", "Bookmarks", "Evaluation", "Pipelines", "Retrieval", "Observability", "Admin"]) {
       expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
   });

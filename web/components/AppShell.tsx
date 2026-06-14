@@ -26,6 +26,7 @@ import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import TravelExploreIcon from "@mui/icons-material/TravelExplore";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
+import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useActionBarContent } from "@/app/action-bar";
 import { useLogout } from "@/hooks/useAuth";
@@ -36,6 +37,7 @@ const COLLAPSED_WIDTH = 64;
 
 const NAV_ITEMS = [
   { href: "/", label: "Documents", icon: DescriptionIcon },
+  { href: "/bookmarks", label: "Bookmarks", icon: BookmarkBorderIcon },
   { href: "/eval", label: "Evaluation", icon: FactCheckIcon },
   { href: "/pipelines", label: "Pipelines", icon: AccountTreeIcon },
   { href: "/retrieval", label: "Retrieval", icon: TravelExploreIcon },
