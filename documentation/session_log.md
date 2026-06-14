@@ -727,3 +727,19 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
   - Bookmarks: user wants **server-side per-user** → split into its OWN spec (Spec 2, not yet brainstormed). Viewer overview only reserves a disabled bookmark-star slot.
 - Spec: `docs/superpowers/specs/2026-06-14-document-viewer-redesign-design.md` (committed). Plan: `docs/superpowers/plans/2026-06-14-document-viewer-redesign.md` (committed, 8 tasks, TDD, written for a Sonnet-4.6 executor).
 - **Next step:** execute the plan (subagent-driven or inline) — user switching to Sonnet 4.6 medium for implementation. After: brainstorm Spec 2 (bookmarks).
+
+## 2026-06-14 (continued) — Document viewer redesign: full implementation + verification
+- Stage: web UX redesign — document viewer (all 3 surfaces).
+- Resumed from session handoff (context compaction mid-session). Resumed at Task 7 review cycle.
+- **All 8 tasks complete** (subagent-driven TDD, 2-stage review each):
+  - T1 f38c9ae `useCollapsible(key, default)` hook — SSR-safe, localStorage-persisted.
+  - T2 8df2f5f Collapsible app sidebar — icon-rail strip when collapsed, Tooltip labels.
+  - T3 953680f Flat icon+title page rail — lucide icons per page_type, OCR dot, 56/200 widths.
+  - T4 cf0725a Rail-collapse context in layout — `RailContext`, `usePageRail()`, `PageRailToggle` exported.
+  - T5 4b12f9c Sticky viewer header + collapsible data panel — `useCollapsible("page-data-panel")`.
+  - T6 7974eda Zoom/pan on page image — `react-zoom-pan-pinch`, zoom in/out/fit-width overlay.
+  - T7 930672d Overview restyle + bookmark slot — `PageHeader`, disabled star, warm metadata Card.
+  - T8 tsc 0 errors; **79 web tests pass** (27/27 files); `next build` exit 0. Pre-existing action-bar tinypool OOM unchanged.
+- Key quirk: `react-zoom-pan-pinch` uses browser APIs incompatible with jsdom — mocked at test level.
+- **Document viewer redesign COMPLETE.** Merged commits on local `main` (not pushed).
+- **Next (UX roadmap):** Spec 2 — server-side per-user bookmarks (DB table, API, star toggle, list filter). After that: evaluation/retrieval/pipelines/observability/admin redesigns.
