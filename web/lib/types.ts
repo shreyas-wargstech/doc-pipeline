@@ -179,3 +179,25 @@ export interface RunEvent {
   // summary/done frames carry the full RunState shape too:
   [key: string]: unknown;
 }
+
+export interface RetrievalHit {
+  document_id: string;
+  s3_key_pdf: string;
+  document_type: string | null;
+  score: number;
+  tier: 1 | 2 | 3;
+  why_matched: string;
+}
+export interface SearchResponse { count: number; hits: RetrievalHit[]; }
+
+export interface SearchPageHit {
+  page_id: string;
+  page_num: number;
+  page_type: string | null;
+  s3_key_image: string;
+  page_summary: string | null;
+  search_keywords: string[];
+  entities: { type: string; value: string }[];
+  index_status: string;
+}
+export interface SearchPagesResponse { document_id: string; count: number; hits: SearchPageHit[]; }
