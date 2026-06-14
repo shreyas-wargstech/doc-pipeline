@@ -5,41 +5,41 @@ import type { PageRow } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/documents/doc1/pages/2" }));
 
-function makePage(overrides: Partial<PageRow>): PageRow {
+function makePage(n: number, type: string): PageRow {
   return {
-    page_id: "p1",
+    page_id: `doc1:${n}`,
     document_id: "doc1",
-    page_num: 1,
-    s3_key_image: "documents/doc1/pages/page_001.png",
-    page_type: "cover",
+    page_num: n,
+    s3_key_image: "",
+    page_type: type,
     raw_text: null,
     structured_json: null,
     confidence_score: null,
     language_detected: null,
     page_summary: null,
     ocr_status: "done",
-    created_at: "2026-06-01T00:00:00Z",
-    updated_at: "2026-06-01T00:00:00Z",
-    ...overrides,
+    created_at: "",
+    updated_at: "",
   };
 }
 
-const pages: PageRow[] = [
-  makePage({ page_id: "p1", page_num: 1, page_type: "cover", ocr_status: "done" }),
-  makePage({ page_id: "p2", page_num: 2, page_type: "application_form", ocr_status: "queued" }),
-];
+const pages = [makePage(1, "cover"), makePage(2, "application_form"), makePage(3, "receipt")];
 
 describe("PageRail", () => {
-  it("renders a link per page with page number and type", () => {
-    render(<PageRail documentId="doc1" pages={pages} />);
-    expect(screen.getByRole("link", { name: /page 1/i })).toHaveAttribute("href", "/documents/doc1/pages/1");
-    expect(screen.getByRole("link", { name: /page 2/i })).toHaveAttribute("href", "/documents/doc1/pages/2");
-    expect(screen.getByText(/application form/i)).toBeInTheDocument();
+  it("renders a flat list with a page count header and per-page titles", () => {
+    render(<PageRail documentId="doc1" pages={pages} collapsed={false} />);
+    expect(screen.getByText("Pages · 3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /application form/i })).toBeInTheDocument();
   });
 
-  it("marks the page matching the current pathname as active", () => {
-    render(<PageRail documentId="doc1" pages={pages} />);
-    expect(screen.getByRole("link", { name: /page 2/i })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: /page 1/i })).not.toHaveAttribute("aria-current");
+  it("marks the active page with aria-current", () => {
+    render(<PageRail documentId="doc1" pages={pages} collapsed={false} />);
+    expect(screen.getByRole("link", { name: /application form/i })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("hides the count header and keeps clickable links when collapsed", () => {
+    render(<PageRail documentId="doc1" pages={pages} collapsed={true} />);
+    expect(screen.queryByText("Pages · 3")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link")).toHaveLength(3);
   });
 });
