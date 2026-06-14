@@ -825,3 +825,10 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Root cause: `documents/[id]/page.tsx:30-32` `actionBarContent` useMemo read `q.data.doc.document_id` (dep `[q.data?.doc.document_id]`) — guards `data` not `doc`; memo runs *before* loading/error guards → doc-less payload throws. Post-guard `const {doc}=q.data` also unguarded.
 - Fix: `q.data?.doc ?` in memo, `[q.data?.doc?.document_id]` dep, `|| !q.data.doc` in error guard. Failing-first test in `document-detail.test.tsx` → 4/4 green. tsc clean (same pre-existing PageRailToggle `.next/types` artifact only).
 - Rule: hook bodies + dep arrays run before render guards — audit them for the FIX-045 pattern too, not just JSX. See FIX-046.
+
+## 2026-06-15 — FIX-047: cut OCR page-type over-escalation (cost finding)
+- Investigated "what classifies the page + what model": keyword typer (`shared/page_type.py`) first, VLM classify fallback (`cloud/ocr/page_type.py::VlmPageTyper`, `google/gemini-2.5-flash`/`openrouter_model`) only when keyword conf < 0.5. Tier routing separate.
+- Live `cost_events`: on the 13-page bundle `ocr_classify` ($0.0115/11 calls) > `ocr_vlm` transcription ($0.0050/2 calls) — classify, not transcription, was the dominant spend (flips the prior assumption). 11/13 pages escalated.
+- Diagnosis (per-page replay): 3 causes — (1) `letter_body`/`invoice`/`blank` had NO keyword rule → always escalate; 23 stored blank pages each paid a VLM call; (2) education-cert ambiguity (0.4 multi-match) — left as-is (needs calibration); (3) genuinely garbled OCR — VLM legitimately earns keep.
+- Fix: blank short-circuit (`_BLANK_CHAR_FLOOR=5` → `("blank",0.9)`) + `invoice`/`letter_body` keyword rules (listed last). TDD: 4 failing tests first → green. Fixed `test_ocr_router` fixture (`words=1`→`8`; "x" now reads as blank). Verified 414→all green relevant suites (`tests/shared` + `tests/cloud` 414 pass pre-fix-of-fixture, then 31 affected green; full unit run clean bar known env failures).
+- Anchors UNCALIBRATED — tune via content-type eval lab. Ambiguity-penalty softening + `application_form` "applicant name" mislabel (silent SBI→application_form) deferred.

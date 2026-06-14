@@ -59,6 +59,38 @@ def test_birth_certificate_keywords():
     assert conf >= PAGE_TYPE_CONF_NET
 
 
+def test_blank_page_short_circuits_no_escalation():
+    # Empty / whitespace-only OCR text = blank page. Typed directly at high
+    # confidence so the router never pays the VLM classifier to look at it.
+    for raw in ("", "   \n\t ", None):
+        ptype, conf = classify_page_type(raw)  # type: ignore[arg-type]
+        assert ptype == "blank"
+        assert conf >= PAGE_TYPE_CONF_NET
+
+
+def test_near_empty_noise_is_blank():
+    ptype, conf = classify_page_type(" .\n ")
+    assert ptype == "blank"
+    assert conf >= PAGE_TYPE_CONF_NET
+
+
+def test_letter_body_keywords_classify_high_conf():
+    ptype, conf = classify_page_type(
+        "Office of the Registrar\nOutward No. 1234\nSubject: registration status\n"
+        "With reference to your letter ... Yours faithfully, Registrar"
+    )
+    assert ptype == "letter_body"
+    assert conf >= PAGE_TYPE_CONF_NET
+
+
+def test_invoice_keywords_classify_high_conf():
+    ptype, conf = classify_page_type(
+        "TAX INVOICE\nInvoice No. 88\nGSTIN: 27ABCDE1234F1Z5\nHSN 4901"
+    )
+    assert ptype == "invoice"
+    assert conf >= PAGE_TYPE_CONF_NET
+
+
 def test_app_cover_rule_removed_falls_to_other():
     # Text that previously matched the now-deleted app_cover rule
     # ("form of application" + "homoeopathy act" + "under sub-section" +

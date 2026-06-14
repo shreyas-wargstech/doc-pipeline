@@ -312,7 +312,9 @@ async def test_non_identity_page_type_from_keywords():
 
 @pytest.mark.anyio
 async def test_non_identity_lowconf_keywords_escalate_to_typer():
-    t = FakeTier("tesseract", mean_conf=95.0, words=1)  # raw_text="x" → no keywords
+    # raw_text="xxxxxxxx": real length (above the blank floor) but no keyword
+    # match → genuine low-confidence page that should escalate to the typer.
+    t = FakeTier("tesseract", mean_conf=95.0, words=8)
     typer = FakeTyper("ssc")
     router = _router_typed(t=t, typer=typer)
     repo = FakeRepo()

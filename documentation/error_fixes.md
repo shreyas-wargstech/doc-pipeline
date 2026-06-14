@@ -873,3 +873,15 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 **Rule:** (reaffirms FIX-045) — `useMemo`/`useEffect` bodies and their dependency arrays run *before* the component's loading/error guards, so they need the SAME defensive optional-chaining as the render body. When auditing for the FIX-045 pattern, don't stop at the JSX — grep hooks and dep arrays for unguarded `data.x.y` too.
 
 **Files:** `web/app/(dash)/documents/[id]/page.tsx`, `web/__tests__/document-detail.test.tsx`.
+
+### FIX-047 · OCR over-escalates to the paid VLM page-type classifier (blank pages + uncovered types)
+
+**Symptom:** On the validated 13-page bundle, `ocr_classify` (VLM page-type fallback) was the **largest** cost line — $0.01145 over 11 calls vs $0.00505 over 2 `ocr_vlm` transcription calls. 11/13 non-identity pages escalated to the paid classifier. Across all stored pages, **23 blank (empty-OCR) pages** each triggered a paid VLM call just to confirm they were blank.
+
+**Root cause:** `shared/page_type.py::classify_page_type` returned `("other", 0.0)` for any text the keyword rules didn't match — including empty text — and 0.0 < `PAGE_TYPE_CONF_NET` (0.5) forces the router to escalate. Two avoidable buckets: (1) blank pages (no text) and (2) page types with **no keyword rule at all** (`letter_body`, `invoice`, `blank`) — every government letter / vendor invoice escalated by definition.
+
+**Fix:** (a) blank short-circuit — text stripping to `< _BLANK_CHAR_FLOOR` (5) chars returns `("blank", 0.9)`, no escalation; (b) added keyword rules for `invoice` (anchored on `tax invoice`/`invoice no`/`gstin`/`hsn`/`purchase order`) and `letter_body` (anchored on `outward no`/`with reference to your`/`subject:`/`yours faithfully`/`office of the registrar`), listed LAST so specific document rules keep priority on a multi-match. Re-running stored pages: 23 blanks now resolve free; keyword-resolved 44/59. Genuinely garbled pages (real text, 0.0) still escalate — VLM earns its cost there.
+
+**Files:** `shared/page_type.py`, `tests/shared/test_page_type.py`, `tests/cloud/test_ocr_router.py` (fixture used `raw_text="x"` to mean "no keywords" — 1 char now classifies as blank; bumped to 8 chars to represent a real low-confidence page).
+
+**Rule:** Before paying an LLM for a fallback, exhaust the free path — short-circuit trivially-classifiable inputs (empty/blank) and make sure every output label the cheap classifier *can* emit has at least one cheap rule. A 0.0-confidence "I don't know" that forces a paid call is a coverage gap, not a hard case. `letter_body`/`invoice` keyword anchors are UNCALIBRATED (no labeled letter/invoice text yet) — tune against the content-type eval lab.

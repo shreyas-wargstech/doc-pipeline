@@ -16,6 +16,11 @@ __all__ = ["classify_page_type", "PAGE_TYPE_CONF_NET"]
 # the router escalates to the VLM classifier.
 PAGE_TYPE_CONF_NET = 0.5
 
+# Pages whose OCR text strips to fewer than this many chars are treated as blank
+# and typed directly (free) — never escalated to the paid VLM classifier just to
+# look at an empty page. Small floor (not 0) tolerates stray OCR noise on a blank.
+_BLANK_CHAR_FLOOR = 5
+
 # (page_type, keyword phrases). Phrases are matched case-insensitively as
 # substrings of the page text. Order = priority on single-rule matches.
 _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -53,18 +58,32 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("form_e", ("form e ", "form-e", "indian medical council act")),
     ("photo_id", ("permanent account number", "driving licence", "passport no",
                   "election commission")),
+    # Vendor invoices / receipts. Anchored on tax-doc fields rather than the
+    # bare word "invoice" so a line item mentioning one doesn't misfire.
+    ("invoice", ("tax invoice", "invoice no", "invoice number", "gstin",
+                 "gst no", "hsn", "purchase order")),
+    # Government / council letters. Generic body, so listed LAST — any specific
+    # document rule above wins priority on a multi-match. Anchored on the
+    # letterhead / dispatch / salutation furniture of an official letter.
+    ("letter_body", ("outward no", "inward no", "with reference to your",
+                     "subject:", "sub:-", "sub :-", "yours faithfully",
+                     "yours sincerely", "office of the registrar")),
 )
 
 
 def classify_page_type(raw_text: str) -> tuple[str, float]:
     """Return (page_type, confidence in [0,1]).
 
+    - text strips to < _BLANK_CHAR_FLOOR chars → ("blank", 0.9) — short-circuit,
+      no VLM escalation for an empty page
     - exactly one rule matches → (that type, 0.8)
     - more than one distinct rule matches → (first match, 0.4) — ambiguous,
       below the net so the caller escalates
     - no rule matches → ("other", 0.0)
     """
     text = (raw_text or "").lower()
+    if len(text.strip()) < _BLANK_CHAR_FLOOR:
+        return "blank", 0.9
     matched: list[str] = []
     for page_type, phrases in _KEYWORD_RULES:
         if any(p in text for p in phrases):
