@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { LoginBrandPanel } from "@/components/auth/LoginBrandPanel";
 import { useLogin } from "@/hooks/useAuth";
 import { ApiError } from "@/lib/api";
+import { DEMO_PASSWORD, DEMO_USERS, SHOW_DEMO_LOGINS } from "@/lib/demo-users";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,12 +16,11 @@ export default function LoginPage() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const signIn = async (u: string, p: string) => {
     if (login.isPending) return;
     setError(null);
     try {
-      await login.mutateAsync({ username, password });
+      await login.mutateAsync({ username: u, password: p });
       router.replace("/");
     } catch (err) {
       setError(
@@ -29,6 +29,11 @@ export default function LoginPage() {
           : "Sign-in failed. Check your connection or try again.",
       );
     }
+  };
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void signIn(username, password);
   };
 
   return (
@@ -81,6 +86,28 @@ export default function LoginPage() {
           </form>
 
           <p className="mt-7 text-center text-xs text-tertiary-fg">🔒 Audited access · role-based permissions</p>
+
+          {SHOW_DEMO_LOGINS && (
+            <div className="mt-8 rounded-xl border border-border bg-surface-alt/60 p-4">
+              <p className="mb-3 text-center font-mono text-[10.5px] uppercase tracking-widest text-tertiary-fg">
+                Demo accounts · dev only
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {DEMO_USERS.map((u) => (
+                  <button
+                    key={u.username}
+                    type="button"
+                    disabled={login.isPending}
+                    onClick={() => void signIn(u.username, DEMO_PASSWORD)}
+                    className="flex flex-col items-start rounded-lg border border-border-strong bg-surface px-3 py-2 text-left transition-colors hover:border-primary disabled:opacity-50"
+                  >
+                    <span className="text-sm font-semibold text-foreground">{u.name}</span>
+                    <span className="text-xs text-muted-fg">{u.role}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </main>
