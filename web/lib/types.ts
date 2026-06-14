@@ -95,3 +95,47 @@ export interface EvalSweep {
   best: SweepCell;
   cells: SweepCell[];
 }
+
+export interface EvalQueueRow {
+  document_id: string;
+  document_type: string | null;
+  applicant_name_raw: string | null;
+  registration_no: string | null;
+  application_no: number | null;
+  document_reference_no: string | null;
+  dob: string | null;
+  gender: string | null;
+  status: DocStatus;
+  match_status: MatchStatus;
+  updated_at: string;
+}
+
+export interface EvalQueueResponse {
+  documents: EvalQueueRow[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface CorrectionPatch {
+  registration_no?: string | null;
+  applicant_name_raw?: string | null;
+  dob?: string | null;
+  gender?: string | null;
+  application_no?: number | null;
+  document_reference_no?: string | null;
+}
+
+export interface MatchResultOut {
+  match_status: MatchStatus;
+  reference_data_id: number | null;
+  method: "exact" | "fuzzy" | null;
+  score: number | null;
+  candidate_registration_no: string | null;
+  matched_on: string | null;
+}
+
+export interface CorrectionResult {
+  doc: DocFull;
+  match_result: MatchResultOut;
+}

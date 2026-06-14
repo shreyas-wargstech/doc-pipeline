@@ -36,6 +36,17 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   );
 }
 
+export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  return parse<T>(
+    await fetch(path, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
+}
+
 export function imageUrl(documentId: string, pageNum: number): string {
   return `/api/documents/${documentId}/pages/${pageNum}/image`;
 }
