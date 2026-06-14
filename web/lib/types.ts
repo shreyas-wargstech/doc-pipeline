@@ -15,6 +15,7 @@ export interface DocRow {
   updated_at: string;
   ocr_done: number;
   ocr_total: number;
+  bookmarked: boolean;
 }
 
 export interface DocumentsResponse { documents: DocRow[]; total: number; offset: number; limit: number; }
@@ -56,6 +57,7 @@ export interface DocFull {
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  bookmarked: boolean;
 }
 
 export interface DocDetailResponse { doc: DocFull; pages: PageRow[]; ocr_done: number; structured_done: number; }

@@ -47,6 +47,12 @@ export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   );
 }
 
+export async function apiDelete<T>(path: string): Promise<T> {
+  return parse<T>(
+    await fetch(path, { method: "DELETE", credentials: "same-origin" }),
+  );
+}
+
 export function imageUrl(documentId: string, pageNum: number): string {
   return `/api/documents/${documentId}/pages/${pageNum}/image`;
 }
