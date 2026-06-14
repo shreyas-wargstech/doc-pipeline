@@ -72,6 +72,24 @@ export interface AuditRow {
 export interface AuditResponse { rows: AuditRow[]; }
 export interface ActionResult { ok: boolean; message: string; }
 
+export interface CostSummary {
+  cost: number; prompt_tokens?: number; completion_tokens?: number;
+  total_tokens: number; calls: number; errors: number;
+}
+export interface CostBreakdownEntry { cost: number; total_tokens: number; calls: number; }
+export interface CostsResponse {
+  summary: CostSummary;
+  by_stage: Record<string, CostBreakdownEntry>;
+  by_model: Record<string, CostBreakdownEntry>;
+}
+export interface CostEventRow {
+  id: number; ts: string; stage: string; model: string;
+  document_id: string | null; page_num: number | null;
+  prompt_tokens: number; completion_tokens: number; total_tokens: number;
+  cost: number; status: "ok" | "error"; detail: string | null;
+}
+export interface CostEventsResponse { rows: CostEventRow[]; }
+
 export interface StreamEvent {
   document_id: string; status: DocStatus; match_status: MatchStatus;
   ocr_done: number; ocr_total: number;

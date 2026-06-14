@@ -8,6 +8,11 @@ const useMetrics = vi.fn();
 const useAudit = vi.fn();
 vi.mock("@/hooks/useMetrics", () => ({ useMetrics: () => useMetrics() }));
 vi.mock("@/hooks/useAudit", () => ({ useAudit: (f: unknown) => useAudit(f) }));
+// CostSection renders inside the page; stub its data hooks so no QueryClient is needed.
+vi.mock("@/hooks/useCosts", () => ({
+  useCosts: () => ({ data: { summary: { cost: 0, total_tokens: 0, calls: 0, errors: 0 }, by_stage: {}, by_model: {} }, isLoading: false, isError: false }),
+  useCostEvents: () => ({ data: { rows: [] }, isLoading: false, isError: false }),
+}));
 
 function row(): AuditRow {
   return {

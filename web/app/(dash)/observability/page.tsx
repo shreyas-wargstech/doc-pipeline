@@ -10,6 +10,7 @@ import { MetricBars } from "@/components/MetricBar";
 import { AuditActivity } from "@/components/AuditActivity";
 import { AuditTable } from "@/components/AuditTable";
 import { AuditDetailDrawer } from "@/components/AuditDetailDrawer";
+import { CostSection } from "@/components/CostSection";
 import { useMetrics } from "@/hooks/useMetrics";
 import { useAudit, type AuditFilters } from "@/hooks/useAudit";
 import type { AuditRow } from "@/lib/types";
@@ -75,9 +76,10 @@ export default function ObservabilityPage() {
         )}
       </section>
 
+      <CostSection />
+
       <p className="text-xs text-muted-fg">
-        Token/cost consumption, OpenRouter delivery status, and per-stage latency are tracked under DASH-2 and
-        will appear here once instrumented.
+        Per-stage latency and OpenRouter credit balance are not yet instrumented.
       </p>
 
       <AuditDetailDrawer row={selected} onClose={() => setSelected(null)} />

@@ -15,3 +15,10 @@ export function titleCase(s: string | null | undefined): string {
   if (!s) return "—";
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+export function fmtUsd(n: number | null | undefined): string {
+  const v = typeof n === "number" && Number.isFinite(n) ? n : 0;
+  // Sub-cent per-call costs are common — show more precision when small.
+  const digits = v !== 0 && Math.abs(v) < 0.01 ? 4 : 2;
+  return `$${v.toFixed(digits)}`;
+}
