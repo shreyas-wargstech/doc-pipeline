@@ -19,7 +19,7 @@ export function ResultCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  const tier = TIER[hit.tier];
+  const tier = TIER[hit.tier as 1 | 2 | 3] ?? { label: "Unknown", cls: "bg-surface-alt text-muted-fg" };
   const pct = Math.max(0, Math.min(1, hit.score)) * 100;
 
   return (
