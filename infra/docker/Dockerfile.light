@@ -1,0 +1,24 @@
+# Lambda image for light stages: structure, match, sweeper.
+# No Tesseract, no torch. Base Python + shared pipeline deps only.
+# Build context = repo root: docker build -f infra/docker/Dockerfile.light .
+FROM public.ecr.aws/lambda/python:3.12
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+        glib2 \
+    && dnf clean all
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /var/task
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev
+
+COPY shared/ shared/
+COPY nas/ nas/
+COPY cloud/ cloud/
+
+# CMD is overridden per-function in Terraform via image_config.command:
+#   structure: cloud.structure.consumer.handler
+#   match:     cloud.match.consumer.handler
+#   sweeper:   cloud.orchestration.sweeper.handler
+CMD ["cloud.structure.consumer.handler"]

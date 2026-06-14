@@ -1,0 +1,31 @@
+# Lambda image for the OCR stage.
+# Heavy: Tesseract + tessdata (eng+mar+hin) + OpenCV + pyzbar + openai SDK.
+# Build context = repo root: docker build -f infra/docker/Dockerfile.ocr .
+FROM public.ecr.aws/lambda/python:3.12
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+        tesseract \
+        tesseract-langpack-eng \
+        mesa-libGL \
+        glib2 \
+        zbar \
+        libzbar \
+    && dnf clean all
+
+# Marathi + Hindi tessdata not in dnf repo for Lambda AL2023 — download manually
+RUN curl -L -o /usr/share/tesseract/tessdata/mar.traineddata \
+        https://github.com/tesseract-ocr/tessdata/raw/main/mar.traineddata && \
+    curl -L -o /usr/share/tesseract/tessdata/hin.traineddata \
+        https://github.com/tesseract-ocr/tessdata/raw/main/hin.traineddata
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /var/task
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev
+
+COPY shared/ shared/
+COPY nas/ nas/
+COPY cloud/ cloud/
+
+CMD ["cloud.ocr.consumer.handler"]

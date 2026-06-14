@@ -1,0 +1,21 @@
+# Lambda image for the ingest stage (S3 event → handle_manifest → SQS OCR queue).
+# Build context = repo root: docker build -f infra/docker/Dockerfile.ingest .
+FROM public.ecr.aws/lambda/python:3.12
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+        mesa-libGL \
+        glib2 \
+        libzbar \
+    && dnf clean all
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /var/task
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev
+
+COPY shared/ shared/
+COPY nas/ nas/
+COPY cloud/ cloud/
+
+CMD ["cloud.ingest.lambda_handler.handler"]

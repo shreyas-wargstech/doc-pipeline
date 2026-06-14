@@ -1,0 +1,28 @@
+# Lambda image for persist + index stages.
+# Heavy: sentence-transformers + torch-cpu (~2.5 GB image).
+# Model (paraphrase-multilingual-MiniLM-L12-v2, ~400 MB) baked in at build time
+# to avoid runtime download and cold-start latency.
+# Build context = repo root: docker build -f infra/docker/Dockerfile.persist-index .
+FROM public.ecr.aws/lambda/python:3.12
+
+RUN dnf install -y --setopt=install_weak_deps=False \
+        glib2 \
+    && dnf clean all
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /var/task
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen --no-dev
+
+COPY shared/ shared/
+COPY nas/ nas/
+COPY cloud/ cloud/
+
+# Pre-download the embedding model so no network call at Lambda cold start
+RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
+
+# CMD overridden per-function in Terraform:
+#   persist: cloud.persist.consumer.handler
+#   index:   cloud.index.consumer.handler
+CMD ["cloud.persist.consumer.handler"]

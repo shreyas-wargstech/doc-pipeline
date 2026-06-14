@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars and fill in real values. NEVER commit terraform.tfvars.
+
+aws_region         = "ap-south-1"
+environment        = "dev"
+db_password        = "CHANGE_ME_strong_password_here"
+openrouter_api_key = "sk-or-..."
+session_secret     = "CHANGE_ME_at_least_32_chars_random"
+
+# Vector store = RDS pgvector (no extra vars — uses the RDS instance above).
+# Graph store  = Amazon Neptune (provisioned in neptune.tf; endpoint is an
+#                output, not an input). Tune Serverless capacity if needed:
+neptune_min_ncu = 1.0
+neptune_max_ncu = 4.0
+
+s3_bucket_name = "docintel-documents-dev"
+ecr_image_tag  = "latest"
+alarm_email    = "ops@your-domain.com"
