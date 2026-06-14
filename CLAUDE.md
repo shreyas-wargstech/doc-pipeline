@@ -93,6 +93,8 @@ Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist)
 
 **Document bookmarks — built on `feat/document-bookmarks` (2026-06-14, not yet merged):** server-side per-user private bookmarks. `document_bookmarks(username, document_id)` table with composite PK + CASCADE FKs; `POST/DELETE /documents/{id}/bookmark` endpoints (identity from session cookie); `bookmarked` boolean injected into all document list/detail reads via `LEFT JOIN`; `bookmarked=true` filter for the new `/bookmarks` page. `BookmarkStar` component (optimistic toggle, filled/outline, `aria-pressed`); star column in `DocumentsTable`; Bookmarks nav entry in `AppShell`. Run `python -m scripts.apply_bookmarks` once against live DB before use. Verified: tsc 0, 79 web tests, 416 backend unit green, `next build` ok. **Next (UX roadmap):** eval/retrieval/pipelines redesigns.
 
+**Pipeline folder runner — built on `feat/pipeline-folder-runner` (2026-06-14, not yet merged):** synchronous in-process runner for a local folder of PDFs. `cloud/pipeline_run/` package (source, registry, orchestrator, runner, api — 5 modules). Key architectural decision: `prepare_ingest()` extracted from `cloud/ingest/service.py` as the shared ingest core (both the SQS/Lambda `handle_manifest` path and the inline runner call the same function). In-memory `RunRegistry` (ephemeral Approach A — state lost on server restart). Pipelines page (`web/app/(dash)/pipelines/page.tsx`) replaces the ComingSoon stub with `RunForm` + live SSE `RunTable`. `POST /pipelines/run` (202), `GET /pipelines/run/{id}/events` (SSE), cancel endpoint. Verified: 441 backend unit green, 90/92 web pass, `next build` ok.
+
 > Per-stage durable detail (gotchas, signatures, txn models) lives in **`session_log.md`** (`Key X facts` were migrated there) and the **code**. This file keeps only cross-cutting facts + active threads. Treat `make test` as ground truth.
 
 Cross-cutting facts (bitten — remember):
@@ -108,6 +110,8 @@ Active threads:
 - Match fuzzy thresholds `FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` UNCALIBRATED (no labeled pairs yet).
 - AWS auto-trigger wiring (Structure→Match→Persist chain) — next pipeline milestone.
 - Manual dashboard smoke NOT yet run (needs `make up` + `make serve` + `make web-dev` + seeded user via `python -m scripts.add_dashboard_user`).
+- **Persisted run history (Approach B)** — in-memory `RunRegistry` is ephemeral; Postgres-backed history is a follow-up.
+- **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production folder runs; currently only `LocalFolderSource` exists.
 
 Local run needs: tesseract on PATH (`eng+mar+hin`+`osd`); `make up` (elasticmq + DBs); `.env` SQS block + `OPENROUTER_API_KEY` (sole cloud-OCR credential). `make serve` = uvicorn :8000; `/pipeline/notify` → 202, `handle_manifest()` in background. **New (2026-06-10):** add `SQS_STRUCTURE_QUEUE_URL`, `SQS_MATCH_QUEUE_URL`, `SQS_PERSIST_QUEUE_URL` to `.env` (see `.env.example`); run `python -m scripts.apply_status_structuring` once against live DB to widen the status CHECK; `make stage-worker STAGE=structure|match|persist` drains a queue; `make sweep` runs one fan-in pass.
 

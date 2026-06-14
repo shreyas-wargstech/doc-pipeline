@@ -756,3 +756,19 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Spec:** `docs/superpowers/specs/2026-06-14-document-bookmarks-design.md`. Plan: `docs/superpowers/plans/2026-06-14-document-bookmarks.md`.
 - **Branch:** `feat/document-bookmarks` — not yet merged; `finishing-a-development-branch` pending.
 - **Next:** merge bookmarks branch; then eval/retrieval/pipelines UX redesigns.
+
+## 2026-06-14 (continued) — Pipeline folder runner — built on feat/pipeline-folder-runner
+
+- **Feature:** synchronous in-process pipeline runner for a local folder of PDFs.
+- **Key architectural decision:** extracted `prepare_ingest()` from `cloud/ingest/service.py` as the shared AWS seam — both the existing SQS/Lambda `handle_manifest()` path and the new inline runner call the same function, ensuring no drift between the two code paths.
+- **New package `cloud/pipeline_run/`** (5 modules):
+  - `source.py` — `DocumentSource` protocol + `LocalFolderSource` (non-recursive `*.pdf` enumeration)
+  - `registry.py` — in-memory `RunRegistry` + `RunState` / `RunItemState` models (single active run, per-subscriber SSE fan-out, cancel flag; ephemeral Approach A — state lost on server restart)
+  - `orchestrator.py` — `run_all_stages(pdf_path, *, category, force, on_event)` — thin sequential composition of existing stage cores (upload → prepare_ingest → ocr consumer `process_record` per page → structure → match → persist → index); skip if already processed unless `force`; error isolation per document
+  - `runner.py` — `start_run()` + `_drive_run()` background asyncio coroutine with cancel support
+  - `api.py` — 4 FastAPI endpoints: `POST /pipelines/run` (202), `GET /pipelines/run/{id}`, `GET /pipelines/run/{id}/events` (SSE), `POST /pipelines/run/{id}/cancel`
+- **Frontend:** `web/lib/types.ts` (RunItem/RunState/RunEvent), `web/lib/pipeline-reducer.ts`, `web/hooks/useRunPipeline.ts`, `web/components/pipelines/{RunForm,RunSummary,RunTable}.tsx`, `web/app/(dash)/pipelines/page.tsx` — replaces the ComingSoon stub with a live SSE progress table.
+- **Tests:** backend unit tests for all 5 modules + 1 gated integration test; frontend reducer tests + page rendering tests.
+- **Test counts:** 441 backend unit pass (1 pre-existing env-dependent failure `test_config_index.py::test_index_defaults`); 90/92 web pass (1 pre-existing tinypool worker crash on action-bar, 1 unrelated).
+- **Branch:** `feat/pipeline-folder-runner` (not yet merged).
+- **Next:** merge branch; then retrieval/observability/admin UX stub pages; persisted run history (Approach B) if needed.

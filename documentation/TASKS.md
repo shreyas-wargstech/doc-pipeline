@@ -21,7 +21,7 @@
 
 - [ ] **Implement the 4 stub feature pages** (currently 16-17 line placeholders under `web/app/(dash)/`):
   - [ ] **Retrieval / search** (`retrieval/page.tsx`) — surface the live `GET /search` 3-tier cascade (keyword→graph→vector) + `GET /search/{doc_id}/pages`. Currently API-only.
-  - [ ] **Pipelines** (`pipelines/page.tsx`) — pipeline status / stage progress / trigger UI (per UX strategy: trigger should not feel like a random admin button).
+  - [x] **Pipelines** (`pipelines/page.tsx`) — DONE (2026-06-14, `feat/pipeline-folder-runner`): `RunForm` + live SSE `RunTable`; `POST /pipelines/run`, `GET /pipelines/run/{id}/events`. Replaces ComingSoon stub.
   - [ ] **Observability** (`observability/page.tsx`) — overview metrics, time-ranges; reuse shared filtering patterns.
   - [ ] **Admin** (`admin/page.tsx`) — users management (ties into Auth/RBAC, P2 below).
 
@@ -69,6 +69,12 @@
 - [~] **DASH-3 — Accuracy eval lab** — content-type eval lab BUILT (`/eval`), thresholds calibrated once (FIX-035), eval review/correction workflow shipped (2026-06-14). Future extensions: OCR-accuracy eval, classification-accuracy eval, on-demand tier comparison/A-B of OCR-VLMs, eval splits, multi-labeler (all explicitly excluded YAGNI from v1).
 - [ ] **UX-redesign remaining feature pages onto warm-editorial foundation** — foundation + document viewer + bookmarks redesigned (2026-06-14). Still pre-redesign / stub: eval polish, retrieval, pipelines, observability, admin (overlaps P0 stub-page work — redesign + build together).
 
+## P2 — Pipeline folder runner follow-ups
+
+- [ ] **Persisted run history (Approach B)** — in-memory `RunRegistry` (Approach A) is ephemeral; run state is lost on server restart. Approach B = persist to Postgres (`pipeline_runs` / `pipeline_run_items` tables) so history survives restarts.
+- [ ] **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production runs (enumerate PDFs under an S3 prefix instead of a local folder). File: `cloud/pipeline_run/source.py`.
+- [ ] **Place `tests/fixtures/sample_bundle.pdf`** — the gated integration test in `tests/cloud/test_pipeline_run_integration.py` is skipped without this fixture; add a real sample PDF to unblock it.
+
 ## P3 — Code follow-ups (Minor, non-blocking — left by review)
 
 - [ ] **Structure:** `structure_max_chars` silent truncation → add warn log. File: `cloud/structure/llm.py`.
@@ -90,6 +96,7 @@
 
 ## Done (recent stages — context only)
 
+- [x] **Pipeline folder runner** — built on `feat/pipeline-folder-runner` 2026-06-14. `cloud/pipeline_run/` (source/registry/orchestrator/runner/api); `prepare_ingest()` extracted as shared ingest core; Pipelines page replaces ComingSoon stub with live SSE progress. 441 backend + 90/92 web green.
 - [x] **Document bookmarks (Spec 2)** — merged → `main` 2026-06-14. `document_bookmarks` table, `POST/DELETE /documents/{id}/bookmark`, per-user `bookmarked` LEFT-JOIN injection, `BookmarkStar`, `/bookmarks` page + nav. `python -m scripts.apply_bookmarks` for live (no-flush) DB. 416 backend + 79 web green.
 - [x] **Document viewer redesign** — merged → `main` 2026-06-14. All 3 surfaces restyled, `useCollapsible`, collapsible sidebar/rail/data-panel, `react-zoom-pan-pinch` zoom/pan.
 - [x] **Frontend foundation redesign (warm-editorial)** — merged → `main` 2026-06-14. Canonical tokens, single warm light theme (light-only), restyled shell + primitives + login.
