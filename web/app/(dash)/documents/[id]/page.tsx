@@ -1,7 +1,7 @@
 "use client";
-import { Bookmark } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ActionButtons } from "@/components/ActionButtons";
+import { BookmarkStar } from "@/components/BookmarkStar";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -46,17 +46,7 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
             <MatchBadge status={doc.match_status} />
           </span>
         }
-        actions={
-          <button
-            type="button"
-            aria-label="Bookmark document"
-            disabled
-            title="Bookmarks coming soon"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-fg opacity-50"
-          >
-            <Bookmark className="h-4 w-4" />
-          </button>
-        }
+        actions={<BookmarkStar documentId={doc.document_id} bookmarked={doc.bookmarked} />}
       />
 
       <Card className="flex flex-col gap-3">

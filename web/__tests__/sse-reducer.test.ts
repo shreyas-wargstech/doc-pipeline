@@ -6,7 +6,7 @@ const base: DocumentsResponse = {
   documents: [
     { document_id: "a", document_category: "practitioner", document_type: null, status: "processing",
       match_status: null, page_count: 3, original_filename: "a.pdf", registration_no: "1",
-      updated_at: "2026-06-08T00:00:00", ocr_done: 1, ocr_total: 3 },
+      updated_at: "2026-06-08T00:00:00", ocr_done: 1, ocr_total: 3, bookmarked: false },
   ],
   total: 1, offset: 0, limit: 50,
 };

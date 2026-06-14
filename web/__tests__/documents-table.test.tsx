@@ -6,13 +6,14 @@ import type { DocRow } from "@/lib/types";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/hooks/useBookmarks", () => ({ useToggleBookmark: () => ({ mutate: vi.fn() }) }));
 
 function makeRow(overrides: Partial<DocRow> = {}): DocRow {
   return {
     document_id: "doc1", document_category: "practitioner", document_type: "registration",
     status: "processed", match_status: "matched", page_count: 3,
     original_filename: "f.pdf", registration_no: "REG1",
-    updated_at: "2026-06-01T00:00:00Z", ocr_done: 3, ocr_total: 3,
+    updated_at: "2026-06-01T00:00:00Z", ocr_done: 3, ocr_total: 3, bookmarked: false,
     ...overrides,
   };
 }

@@ -12,7 +12,7 @@ function makeData(): DocDetailResponse {
       application_no: null, registration_no: null, applicant_name_raw: "Jane Doe",
       dob: "1990-01-01", gender: "F", reference_data_id: null, match_status: "manual_review",
       document_summary: null, metadata: {}, created_at: "2026-06-14T00:00:00Z",
-      updated_at: "2026-06-14T00:00:00Z",
+      updated_at: "2026-06-14T00:00:00Z", bookmarked: false,
     },
     pages: [{
       page_id: "doc1:1", document_id: "doc1", page_num: 1, s3_key_image: "k/p1.png",

@@ -6,6 +6,7 @@ import type { DocDetailResponse } from "@/lib/types";
 const setActionBar = vi.fn();
 vi.mock("@/app/action-bar", () => ({ useSetActionBar: (node: React.ReactNode) => setActionBar(node) }));
 vi.mock("@/components/ActionButtons", () => ({ ActionButtons: ({ documentId }: { documentId: string }) => <div data-testid="action-buttons">{documentId}</div> }));
+vi.mock("@/hooks/useBookmarks", () => ({ useToggleBookmark: () => ({ mutate: vi.fn() }) }));
 
 function makeDoc(): DocDetailResponse {
   return {

@@ -9,19 +9,26 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import { BookmarkStar } from "@/components/BookmarkStar";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MatchBadge } from "@/components/ui/MatchBadge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { fmtDateTime, titleCase } from "@/lib/format";
 import type { DocRow } from "@/lib/types";
 
-export function DocumentsTable({ rows }: { rows: DocRow[] }) {
+export function DocumentsTable({
+  rows,
+  emptyText = "No documents match these filters.",
+}: {
+  rows: DocRow[];
+  emptyText?: string;
+}) {
   const router = useRouter();
 
   if (rows.length === 0) {
     return (
       <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
-        <Typography color="text.secondary" variant="body2">No documents match these filters.</Typography>
+        <Typography color="text.secondary" variant="body2">{emptyText}</Typography>
       </Paper>
     );
   }
@@ -31,6 +38,7 @@ export function DocumentsTable({ rows }: { rows: DocRow[] }) {
       <Table size="small">
         <TableHead>
           <TableRow>
+            <TableCell padding="checkbox" />
             <TableCell>Reg / File</TableCell>
             <TableCell>Category</TableCell>
             <TableCell>Status</TableCell>
@@ -47,6 +55,9 @@ export function DocumentsTable({ rows }: { rows: DocRow[] }) {
               onClick={() => router.push(`/documents/${r.document_id}`)}
               sx={{ cursor: "pointer" }}
             >
+              <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                <BookmarkStar documentId={r.document_id} bookmarked={r.bookmarked} />
+              </TableCell>
               <TableCell sx={{ fontFamily: "var(--font-mono)" }}>
                 <Box sx={{ display: "flex", flexDirection: "column" }}>
                   <Typography variant="body2">{r.registration_no ?? "—"}</Typography>

@@ -28,6 +28,7 @@ function makeDoc(overrides: Partial<DocDetailResponse["doc"]> = {}): DocDetailRe
       registration_no: "REG1", applicant_name_raw: null, dob: null, gender: null,
       reference_data_id: null, match_status: "matched", document_summary: null,
       metadata: {}, created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T00:00:00Z",
+      bookmarked: false,
       ...overrides,
     },
     pages: [],
