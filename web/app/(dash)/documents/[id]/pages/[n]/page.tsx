@@ -49,7 +49,7 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
   const [tab, setTab] = useState<number | null>(null);
   const dataPanel = useCollapsible("page-data-panel", false);
 
-  const pageCount = docQuery.data?.doc.page_count ?? null;
+  const pageCount = docQuery.data?.doc?.page_count ?? null;
   const hasPrev = pageNum > 1;
   const hasNext = pageCount != null && pageNum < pageCount;
 

@@ -845,3 +845,17 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 ```
 
 **Rule:** Any `/api/*` 500 with the generic `{"detail":"internal server error"}` body means `cloud/app.py`'s catch-all swallowed the real exception — first check `docker ps` / `make up` / Postgres reachability before debugging app code. Never run `scripts/add_dashboard_user.py` via `Bash`/background tools — it calls `getpass.getpass()` and hangs; use the direct-SQL upsert above instead.
+
+---
+
+## 2026-06-15 — Page viewer crash `Cannot read properties of undefined (reading 'page_count')` (FIX-045)
+
+**Symptom:** Opening `/documents/[id]/pages/[n]` throws `TypeError: Cannot read properties of undefined (reading 'page_count')` at `PageDetail` render.
+
+**Root cause:** `page.tsx:52` read `docQuery.data?.doc.page_count` — optional chaining guarded only `data`, not `doc`. `DocDetailResponse.doc` is typed as always-present, but at runtime the `useDocument` payload can lack `doc` (404/error body, or doc not yet found). Line 52 runs on every render, before the loading guard, so `undefined.page_count` threw. Compiled stack showed line 98 but source was line 52.
+
+**Fix:** `docQuery.data?.doc?.page_count ?? null` (added `?.` after `doc`). Failing test added in `web/__tests__/page-detail.test.tsx` (configurable `useDocument` mock returning a `doc`-less payload).
+
+**Rule:** When a TS type claims a nested field is always present but the value comes from a network response, defend the render path with optional chaining anyway — types describe the happy path, runtime payloads (errors/404s/races) don't. Chain through every hop you didn't personally guarantee (`a?.b?.c`), not just the outer object.
+
+**Files:** `web/app/(dash)/documents/[id]/pages/[n]/page.tsx`, `web/__tests__/page-detail.test.tsx`.

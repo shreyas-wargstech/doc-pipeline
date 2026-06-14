@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import PageDetail from "@/app/(dash)/documents/[id]/pages/[n]/page";
 import type { PageDetailResponse, DocDetailResponse } from "@/lib/types";
 
@@ -21,9 +21,10 @@ const page: PageDetailResponse = {
   raw_text: "raw text body",
 };
 const doc = { doc: { page_count: 3 }, pages: [] } as unknown as DocDetailResponse;
+const mockDoc: { value: unknown } = { value: doc };
 
 vi.mock("@/hooks/usePage", () => ({ usePage: () => ({ isLoading: false, isError: false, data: page }) }));
-vi.mock("@/hooks/useDocument", () => ({ useDocument: () => ({ data: doc }) }));
+vi.mock("@/hooks/useDocument", () => ({ useDocument: () => ({ data: mockDoc.value }) }));
 vi.mock("react-zoom-pan-pinch", () => ({
   TransformWrapper: ({ children }: { children: (api: { zoomIn: () => void; zoomOut: () => void; resetTransform: () => void }) => React.ReactNode }) =>
     <>{children({ zoomIn: vi.fn(), zoomOut: vi.fn(), resetTransform: vi.fn() })}</>,
@@ -31,6 +32,16 @@ vi.mock("react-zoom-pan-pinch", () => ({
 }));
 
 describe("PageDetail", () => {
+  afterEach(() => {
+    mockDoc.value = doc;
+  });
+
+  it("renders without crashing when the document payload has no doc", async () => {
+    mockDoc.value = { pages: [] };
+    render(<PageDetail params={Promise.resolve({ id: "doc1", n: "2" })} />);
+    expect(await screen.findByRole("heading", { name: /page 2/i })).toBeInTheDocument();
+  });
+
   it("renders the page title and a data-panel toggle", async () => {
     render(<PageDetail params={Promise.resolve({ id: "doc1", n: "2" })} />);
     expect(await screen.findByRole("heading", { name: /page 2/i })).toBeInTheDocument();

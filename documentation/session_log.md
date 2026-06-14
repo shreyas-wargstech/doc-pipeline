@@ -811,3 +811,10 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Verified:** tsc 0; 111/113 web tests (2 = pre-existing `action-bar` tinypool heap-OOM, unrelated); backend cost/observability suites 59 green; `next build` ok (`/observability` 6.23 kB). Commits `0502e3f`..`5f47fd1`.
 - **Live-DB action required:** `python -m scripts.apply_cost_events` once (schema.sql already has it for fresh inits).
 - **Next (UX roadmap):** admin stub page; manual dashboard smoke; push to origin.
+
+## 2026-06-15 — FIX-045: page viewer crash on doc-less payload
+- Stage: web bugfix (`/documents/[id]/pages/[n]`).
+- Symptom: `TypeError: Cannot read properties of undefined (reading 'page_count')` at PageDetail render.
+- Root cause: `page.tsx:52` `docQuery.data?.doc.page_count` guarded only `data`, not `doc`; runtime payload can lack `doc` (404/error/race). Runs before loading guard → throws.
+- Fix: `?.` after `doc`. Added failing-first test (configurable `useDocument` mock, doc-less payload) → 4/4 page-detail tests green. tsc clean (sole error = pre-existing `.next/types` PageRailToggle-from-layout artifact, confirmed via stash).
+- See FIX-045.
