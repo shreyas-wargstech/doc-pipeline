@@ -20,8 +20,8 @@
   - Prior background tasks (may be stale): upload `bl9rhl00h` (`/tmp/upload_all.log`), OCR worker `bmwl4er4c` (`/tmp/ocr_worker.log`) — check/kill before relaunch.
 
 - [ ] **Implement the 4 stub feature pages** (currently 16-17 line placeholders under `web/app/(dash)/`):
-  - [ ] **Retrieval / search** (`retrieval/page.tsx`) — surface the live `GET /search` 3-tier cascade (keyword→graph→vector) + `GET /search/{doc_id}/pages`. Currently API-only.
-  - [x] **Pipelines** (`pipelines/page.tsx`) — DONE (2026-06-14, `feat/pipeline-folder-runner`): `RunForm` + live SSE `RunTable`; `POST /pipelines/run`, `GET /pipelines/run/{id}/events`. Replaces ComingSoon stub.
+  - [x] **Retrieval / search** (`retrieval/page.tsx`) — DONE 2026-06-15, on local `main`. Split-view search workspace: `SearchBar` + `ResultsList` (380px) + `DetailPanel`. Backend routes extracted to `/api` prefix. 8 frontend + 3 backend tests green.
+  - [x] **Pipelines** (`pipelines/page.tsx`) — DONE, merged to `main` (2026-06-14, `feat/pipeline-folder-runner`): `RunForm` + live SSE `RunTable`; `POST /pipelines/run`, `GET /pipelines/run/{id}/events`. Replaces ComingSoon stub.
   - [ ] **Observability** (`observability/page.tsx`) — overview metrics, time-ranges; reuse shared filtering patterns.
   - [ ] **Admin** (`admin/page.tsx`) — users management (ties into Auth/RBAC, P2 below).
 
@@ -96,7 +96,7 @@
 
 ## Done (recent stages — context only)
 
-- [x] **Pipeline folder runner** — built on `feat/pipeline-folder-runner` 2026-06-14. `cloud/pipeline_run/` (source/registry/orchestrator/runner/api); `prepare_ingest()` extracted as shared ingest core; Pipelines page replaces ComingSoon stub with live SSE progress. 441 backend + 90/92 web green.
+- [x] **Pipeline folder runner** — built on `feat/pipeline-folder-runner` 2026-06-14, **merged to `main`** (branch deleted). `cloud/pipeline_run/` (source/registry/orchestrator/runner/api); `prepare_ingest()` extracted as shared ingest core; Pipelines page replaces ComingSoon stub with live SSE progress. 441 backend + 90/92 web green.
 - [x] **Document bookmarks (Spec 2)** — merged → `main` 2026-06-14. `document_bookmarks` table, `POST/DELETE /documents/{id}/bookmark`, per-user `bookmarked` LEFT-JOIN injection, `BookmarkStar`, `/bookmarks` page + nav. `python -m scripts.apply_bookmarks` for live (no-flush) DB. 416 backend + 79 web green.
 - [x] **Document viewer redesign** — merged → `main` 2026-06-14. All 3 surfaces restyled, `useCollapsible`, collapsible sidebar/rail/data-panel, `react-zoom-pan-pinch` zoom/pan.
 - [x] **Frontend foundation redesign (warm-editorial)** — merged → `main` 2026-06-14. Canonical tokens, single warm light theme (light-only), restyled shell + primitives + login.

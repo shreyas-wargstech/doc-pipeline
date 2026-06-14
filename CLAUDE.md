@@ -81,9 +81,11 @@ docs/     INTEGRATION.md
 - Retrieval: `owner × page_type` over Postgres (`cloud/retrieval/service.py`, `GET /retrieve`); owner filter requires `documents.match_status='matched'` (verified owners only). By-person scope = practitioner bundles only.
 - SQS = one message per page; enqueue before final DB write; FIFO dedup key `<document_id>:<page_num>`.
 
-## Current state (as of 2026-06-14)
+## Current state (as of 2026-06-15)
 
-Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), all merged to main; FastAPI `cloud/app.py` + Next.js `web/` SPA dashboard. **Validated on a real 13-page bundle 2026-06-09** (all 4 datastores clean, 13/13 pages through the `vlm` tier). DASH-3 **content-type eval lab built** on `feat/content-type-eval-lab` (not yet merged). Backend **416 unit green** (1 pre-existing unrelated env-dependent failure `test_config_index.py::test_index_defaults`; integration deselected, need Docker); web **79 green** + tsc/build clean. `main` is local-only, ahead of origin (not pushed, user's choice).
+Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), all merged to main; FastAPI `cloud/app.py` + Next.js `web/` SPA dashboard. **Validated on a real 13-page bundle 2026-06-09** (all 4 datastores clean, 13/13 pages through the `vlm` tier). DASH-3 **content-type eval lab built** on `feat/content-type-eval-lab` (not yet merged). Backend **441 unit green** (1 pre-existing unrelated env-dependent failure `test_config_index.py::test_index_defaults`; integration deselected, need Docker); web **79+ green** + tsc/build clean. `main` is local-only, ahead of origin (not pushed, user's choice).
+
+**Retrieval search UI — COMPLETE on local `main` (2026-06-15):** live `/retrieval` search workspace (split-view: 380px results panel + detail panel). `cloud/retrieval/api.py` router mounts `/api/search` + `/api/search/{id}/pages` (previously at app root, unreachable from Next.js proxy). Components: `SearchBar`, `ResultCard` (tier badge + score bar), `ResultsList`, `PageRow`, `DetailPanel`. `useSearch`/`useSearchDocPages` hooks (React Query). Error states + accessible loading skeleton. `docs/superpowers/specs/2026-06-15-retrieval-search-ui-design.md`. Commits `e25e9e1`..`3261a5b`.
 
 **Eval review workflow (UX roadmap step 2)** built on `feat/eval-review-workflow` (2026-06-14, not yet merged): `/eval` tabbed page (Review queue + Content-type lab), `/eval/[id]` correction workspace — `GET/PATCH /api/eval/queue[/{id}]`, re-runs `match_document()` inline, audits `manual_correction`. Pending: final code review + merge.
 
