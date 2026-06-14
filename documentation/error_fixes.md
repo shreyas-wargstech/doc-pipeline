@@ -859,3 +859,17 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 **Rule:** When a TS type claims a nested field is always present but the value comes from a network response, defend the render path with optional chaining anyway — types describe the happy path, runtime payloads (errors/404s/races) don't. Chain through every hop you didn't personally guarantee (`a?.b?.c`), not just the outer object.
 
 **Files:** `web/app/(dash)/documents/[id]/pages/[n]/page.tsx`, `web/__tests__/page-detail.test.tsx`.
+
+---
+
+## 2026-06-15 — Document detail crash `Cannot read properties of undefined (reading 'document_id')` (FIX-046)
+
+**Symptom:** Opening `/documents/[id]` throws `TypeError: Cannot read properties of undefined (reading 'document_id')` at `DocumentDetail` render.
+
+**Root cause:** Same class as FIX-045, different file. `documents/[id]/page.tsx:30-32` — the `actionBarContent` `useMemo` read `q.data.doc.document_id` (guarded `q.data ?` but not `doc`) with dependency `[q.data?.doc.document_id]` (optional chaining covered `data`, not `doc`). The memo runs on *every* render, before the loading/error guards, so a `doc`-less `useDocument` payload (404/error body/race) threw. The post-guard destructure `const { doc } = q.data` then used `doc.*` unconditionally too.
+
+**Fix:** `q.data?.doc ?` in the memo, `[q.data?.doc?.document_id]` dependency, and added `|| !q.data.doc` to the error guard so a doc-less payload renders "Failed to load document." instead of crashing. Failing-first test added to `web/__tests__/document-detail.test.tsx` (configurable `useDocument` mock returning a doc-less payload).
+
+**Rule:** (reaffirms FIX-045) — `useMemo`/`useEffect` bodies and their dependency arrays run *before* the component's loading/error guards, so they need the SAME defensive optional-chaining as the render body. When auditing for the FIX-045 pattern, don't stop at the JSX — grep hooks and dep arrays for unguarded `data.x.y` too.
+
+**Files:** `web/app/(dash)/documents/[id]/page.tsx`, `web/__tests__/document-detail.test.tsx`.

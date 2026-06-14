@@ -818,3 +818,10 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Root cause: `page.tsx:52` `docQuery.data?.doc.page_count` guarded only `data`, not `doc`; runtime payload can lack `doc` (404/error/race). Runs before loading guard → throws.
 - Fix: `?.` after `doc`. Added failing-first test (configurable `useDocument` mock, doc-less payload) → 4/4 page-detail tests green. tsc clean (sole error = pre-existing `.next/types` PageRailToggle-from-layout artifact, confirmed via stash).
 - See FIX-045.
+
+## 2026-06-15 — FIX-046: document detail crash on doc-less payload (same class as FIX-045)
+- Stage: web bugfix (`/documents/[id]`).
+- Symptom: `TypeError: Cannot read properties of undefined (reading 'document_id')` at DocumentDetail render.
+- Root cause: `documents/[id]/page.tsx:30-32` `actionBarContent` useMemo read `q.data.doc.document_id` (dep `[q.data?.doc.document_id]`) — guards `data` not `doc`; memo runs *before* loading/error guards → doc-less payload throws. Post-guard `const {doc}=q.data` also unguarded.
+- Fix: `q.data?.doc ?` in memo, `[q.data?.doc?.document_id]` dep, `|| !q.data.doc` in error guard. Failing-first test in `document-detail.test.tsx` → 4/4 green. tsc clean (same pre-existing PageRailToggle `.next/types` artifact only).
+- Rule: hook bodies + dep arrays run before render guards — audit them for the FIX-045 pattern too, not just JSX. See FIX-046.

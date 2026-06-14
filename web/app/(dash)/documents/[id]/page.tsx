@@ -27,13 +27,13 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
   const q = useDocument(id);
 
   const actionBarContent = useMemo(
-    () => (q.data ? <ActionButtons documentId={q.data.doc.document_id} /> : null),
-    [q.data?.doc.document_id],
+    () => (q.data?.doc ? <ActionButtons documentId={q.data.doc.document_id} /> : null),
+    [q.data?.doc?.document_id],
   );
   useSetActionBar(actionBarContent);
 
   if (!resolved || q.isLoading) return <Skeleton className="h-64 w-full" />;
-  if (q.isError || !q.data) return <p className="text-sm text-danger">Failed to load document.</p>;
+  if (q.isError || !q.data || !q.data.doc) return <p className="text-sm text-danger">Failed to load document.</p>;
   const { doc, ocr_done, structured_done } = q.data;
 
   return (

@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import DocumentDetail from "@/app/(dash)/documents/[id]/page";
 import type { DocDetailResponse } from "@/lib/types";
 
@@ -18,10 +18,21 @@ const data = {
   },
   ocr_done: 3, structured_done: 3,
 } as unknown as DocDetailResponse;
+const mockDoc: { value: unknown } = { value: data };
 
-vi.mock("@/hooks/useDocument", () => ({ useDocument: () => ({ isLoading: false, isError: false, data }) }));
+vi.mock("@/hooks/useDocument", () => ({ useDocument: () => ({ isLoading: false, isError: false, data: mockDoc.value }) }));
 
 describe("DocumentDetail", () => {
+  afterEach(() => {
+    mockDoc.value = data;
+  });
+
+  it("renders without crashing when the document payload has no doc", async () => {
+    mockDoc.value = { ocr_done: 0, structured_done: 0 };
+    render(<DocumentDetail params={Promise.resolve({ id: "doc1" })} />);
+    expect(await screen.findByText(/Failed to load document/i)).toBeInTheDocument();
+  });
+
   it("renders the registration number as the page heading", async () => {
     render(<DocumentDetail params={Promise.resolve({ id: "doc1" })} />);
     expect(await screen.findByRole("heading", { level: 1, name: /REG-12345/ })).toBeInTheDocument();
