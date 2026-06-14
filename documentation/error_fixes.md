@@ -828,3 +828,20 @@ Online portal application form has "Mobile No" field immediately before qualific
 **Fix:** Added `document_summary`/`index_status` to `Document`, `page_summary`/`index_status` to `Page`. Wired into `web/lib/types.ts` (`DocFull.document_summary`, `PageRow.page_summary`) and rendered in document-detail and page-detail views.
 
 **Rule:** When schema.sql gains a column meant to surface via the dashboard API, also add it to the matching ORM model in `storage_db.py` — `_to_dict()` silently drops unmapped columns, no error.
+
+---
+
+## 2026-06-14 — `POST /api/login` → 500 `{"detail":"internal server error"}` (FIX-044)
+
+**Symptom:** Fresh dashboard smoke test, login form submits and gets generic 500.
+
+**Root cause:** Not a code bug. Docker Desktop wasn't running (`docker ps` failed to reach the daemon) → `docpipe-postgres` container was down → `session.py::_lookup_hash()`'s `session_scope()` raised a DB connection error inside `/login` → caught by the catch-all `cloud/app.py::_unhandled` handler → masked as generic 500. Separately, `dashboard_users` table was empty (no seeded user) — `scripts/add_dashboard_user.py` requires interactive `getpass` (no `--help`/non-interactive mode, hangs forever if run via a piped/background shell).
+
+**Fix:** Start Docker Desktop, `make up`, confirm `docker exec docpipe-postgres pg_isready`. Seed a user without the interactive script via direct SQL:
+```bash
+python -c "from passlib.hash import bcrypt; print(bcrypt.hash('<pw>'))"
+docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
+  "INSERT INTO dashboard_users (username, password_hash) VALUES ('<user>', '<hash>') ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash;"
+```
+
+**Rule:** Any `/api/*` 500 with the generic `{"detail":"internal server error"}` body means `cloud/app.py`'s catch-all swallowed the real exception — first check `docker ps` / `make up` / Postgres reachability before debugging app code. Never run `scripts/add_dashboard_user.py` via `Bash`/background tools — it calls `getpass.getpass()` and hangs; use the direct-SQL upsert above instead.
