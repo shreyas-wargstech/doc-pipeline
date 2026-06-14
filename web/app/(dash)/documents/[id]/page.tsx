@@ -1,9 +1,9 @@
 "use client";
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
+import { Bookmark } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ActionButtons } from "@/components/ActionButtons";
 import { Card } from "@/components/ui/Card";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MatchBadge } from "@/components/ui/MatchBadge";
@@ -38,29 +38,45 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="flex flex-col gap-4">
-      <Link href="/" className="inline-flex w-fit items-center gap-1 text-sm text-muted-fg hover:text-foreground"><ArrowLeft className="h-4 w-4" />Documents</Link>
+      <PageHeader
+        title={doc.registration_no ?? doc.original_filename}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={doc.status} />
+            <MatchBadge status={doc.match_status} />
+          </span>
+        }
+        actions={
+          <button
+            type="button"
+            aria-label="Bookmark document"
+            disabled
+            title="Bookmarks coming soon"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-fg opacity-50"
+          >
+            <Bookmark className="h-4 w-4" />
+          </button>
+        }
+      />
 
       <Card className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="font-mono text-lg font-semibold text-foreground">{doc.registration_no ?? doc.original_filename}</h1>
-          <StatusBadge status={doc.status} />
-          <MatchBadge status={doc.match_status} />
-        </div>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
           <Field k="Category" v={titleCase(doc.document_category)} />
           <Field k="Type" v={titleCase(doc.document_type)} />
           <Field k="Applicant" v={doc.applicant_name_raw ?? "—"} />
           <Field k="Doc ref." v={doc.document_reference_no ?? "—"} mono />
           <Field k="Application no." v={doc.application_no?.toString() ?? "—"} mono />
+          <Field k="Registration no." v={doc.registration_no ?? "—"} mono />
           <Field k="DOB" v={doc.dob ?? "—"} />
           <Field k="OCR" v={`${ocr_done}/${doc.page_count}`} />
           <Field k="Structured" v={`${structured_done}/${doc.page_count}`} />
           <Field k="Updated" v={fmtDateTime(doc.updated_at)} />
         </dl>
-        {doc.document_summary && (
-          <p className="text-sm text-muted-fg">{doc.document_summary}</p>
-        )}
       </Card>
+
+      {doc.document_summary && (
+        <p className="font-sans text-sm leading-relaxed text-muted-fg">{doc.document_summary}</p>
+      )}
     </div>
   );
 }
