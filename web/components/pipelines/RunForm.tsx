@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
+import type { Category } from "@/lib/types";
 
-const CATEGORIES = ["practitioner", "letter", "receipt", "record"];
+const CATEGORIES: Category[] = ["practitioner", "letter", "receipt", "record"];
 
 export function RunForm({
   onRun, disabled,
@@ -28,7 +29,7 @@ export function RunForm({
           placeholder="/data/incoming"
         />
       </div>
-      <div className="flex flex-col gap-1" style={{ maxWidth: 240 }}>
+      <div className="flex flex-col gap-1 max-w-60">
         <label htmlFor="run-category" className="text-xs font-medium text-muted-fg">Category</label>
         <Select id="run-category" value={category} onChange={(e) => setCategory(e.target.value)}>
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}

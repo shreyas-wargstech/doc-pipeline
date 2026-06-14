@@ -10,7 +10,6 @@ function statusTone(s: RunItem["status"]): "ok" | "warn" | "danger" | "info" | "
     case "done": return "ok";
     case "failed": return "danger";
     case "running": return "info";
-    case "skipped": return "muted";
     default: return "muted";
   }
 }
