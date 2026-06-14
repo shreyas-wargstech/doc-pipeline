@@ -838,3 +838,14 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - First run (n=36) killed 2 FIX-047 guesses: `letter_body` English anchors inert (real letters = Devanagari) → replaced with `महोप`/`संदर्भ`/`प्रति,` (recall 0→1.0); `विषय` rejected (collides with marksheet "subject" → HSC false positive). `"applicant name"` dropped from application_form (silently mislabelled a council payment receipt) → silent_mislabel 8.3%→5.6%.
 - Tradeoff accepted: application_form keyword recall 0.80→0.40, escalation 41.7%→44.4% (safe VLM escalation > silent-wrong).
 - Verified: 471 unit green (shared+cloud+nas, integration deselected). Commits: harness `ffec864`, calibration next.
+
+## 2026-06-15 — AWS orchestration infra: Terraform + pgvector + Neptune
+
+- Changed datastores: Qdrant Cloud → RDS pgvector (same Postgres instance, `document_pages` table); Neo4j Aura → Amazon Neptune Serverless (openCypher; `GRAPH_BACKEND=neptune` makes `ensure_constraints()` a no-op — Neptune auto-indexes, rejects DDL).
+- App code: `cloud/persist/pgvector_writer.py` (replaces qdrant_writer), `cloud/persist/service.py` + `cloud/retrieval/service.py` rewired for pgvector (same `AsyncSession`), `db/schema.sql` + `scripts/apply_pgvector.py`, `shared/config.py` `graph_backend` flag, `shared/neo4j_client.py` Neptune short-circuit, `cloud/ingest/lambda_handler.py` (S3→SQS→ingest handler). 484 unit green.
+- Terraform infra (`infra/`): providers, variables, outputs, tfvars.example, vpc (2-AZ, NAT gateways, 3 SGs), rds, neptune, secrets, ecr (4 repos), sqs (ingest standard + 5 FIFO + DLQs), iam, lambda (7 functions + ESMs w/ ReportBatchItemFailures), s3, eventbridge, monitoring. Plus `infra/docker/` 4 Dockerfiles + `build_push.sh`.
+- `elasticmq.conf`: renamed `ocr-queue.fifo` → `docintel-local-*` prefix scheme, all 6 queues.
+- `docs/AWS_SETUP.md`: operator runbook (state backend bootstrap → tf apply → init DBs → smoke).
+- Key: `.env` `SQS_OCR_QUEUE_URL` must change to `http://localhost:9324/000000000000/docintel-local-ocr.fifo` for local dev.
+- Committed: `6fd0e63` (ingest handler), `b627f06` (pgvector/neptune app), `44bd78c` (terraform infra).
+- Next: `terraform init` + `terraform validate` (terraform not on WSL/PowerShell PATH yet — user to run from their terminal). Then phase-1 apply (ECR only) → docker build/push → full apply.
