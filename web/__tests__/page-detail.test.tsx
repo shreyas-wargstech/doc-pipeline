@@ -1,3 +1,4 @@
+import React from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import PageDetail from "@/app/(dash)/documents/[id]/pages/[n]/page";
@@ -23,6 +24,11 @@ const doc = { doc: { page_count: 3 }, pages: [] } as unknown as DocDetailRespons
 
 vi.mock("@/hooks/usePage", () => ({ usePage: () => ({ isLoading: false, isError: false, data: page }) }));
 vi.mock("@/hooks/useDocument", () => ({ useDocument: () => ({ data: doc }) }));
+vi.mock("react-zoom-pan-pinch", () => ({
+  TransformWrapper: ({ children }: { children: (api: { zoomIn: () => void; zoomOut: () => void; resetTransform: () => void }) => React.ReactNode }) =>
+    <>{children({ zoomIn: vi.fn(), zoomOut: vi.fn(), resetTransform: vi.fn() })}</>,
+  TransformComponent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 describe("PageDetail", () => {
   it("renders the page title and a data-panel toggle", async () => {
@@ -34,5 +40,12 @@ describe("PageDetail", () => {
   it("shows the summary tab content by default", async () => {
     render(<PageDetail params={Promise.resolve({ id: "doc1", n: "2" })} />);
     expect(await screen.findByText("A summary.")).toBeInTheDocument();
+  });
+
+  it("renders zoom controls over the page image", async () => {
+    render(<PageDetail params={Promise.resolve({ id: "doc1", n: "2" })} />);
+    expect(await screen.findByRole("button", { name: /zoom in/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /zoom out/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /fit to width/i })).toBeInTheDocument();
   });
 });

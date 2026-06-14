@@ -12,7 +12,11 @@ import Typography from "@mui/material/Typography";
 import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
 import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import FitScreenIcon from "@mui/icons-material/FitScreen";
 import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
+import ZoomInIcon from "@mui/icons-material/ZoomIn";
+import ZoomOutIcon from "@mui/icons-material/ZoomOut";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { JsonViewer } from "@/components/JsonViewer";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { PageRailToggle } from "@/app/(dash)/documents/[id]/layout";
@@ -147,9 +151,37 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
           gridTemplateColumns: dataPanel.collapsed ? "1fr" : { xs: "1fr", lg: "1fr 1fr" },
         }}
       >
-        <Paper sx={{ overflow: "hidden" }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={imageUrl(id, pageNum)} alt={`Page ${pageNum}`} style={{ width: "100%", display: "block" }} />
+        <Paper sx={{ overflow: "hidden", position: "relative" }}>
+          <TransformWrapper
+            key={pageNum}
+            minScale={1}
+            maxScale={6}
+            doubleClick={{ disabled: false, mode: "reset" }}
+            wheel={{ step: 0.15 }}
+          >
+            {({ zoomIn, zoomOut, resetTransform }) => (
+              <>
+                <TransformComponent
+                  wrapperStyle={{ width: "100%" }}
+                  contentStyle={{ width: "100%" }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl(id, pageNum)} alt={`Page ${pageNum}`} style={{ width: "100%", display: "block" }} />
+                </TransformComponent>
+                <Box sx={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 0.5, zIndex: 2 }}>
+                  <IconButton aria-label="Zoom in" size="small" onClick={() => zoomIn()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
+                    <ZoomInIcon fontSize="small" />
+                  </IconButton>
+                  <IconButton aria-label="Zoom out" size="small" onClick={() => zoomOut()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
+                    <ZoomOutIcon fontSize="small" />
+                  </IconButton>
+                  <IconButton aria-label="Fit to width" size="small" onClick={() => resetTransform()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
+                    <FitScreenIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              </>
+            )}
+          </TransformWrapper>
         </Paper>
 
         {hasPrev && (
