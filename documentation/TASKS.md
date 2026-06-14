@@ -22,7 +22,7 @@
 - [ ] **Implement the 4 stub feature pages** (currently 16-17 line placeholders under `web/app/(dash)/`):
   - [x] **Retrieval / search** (`retrieval/page.tsx`) — DONE 2026-06-15, on local `main`. Split-view search workspace: `SearchBar` + `ResultsList` (380px) + `DetailPanel`. Backend routes extracted to `/api` prefix. 8 frontend + 3 backend tests green.
   - [x] **Pipelines** (`pipelines/page.tsx`) — DONE, merged to `main` (2026-06-14, `feat/pipeline-folder-runner`): `RunForm` + live SSE `RunTable`; `POST /pipelines/run`, `GET /pipelines/run/{id}/events`. Replaces ComingSoon stub.
-  - [ ] **Observability** (`observability/page.tsx`) — overview metrics, time-ranges; reuse shared filtering patterns.
+  - [x] **Observability** (`observability/page.tsx`) — DONE 2026-06-15 (`feat/observability-page`, merged to `main`). Pipeline-health KPIs + status/match bars, client-side 14-day audit-activity timeline, filterable control-action event log (+`result` filter) with detail drawer, and a **DASH-2 cost & usage** section (see below). New `ui/Drawer`, `AuditActivity`, `AuditDetailDrawer`, `CostSection`.
   - [ ] **Admin** (`admin/page.tsx`) — users management (ties into Auth/RBAC, P2 below).
 
 - [ ] **Manual dashboard smoke** — `make up` + `make serve` (:8000) + `make web-dev` + seed user (`python -m scripts.add_dashboard_user`); click through documents/detail/metrics/audit/eval/**bookmarks**/retrieval. NOT yet run end-to-end on the redesigned UI.
@@ -76,7 +76,7 @@
 
 ## P3 — Dashboard roadmap (future phases)
 
-- [ ] **DASH-2 — Cost & usage tracking** — add `ocr_tier` to `pages`; instrument OCR tiers + `classifier/llm.py` + `structure/llm.py` to emit token/cost → new `cost_events` table; dashboard cost views. (Needs plumbing; spec when picked up.)
+- [x] **DASH-2 — Cost & usage tracking** — DONE 2026-06-15 (`feat/observability-page`, merged). `cost_events` table + `scripts/apply_cost_events.py`; `shared/llm_usage.py` (`chat_completion` wrapper + contextvar sink) instruments `ocr_vlm`/`ocr_classify`/`classifier`/`structure`/`document_type` with flush points at OCR/structure consumers + ingest classify; `cloud/dashboard/cost_queries.py` + `GET /api/costs[/events]`; `CostSection` UI on Observability. **Run `python -m scripts.apply_cost_events` once on the live DB.** Deferred: per-stage latency, live credit balance, `cloud/retrieval/query_parser.py` instrumentation (skipped to avoid merge collision). Captures real OpenRouter `cost` inline (no extra API call).
 - [~] **DASH-3 — Accuracy eval lab** — content-type eval lab BUILT (`/eval`), thresholds calibrated once (FIX-035), eval review/correction workflow shipped (2026-06-14). Future extensions: OCR-accuracy eval, classification-accuracy eval, on-demand tier comparison/A-B of OCR-VLMs, eval splits, multi-labeler (all explicitly excluded YAGNI from v1).
 - [ ] **UX-redesign remaining feature pages onto warm-editorial foundation** — foundation + document viewer + bookmarks redesigned (2026-06-14). Still pre-redesign / stub: eval polish, retrieval, pipelines, observability, admin (overlaps P0 stub-page work — redesign + build together).
 

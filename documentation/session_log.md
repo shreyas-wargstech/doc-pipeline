@@ -796,3 +796,18 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Commits:** `e25e9e1`..`3261a5b` (15 commits on `main`, local-only).
 - **Spec:** `docs/superpowers/specs/2026-06-15-retrieval-search-ui-design.md`. Plan: `docs/superpowers/plans/2026-06-15-retrieval-search-ui.md`.
 - **Next (UX roadmap):** observability + admin stub pages; manual dashboard smoke; push to origin.
+
+## 2026-06-15 (continued) — Observability page + DASH-2 cost/usage tracking — DONE (feat/observability-page)
+
+- **Isolation:** built in worktree `.claude/worktrees/observability` (branch `feat/observability-page`, based off local HEAD) so it never collided with the concurrent retrieval work on `main`. Merged `main` in cleanly (no conflicts) before finishing.
+- **Observability page** (`web/app/(dash)/observability/page.tsx`) — replaced ComingSoon. Pipeline-health KPIs + status/match `MetricBars` (reuse `useMetrics`), client-side 14-day `AuditActivity` timeline (derived from audit rows, no new backend), filterable control-action event log (`AuditTable` + new `result` ok/error filter), row-click `AuditDetailDrawer` (params JSON + detail). New reusable `ui/Drawer`. Backend: `result` filter added to `list_audit` + `GET /api/audit`.
+- **DASH-2 cost/usage (5 phases, TDD):**
+  1. `cost_events` table in `db/schema.sql` + `scripts/apply_cost_events.py` (run once on live DB).
+  2. `shared/llm_usage.py` — `CostEvent`, contextvar sink `collecting(document_id,page_num)` (backfills doc context), `chat_completion()` wrapper (records tokens + OpenRouter `cost`; no-op without sink; records `status=error` then re-raises), `persist_cost_events()`.
+  3. Instrumented 5 paid call sites (`ocr_vlm`, `ocr_classify`, `classifier`, `structure`, `document_type`); flush points at OCR consumer (per page), structure consumer (per doc), ingest classify (per doc). **Skipped `cloud/retrieval/query_parser.py`** to avoid colliding with retrieval on main.
+  4. `cloud/dashboard/cost_queries.py` (summary / by_stage / by_model / recent) + `GET /api/costs`, `/api/costs/events`.
+  5. `CostSection` UI (spend/tokens/calls/errors KPIs, cost-by-stage/model bars, recent-calls table); `useCosts`/`useCostEvents` hooks, `fmtUsd`.
+- **OpenRouter finding:** usage+`cost` return inline on every response (no extra call, no `usage:{include}` flag needed); no inference webhooks → "delivery status" = per-call ok/error. Per-stage latency + live credit balance left as a note (uninstrumented).
+- **Verified:** tsc 0; 111/113 web tests (2 = pre-existing `action-bar` tinypool heap-OOM, unrelated); backend cost/observability suites 59 green; `next build` ok (`/observability` 6.23 kB). Commits `0502e3f`..`5f47fd1`.
+- **Live-DB action required:** `python -m scripts.apply_cost_events` once (schema.sql already has it for fresh inits).
+- **Next (UX roadmap):** admin stub page; manual dashboard smoke; push to origin.
