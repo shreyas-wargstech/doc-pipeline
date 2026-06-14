@@ -79,9 +79,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="subtitle1" sx={{ fontFamily: "var(--font-mono)", fontWeight: 700, mr: 2 }}>
-            doc-pipeline
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mr: 2 }}>
+            <Box
+              aria-hidden
+              sx={{
+                width: 26,
+                height: 26,
+                borderRadius: "8px",
+                background: "linear-gradient(135deg, rgb(94 234 212), rgb(13 148 136))",
+                boxShadow: "0 3px 10px rgba(13,148,136,.45)",
+              }}
+            />
+            <Typography
+              component="span"
+              sx={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: "1.05rem", letterSpacing: "0.2px" }}
+            >
+              Docintel
+            </Typography>
+          </Box>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Breadcrumbs />
           </Box>
@@ -124,11 +139,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           display: { xs: "none", sm: "block" },
           width: DRAWER_WIDTH,
           flexShrink: 0,
-          "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box" },
+          "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box", display: "flex", flexDirection: "column" },
         }}
       >
         <Toolbar />
         {navList}
+        <Box sx={{ mt: "auto", p: 2, fontSize: 11, color: "text.secondary", fontFamily: "var(--font-mono)" }}>
+          92,431 registry rows
+        </Box>
       </Drawer>
 
       <Box component="main" sx={{ flexGrow: 1, p: 2, width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` } }}>

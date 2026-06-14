@@ -31,6 +31,6 @@ describe("AppShell", () => {
     usePathname.mockReturnValue("/");
     render(<AppShell><div>page content</div></AppShell>);
     expect(screen.getByText("page content")).toBeInTheDocument();
-    expect(screen.getByText("doc-pipeline")).toBeInTheDocument();
+    expect(screen.getByText("Docintel")).toBeInTheDocument();
   });
 });
