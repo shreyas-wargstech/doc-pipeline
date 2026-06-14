@@ -61,8 +61,8 @@ async def _seed_and_cleanup():
 async def test_list_and_count_documents_execute_with_and_without_filters():
     async with session_scope() as session:
         # No filters — this is the exact call that raised AmbiguousParameterError.
-        rows = await queries.list_documents(session)
-        total = await queries.count_documents(session)
+        rows = await queries.list_documents(session, username="bm_seed")
+        total = await queries.count_documents(session, username="bm_seed")
         assert any(r["document_id"] == DOC_ID for r in rows)
         assert total >= 1
         # The OCR-progress subquery: 1 of 2 pages done.
@@ -72,16 +72,18 @@ async def test_list_and_count_documents_execute_with_and_without_filters():
 
         # With every filter populated (search hits registration_no via ILIKE).
         filtered = await queries.list_documents(
-            session, category="practitioner", status="processed",
+            session, username="bm_seed", category="practitioner", status="processed",
             match_status="matched", search="I-12345",
         )
         assert [r["document_id"] for r in filtered] == [DOC_ID]
         assert await queries.count_documents(
-            session, category="practitioner", search="I-12345"
+            session, username="bm_seed", category="practitioner", search="I-12345"
         ) == 1
 
         # A non-matching search returns nothing (and still must not raise).
-        assert await queries.list_documents(session, search="no-such-doc-xyz") == []
+        assert await queries.list_documents(
+            session, username="bm_seed", search="no-such-doc-xyz"
+        ) == []
 
 
 @pytest.mark.integration
