@@ -20,8 +20,8 @@ export function PageRow({ hit }: { hit: SearchPageHit }) {
         <p className="line-clamp-2 text-xs text-muted-fg">{hit.page_summary ?? "No summary."}</p>
         {hit.entities.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {hit.entities.slice(0, 5).map((e, i) => (
-              <span key={i} className="rounded bg-info-bg px-1.5 py-px font-mono text-[10px] text-info">
+            {hit.entities.slice(0, 5).map((e) => (
+              <span key={`${e.type}:${e.value}`} className="rounded bg-info-bg px-1.5 py-px font-mono text-[10px] text-info">
                 {e.value}
               </span>
             ))}
