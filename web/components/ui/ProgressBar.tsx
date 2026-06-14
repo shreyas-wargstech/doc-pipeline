@@ -11,7 +11,7 @@ export function ProgressBar({ done, total }: { done: number; total: number }) {
         aria-valuenow={clampedDone}
         className="h-2 w-24 overflow-hidden rounded-full bg-muted"
       >
-        <div className="h-full bg-muted transition-[width] duration-300" style={{ width: `${pct}%` }} />
+        <div className="h-full bg-primary transition-[width] duration-300" style={{ width: `${pct}%` }} />
       </div>
       <span className="tnum text-xs text-muted-fg">{done}/{total}</span>
     </div>

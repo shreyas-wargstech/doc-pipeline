@@ -10,7 +10,7 @@ export function MetricBars({ title, data }: { title: string; data: Record<string
         <div key={k} className="flex items-center gap-3">
           <span className="w-32 shrink-0 truncate text-xs text-muted-fg">{k}</span>
           <div className="h-4 flex-1 overflow-hidden rounded bg-muted">
-            <div className="h-full rounded bg-muted transition-[width] duration-300" style={{ width: `${(n / max) * 100}%` }} />
+            <div className="h-full rounded bg-primary transition-[width] duration-300" style={{ width: `${(n / max) * 100}%` }} />
           </div>
           <span className="tnum w-10 text-right text-xs text-foreground">{n}</span>
         </div>
