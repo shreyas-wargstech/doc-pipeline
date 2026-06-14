@@ -1,6 +1,7 @@
 """Unit tests for cloud/dashboard/api.py — JSON API. DB layer is mocked."""
 from __future__ import annotations
 
+from datetime import date, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -251,22 +252,33 @@ async def test_reclassify_action_ok(client: AsyncClient, as_user):
 
 @pytest.mark.asyncio
 async def test_eval_queue_returns_list_and_total(client: AsyncClient, as_user):
+    updated_at_1 = datetime(2026, 6, 14, 0, 0, 0)
+    updated_at_2 = datetime(2026, 6, 13, 12, 30, 0)
     rows = [{"document_id": "a" * 64, "status": "manual_review", "match_status": None,
              "applicant_name_raw": "Jane Doe", "registration_no": None,
              "application_no": None, "document_reference_no": None,
+             "dob": date(1990, 1, 1), "gender": None, "document_type": "registration",
+             "updated_at": updated_at_1},
+            {"document_id": "b" * 64, "status": "manual_review", "match_status": None,
+             "applicant_name_raw": "John Roe", "registration_no": None,
+             "application_no": None, "document_reference_no": None,
              "dob": None, "gender": None, "document_type": "registration",
-             "updated_at": "2026-06-14T00:00:00Z"}]
+             "updated_at": updated_at_2}]
     with patch("cloud.dashboard.api.queries.list_review_queue",
                new=AsyncMock(return_value=rows)), \
          patch("cloud.dashboard.api.queries.count_review_queue",
-               new=AsyncMock(return_value=1)):
+               new=AsyncMock(return_value=2)):
         async with client as c:
             resp = await c.get("/api/eval/queue")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total"] == 1
-    assert body["documents"] == rows
+    assert body["total"] == 2
     assert body["offset"] == 0 and body["limit"] == 50
+    docs = body["documents"]
+    assert docs[0]["dob"] == "1990-01-01"
+    assert docs[0]["updated_at"] == str(updated_at_1)
+    assert docs[1]["dob"] is None
+    assert docs[1]["updated_at"] == str(updated_at_2)
 
 
 @pytest.mark.asyncio
