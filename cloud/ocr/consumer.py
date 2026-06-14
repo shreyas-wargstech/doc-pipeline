@@ -23,6 +23,7 @@ from cloud.ingest.storage_db import PageRepository
 from cloud.ocr.router import OcrRouter
 from shared.config import get_settings
 from shared.db import session_scope
+from shared.llm_usage import collecting, persist_cost_events
 from shared.logging import get_logger
 from shared.storage_s3 import get_s3_client
 
@@ -45,7 +46,9 @@ async def process_record(body: str, *, router: OcrRouter | None = None) -> None:
     image = await _fetch_image(msg.s3_key)
     async with session_scope() as session:
         repo = PageRepository(session)
-        await router.process_page(msg, image, repo)
+        with collecting(document_id=msg.document_id, page_num=msg.page_num) as costs:
+            await router.process_page(msg, image, repo)
+        await persist_cost_events(session, costs)
 
 
 async def _run_event_async(event: dict) -> dict:

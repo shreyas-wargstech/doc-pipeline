@@ -25,6 +25,7 @@ from cloud.ocr.models import OcrResult, OcrWord
 from cloud.ocr.tiers.base import TierNotImplemented
 from shared.config import get_settings
 from shared.exceptions import OCRError
+from shared.llm_usage import chat_completion
 from shared.logging import get_logger
 
 log = get_logger(__name__)
@@ -104,8 +105,11 @@ class VlmTier:
     def _ocr_sync(self, image: bytes, page_num: int) -> tuple[str, list[OcrWord]]:
         data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
         try:
-            response = self._client.chat.completions.create(
+            response = chat_completion(
+                self._client,
+                stage="ocr_vlm",
                 model=self._model,
+                page_num=page_num,
                 temperature=0.0,
                 messages=[
                     {

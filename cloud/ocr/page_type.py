@@ -16,6 +16,7 @@ from cloud.ocr.tiers.base import TierNotImplemented
 from cloud.structure.models import PAGE_TYPES
 from shared.config import get_settings
 from shared.exceptions import OCRError
+from shared.llm_usage import chat_completion
 from shared.logging import get_logger
 from shared.page_type import PAGE_TYPE_CONF_NET, classify_page_type
 
@@ -63,7 +64,9 @@ class VlmPageTyper:
         data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
         prompt = _CLASSIFY_PROMPT.format(labels=", ".join(sorted(PAGE_TYPES)))
         try:
-            response = self._client.chat.completions.create(
+            response = chat_completion(
+                self._client,
+                stage="ocr_classify",
                 model=self._model,
                 temperature=0.0,
                 messages=[

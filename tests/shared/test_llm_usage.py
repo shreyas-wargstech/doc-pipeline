@@ -67,6 +67,23 @@ def test_chat_completion_records_error_then_reraises():
     assert "api down" in (sink[0].detail or "")
 
 
+def test_collecting_backfills_default_document_context():
+    client = MagicMock()
+    client.chat.completions.create.return_value = _response()
+    with lu.collecting(document_id="docZ", page_num=7) as sink:
+        lu.chat_completion(client, stage="ocr_vlm", model="m", messages=[])
+    assert sink[0].document_id == "docZ"
+    assert sink[0].page_num == 7
+
+
+def test_explicit_document_id_overrides_default_context():
+    client = MagicMock()
+    client.chat.completions.create.return_value = _response()
+    with lu.collecting(document_id="docDefault") as sink:
+        lu.chat_completion(client, stage="s", model="m", document_id="docExplicit", messages=[])
+    assert sink[0].document_id == "docExplicit"
+
+
 @pytest.mark.asyncio
 async def test_persist_cost_events_bulk_inserts():
     session = AsyncMock()

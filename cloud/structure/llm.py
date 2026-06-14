@@ -17,6 +17,7 @@ import structlog
 from cloud.structure.models import DOCUMENT_TYPES, ENTITY_TYPES, PAGE_TYPES, Entity
 from shared.config import get_settings
 from shared.exceptions import StructureError
+from shared.llm_usage import chat_completion
 
 log = structlog.get_logger()
 
@@ -140,7 +141,9 @@ def _extract_sync(
         raw_text=raw_text,
     )
     try:
-        response = client.chat.completions.create(
+        response = chat_completion(
+            client,
+            stage="structure",
             model=model,
             temperature=0.0,
             messages=[
@@ -207,7 +210,9 @@ def _classify_document_type_sync(
         raw_text=raw_text,
     )
     try:
-        response = client.chat.completions.create(
+        response = chat_completion(
+            client,
+            stage="document_type",
             model=model,
             temperature=0.0,
             messages=[

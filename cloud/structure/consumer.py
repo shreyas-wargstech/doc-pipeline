@@ -13,6 +13,7 @@ from cloud.orchestration.sqs import enqueue_stage
 from cloud.structure.service import structure_document
 from shared.config import get_settings
 from shared.db import session_scope
+from shared.llm_usage import collecting, persist_cost_events
 from shared.logging import get_logger
 
 log = get_logger(__name__)
@@ -22,7 +23,9 @@ async def process_record(body: str) -> None:
     """Process one stage message. Raises on failure (caller marks for redelivery)."""
     msg = StageMessage.model_validate_json(body)
     async with session_scope() as session:
-        await structure_document(msg.document_id, session=session)
+        with collecting(document_id=msg.document_id) as costs:
+            await structure_document(msg.document_id, session=session)
+        await persist_cost_events(session, costs)
     # Committed cleanly above → chain forward. A failure here redelivers the
     # message; structure_document re-runs idempotently before re-enqueue.
     await enqueue_stage(get_settings().sqs_match_queue_url, msg.document_id)

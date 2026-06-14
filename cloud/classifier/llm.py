@@ -17,6 +17,7 @@ import structlog
 
 from shared.config import get_settings
 from shared.exceptions import ClassifierError
+from shared.llm_usage import chat_completion
 
 log = structlog.get_logger()
 
@@ -62,7 +63,9 @@ def _classify_sync(
 ) -> tuple[str, str | None, float]:
     prompt = _USER_TEMPLATE.format(cover_text=cover_text[:_MAX_COVER_CHARS])
     try:
-        response = client.chat.completions.create(
+        response = chat_completion(
+            client,
+            stage="classifier",
             model=model,
             temperature=0.0,
             messages=[

@@ -64,6 +64,27 @@ def test_ocr_sync_splits_words_with_prior_and_zero_bbox():
     assert all(w.page_num == 2 for w in words)
 
 
+def test_ocr_sync_records_cost_event_when_collecting():
+    """Inside collecting(), a VLM call emits one ocr_vlm CostEvent."""
+    from types import SimpleNamespace
+
+    from shared import llm_usage
+
+    client = MagicMock()
+    message = MagicMock(content="hi")
+    usage = SimpleNamespace(prompt_tokens=100, completion_tokens=20, total_tokens=120, cost=0.003)
+    client.chat.completions.create.return_value = MagicMock(choices=[MagicMock(message=message)], usage=usage)
+    tier = VlmTier(client=client)
+    with llm_usage.collecting(document_id="docV", page_num=4) as sink:
+        tier._ocr_sync(b"img", page_num=4)
+    assert len(sink) == 1
+    assert sink[0].stage == "ocr_vlm"
+    assert sink[0].document_id == "docV"
+    assert sink[0].page_num == 4
+    assert sink[0].total_tokens == 120
+    assert sink[0].cost == pytest.approx(0.003)
+
+
 def test_ocr_sync_strips_and_handles_empty():
     """Blank / whitespace-only transcription → no words, empty raw_text."""
     tier = VlmTier(client=_mock_client_returning("   \n  "))

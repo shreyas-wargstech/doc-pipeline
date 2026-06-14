@@ -39,18 +39,36 @@ class CostEvent(BaseModel):
     detail: str | None = None
 
 
-_SINK: contextvars.ContextVar[list[CostEvent] | None] = contextvars.ContextVar(
+class _Collector:
+    """Active sink: the collected events plus a default document context that
+    ``record`` backfills into events whose own ids are unset. Lets call sites pass
+    only ``stage``/``model`` while the flush point (which knows the document) sets
+    the ids once."""
+
+    def __init__(self, document_id: str | None, page_num: int | None) -> None:
+        self.events: list[CostEvent] = []
+        self.document_id = document_id
+        self.page_num = page_num
+
+
+_SINK: contextvars.ContextVar[_Collector | None] = contextvars.ContextVar(
     "llm_cost_sink", default=None
 )
 
 
 @contextlib.contextmanager
-def collecting() -> Iterator[list[CostEvent]]:
-    """Activate a fresh sink for the duration of the block, yielding the list."""
-    sink: list[CostEvent] = []
-    token = _SINK.set(sink)
+def collecting(
+    *, document_id: str | None = None, page_num: int | None = None
+) -> Iterator[list[CostEvent]]:
+    """Activate a fresh sink for the block, yielding the collected-events list.
+
+    ``document_id``/``page_num`` become the default context backfilled into any
+    recorded event that does not carry its own.
+    """
+    collector = _Collector(document_id, page_num)
+    token = _SINK.set(collector)
     try:
-        yield sink
+        yield collector.events
     finally:
         _SINK.reset(token)
 
@@ -89,10 +107,16 @@ def _extract(
 
 
 def record(event: CostEvent) -> None:
-    """Append to the active sink, if any. No-op otherwise."""
-    sink = _SINK.get()
-    if sink is not None:
-        sink.append(event)
+    """Append to the active sink, if any. No-op otherwise. Backfills the sink's
+    default document context into events that don't carry their own."""
+    collector = _SINK.get()
+    if collector is None:
+        return
+    if event.document_id is None:
+        event.document_id = collector.document_id
+    if event.page_num is None:
+        event.page_num = collector.page_num
+    collector.events.append(event)
 
 
 def chat_completion(

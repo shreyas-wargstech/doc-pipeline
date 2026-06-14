@@ -26,6 +26,7 @@ from cloud.ingest.storage_db import (
 from nas.manifest.models import Manifest
 from shared.db import session_scope
 from shared.exceptions import IngestError
+from shared.llm_usage import collecting, persist_cost_events
 
 log = structlog.get_logger(__name__)
 
@@ -92,7 +93,11 @@ async def prepare_ingest(manifest: Manifest, *, classifier: ClassifierService | 
 
     # ── 2. Classify ───────────────────────────────────────────────────────
     classifier = classifier or ClassifierService()
-    result = await classifier.classify(manifest)
+    with collecting(document_id=manifest.document_id) as costs:
+        result = await classifier.classify(manifest)
+    if costs:
+        async with session_scope() as session:
+            await persist_cost_events(session, costs)
     logger.info(
         "ingest_classified",
         category=result.document_category,
