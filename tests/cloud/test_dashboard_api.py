@@ -114,6 +114,16 @@ async def test_audit_returns_rows(client: AsyncClient, as_user):
 
 
 @pytest.mark.asyncio
+async def test_audit_forwards_result_filter(client: AsyncClient, as_user):
+    spy = AsyncMock(return_value=[])
+    with patch("cloud.dashboard.api.audit.list_audit", new=spy):
+        async with client as c:
+            resp = await c.get("/api/audit?result=error")
+    assert resp.status_code == 200
+    assert spy.await_args.kwargs["result"] == "error"
+
+
+@pytest.mark.asyncio
 async def test_doc_detail_404_when_missing(client: AsyncClient, as_user):
     repo = AsyncMock()
     repo.get = AsyncMock(return_value=None)

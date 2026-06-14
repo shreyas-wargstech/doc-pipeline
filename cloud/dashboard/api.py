@@ -142,11 +142,13 @@ async def audit_view(
     username: str | None = None,
     document_id: str | None = None,
     action: str | None = None,
+    result: str | None = None,
     _user: str = Depends(require_session),
 ) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await audit.list_audit(session, username=username,
-                                      document_id=document_id, action=action)
+                                      document_id=document_id, action=action,
+                                      result=result)
     return {"rows": rows}
 
 

@@ -45,6 +45,7 @@ async def list_audit(
     username: str | None = None,
     document_id: str | None = None,
     action: str | None = None,
+    result: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -53,21 +54,23 @@ async def list_audit(
     # the binary protocol and cannot infer the type of a param used only in a
     # bare ":x IS NULL" predicate (raises AmbiguousParameterError). The cast
     # makes the type explicit. Same reason for the casts in queries.py.
-    result = await session.execute(
+    rows = await session.execute(
         text(
             "SELECT id, ts, username, action, document_id, params, result, detail "
             "FROM audit_log "
             "WHERE (CAST(:username AS text) IS NULL OR username = :username) "
             "  AND (CAST(:document_id AS text) IS NULL OR document_id = :document_id) "
             "  AND (CAST(:action AS text) IS NULL OR action = :action) "
+            "  AND (CAST(:result AS text) IS NULL OR result = :result) "
             "ORDER BY ts DESC LIMIT :limit OFFSET :offset"
         ),
         {
             "username": username,
             "document_id": document_id,
             "action": action,
+            "result": result,
             "limit": limit,
             "offset": offset,
         },
     )
-    return [dict(r) for r in result.mappings().all()]
+    return [dict(r) for r in rows.mappings().all()]
