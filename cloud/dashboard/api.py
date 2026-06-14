@@ -19,7 +19,7 @@ from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect, text
 
-from cloud.dashboard import actions, audit, eval_queries, queries, sse
+from cloud.dashboard import actions, audit, cost_queries, eval_queries, queries, sse
 from cloud.dashboard.bookmarks import BookmarkRepository
 from cloud.dashboard.session import (
     COOKIE_NAME,
@@ -149,6 +149,26 @@ async def audit_view(
         rows = await audit.list_audit(session, username=username,
                                       document_id=document_id, action=action,
                                       result=result)
+    return {"rows": rows}
+
+
+@router.get("/costs")
+async def costs_view(_user: str = Depends(require_session)) -> dict[str, Any]:
+    async with session_scope() as session:
+        summary = await cost_queries.cost_summary(session)
+        by_stage = await cost_queries.cost_by_stage(session)
+        by_model = await cost_queries.cost_by_model(session)
+    return {"summary": summary, "by_stage": by_stage, "by_model": by_model}
+
+
+@router.get("/costs/events")
+async def cost_events_view(
+    stage: str | None = None,
+    limit: int = 50,
+    _user: str = Depends(require_session),
+) -> dict[str, Any]:
+    async with session_scope() as session:
+        rows = await cost_queries.recent_cost_events(session, stage=stage, limit=limit)
     return {"rows": rows}
 
 
