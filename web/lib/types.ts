@@ -141,3 +141,41 @@ export interface CorrectionResult {
   doc: DocFull;
   match_result: MatchResultOut;
 }
+
+export type RunItemStatus = "pending" | "running" | "done" | "skipped" | "failed";
+export type RunStatus = "running" | "completed" | "cancelled" | "failed";
+
+export interface RunItem {
+  filename: string;
+  status: RunItemStatus;
+  document_id: string | null;
+  stage: string | null;
+  error: string | null;
+}
+
+export interface RunState {
+  run_id: string;
+  folder: string;
+  category: string;
+  force: boolean;
+  status: RunStatus;
+  total: number;
+  done: number;
+  skipped: number;
+  failed: number;
+  running: number;
+  items: RunItem[];
+}
+
+// SSE frames: {type:"item",...partial item}, {type:"summary",...RunState},
+// {type:"done",...RunState}
+export interface RunEvent {
+  type: "item" | "summary" | "done";
+  filename?: string;
+  status?: RunItemStatus;
+  stage?: string | null;
+  document_id?: string | null;
+  error?: string | null;
+  // summary/done frames carry the full RunState shape too:
+  [key: string]: unknown;
+}
