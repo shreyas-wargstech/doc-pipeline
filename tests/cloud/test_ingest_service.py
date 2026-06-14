@@ -8,7 +8,7 @@ import pytest
 
 from cloud.classifier.models import ClassificationResult
 from cloud.ingest.models import OcrPageMessage
-from cloud.ingest.service import handle_manifest
+from cloud.ingest.service import handle_manifest, prepare_ingest, IngestPlan
 from cloud.ingest.storage_db import DocumentCategory, MatchStatus, OCRStatus
 from nas.manifest.models import Manifest, PageManifest
 
@@ -234,3 +234,48 @@ async def test_handle_manifest_other_does_not_set_processing(
     # 'other' path skips OCR → must NOT be marked 'processing'
     for c in mock_doc_repo.update_status.call_args_list:
         assert c.args[1] != DocumentStatus.PROCESSING
+
+
+# ── Tests: prepare_ingest core ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_prepare_ingest_returns_ocr_messages_without_enqueue(
+    mock_doc_repo, mock_page_repo, mock_enqueue, mock_classifier
+):
+    manifest = _make_manifest(
+        pages=[
+            {"page_num": 1, "s3_key": "...page_001.png", "page_type": "form"},
+            {"page_num": 2, "s3_key": "...page_002.png", "page_type": "blank"},
+        ]
+    )
+    mock_classifier.classify.return_value = _make_classifier_result("practitioner")
+
+    plan = await prepare_ingest(manifest)
+
+    assert isinstance(plan, IngestPlan)
+    assert plan.document_id == manifest.document_id
+    assert plan.short_circuited is False
+    assert [m.page_num for m in plan.ocr_messages] == [1]
+    assert plan.blank_page_nums == [2]
+    # No SQS enqueue and no QUEUED write — those belong to handle_manifest.
+    mock_enqueue.assert_not_called()
+    for c in mock_page_repo.bulk_update_ocr_status.call_args_list:
+        assert c.args[2] != OCRStatus.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_prepare_ingest_other_category_short_circuits(
+    mock_doc_repo, mock_page_repo, mock_enqueue, mock_classifier
+):
+    manifest = _make_manifest(category="other")
+    mock_classifier.classify.return_value = _make_classifier_result("other", confidence=0.3)
+
+    plan = await prepare_ingest(manifest)
+
+    assert plan.short_circuited is True
+    assert plan.ocr_messages == []
+    mock_doc_repo.update_fields.assert_called_once_with(
+        manifest.document_id,
+        document_category=DocumentCategory.OTHER,
+        match_status=MatchStatus.MANUAL_REVIEW,
+    )

@@ -8,6 +8,8 @@ Trigger flow:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import structlog
 
 from cloud.classifier.service import ClassifierService
@@ -28,17 +30,30 @@ from shared.exceptions import IngestError
 log = structlog.get_logger(__name__)
 
 
-async def handle_manifest(manifest: Manifest) -> None:
+@dataclass
+class IngestPlan:
+    """Result of the transport-agnostic ingest core. ``ocr_messages`` are the
+    pages to OCR (already filtered of blanks); the caller decides HOW (SQS
+    enqueue for AWS, inline ``process_record`` for the synchronous runner)."""
+
+    document_id: str
+    short_circuited: bool
+    ocr_messages: list[OcrPageMessage] = field(default_factory=list)
+    blank_page_nums: list[int] = field(default_factory=list)
+
+
+async def prepare_ingest(manifest: Manifest, *, classifier: ClassifierService | None = None) -> IngestPlan:
     """
-    End-to-end ingest handler. Idempotent on manifest.document_id.
+    Transport-agnostic ingest core. Idempotent on manifest.document_id.
 
     Stages:
       1. Upsert document + all pages into Postgres (status = pending).
       2. Classify the document bundle.
       3. Route:
          - category = 'other'  → skip all pages, flag document for manual review.
-         - any other category  → enqueue non-blank pages to SQS OCR queue.
-      4. Persist final page/document statuses.
+         - any other category  → build OCR work plan for non-blank pages.
+      4. Persist final document status + blank-page statuses (NOT the OCR
+         queue/enqueue status — that is the transport's responsibility).
     """
     logger = log.bind(document_id=manifest.document_id)
     logger.info("ingest_started", page_count=len(manifest.pages))
@@ -76,7 +91,7 @@ async def handle_manifest(manifest: Manifest) -> None:
     logger.info("ingest_db_persisted")
 
     # ── 2. Classify ───────────────────────────────────────────────────────
-    classifier = ClassifierService()
+    classifier = classifier or ClassifierService()
     result = await classifier.classify(manifest)
     logger.info(
         "ingest_classified",
@@ -104,17 +119,17 @@ async def handle_manifest(manifest: Manifest) -> None:
             reason="low_confidence_classification",
             page_count=len(all_page_nums),
         )
-        return
+        return IngestPlan(manifest.document_id, short_circuited=True)
 
-    # ── 3b. Enqueue non-blank pages for OCR ──────────────────────────────
+    # ── 3b. Build OCR work plan for non-blank pages ──────────────────────
     blank_page_nums: list[int] = []
-    enqueued_msgs: list[OcrPageMessage] = []
+    ocr_messages: list[OcrPageMessage] = []
 
     for page in manifest.pages:
         if page.page_type == "blank":
             blank_page_nums.append(page.page_num)
             continue
-        enqueued_msgs.append(
+        ocr_messages.append(
             OcrPageMessage(
                 document_id=manifest.document_id,
                 page_num=page.page_num,
@@ -126,14 +141,7 @@ async def handle_manifest(manifest: Manifest) -> None:
             )
         )
 
-    # Enqueue sequentially. On first SQS failure, IngestError propagates —
-    # the caller (Lambda / HTTP handler) must retry the full manifest.
-    # Already-enqueued pages are safe to re-send: FIFO queues deduplicate
-    # within 5 min; standard queue consumers must be idempotent.
-    for msg in enqueued_msgs:
-        await enqueue_page(msg)
-
-    # ── 4. Persist final statuses (single transaction) ────────────────────
+    # ── 4. Persist document status + blank-page statuses ──────────────────
     async with session_scope() as session:
         doc_repo = DocumentRepository(session)
         page_repo = PageRepository(session)
@@ -150,19 +158,41 @@ async def handle_manifest(manifest: Manifest) -> None:
             await page_repo.bulk_update_ocr_status(
                 manifest.document_id, blank_page_nums, OCRStatus.SKIPPED
             )
-        if enqueued_msgs:
-            # only_from=PENDING: enqueue (above) happens before this write, so a
-            # fast OCR worker may already have marked a page DONE/FAILED. Guard
-            # against downgrading those back to QUEUED (race fixed 2026-06-09).
-            await page_repo.bulk_update_ocr_status(
+
+    return IngestPlan(
+        manifest.document_id,
+        short_circuited=False,
+        ocr_messages=ocr_messages,
+        blank_page_nums=blank_page_nums,
+    )
+
+
+async def handle_manifest(manifest: Manifest) -> None:
+    """End-to-end ingest handler (AWS / SQS path). Idempotent on document_id.
+    Runs the shared core, then enqueues OCR pages + writes QUEUED status."""
+    plan = await prepare_ingest(manifest)
+    if plan.short_circuited:
+        return
+
+    # Enqueue sequentially. On first SQS failure, the error propagates — the
+    # caller (Lambda / HTTP handler) retries the full manifest. Already-enqueued
+    # pages are safe to re-send (FIFO dedup / idempotent consumers).
+    for msg in plan.ocr_messages:
+        await enqueue_page(msg)
+
+    if plan.ocr_messages:
+        async with session_scope() as session:
+            # only_from=PENDING: a fast OCR worker may already have marked a page
+            # DONE/FAILED. Guard against downgrading those to QUEUED.
+            await PageRepository(session).bulk_update_ocr_status(
                 manifest.document_id,
-                [m.page_num for m in enqueued_msgs],
+                [m.page_num for m in plan.ocr_messages],
                 OCRStatus.QUEUED,
                 only_from=[OCRStatus.PENDING],
             )
 
-    logger.info(
+    log.bind(document_id=manifest.document_id).info(
         "ingest_complete",
-        queued=len(enqueued_msgs),
-        skipped_blank=len(blank_page_nums),
+        queued=len(plan.ocr_messages),
+        skipped_blank=len(plan.blank_page_nums),
     )
