@@ -158,8 +158,19 @@ async def test_doc_detail_returns_doc_pages_and_counts(client: AsyncClient, as_u
     drepo.get = AsyncMock(return_value=doc)
     prepo = AsyncMock()
     prepo.list_for_document = AsyncMock(return_value=[p1, p2])
+    # Mock the bookmark EXISTS query — scalar_one() returns 0 (not bookmarked)
+    from unittest.mock import MagicMock
+    bm_result = MagicMock()
+    bm_result.scalar_one = MagicMock(return_value=0)
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=bm_result)
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def mock_session_scope():
+        yield mock_session
     with patch("cloud.dashboard.api.DocumentRepository", return_value=drepo), \
-         patch("cloud.dashboard.api.PageRepository", return_value=prepo):
+         patch("cloud.dashboard.api.PageRepository", return_value=prepo), \
+         patch("cloud.dashboard.api.session_scope", mock_session_scope):
         async with client as c:
             resp = await c.get(f"/api/documents/{'a' * 64}")
     assert resp.status_code == 200
@@ -168,6 +179,7 @@ async def test_doc_detail_returns_doc_pages_and_counts(client: AsyncClient, as_u
     assert body["structured_done"] == 1
     # the real metadata JSONB must survive — NOT the literal "MetaData()" string
     assert body["doc"]["metadata"] == {"match": {"method": "exact"}}
+    assert body["doc"]["bookmarked"] is False
 
 
 @pytest.mark.asyncio
@@ -344,3 +356,50 @@ async def test_eval_correction_requires_auth(client: AsyncClient):
     async with client as c:
         resp = await c.patch(f"/api/eval/queue/{'a' * 64}", json={"registration_no": "1"})
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_documents_passes_username_and_bookmarked(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.queries.list_documents",
+               new=AsyncMock(return_value=[])) as m_list, \
+         patch("cloud.dashboard.api.queries.count_documents",
+               new=AsyncMock(return_value=0)):
+        async with client as c:
+            resp = await c.get("/api/documents?bookmarked=true")
+    assert resp.status_code == 200
+    kwargs = m_list.await_args.kwargs
+    assert kwargs["username"] == "tester"
+    assert kwargs["bookmarked"] is True
+
+
+@pytest.mark.asyncio
+async def test_add_bookmark_returns_true(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.DocumentRepository") as m_repo, \
+         patch("cloud.dashboard.api.BookmarkRepository") as m_bm:
+        m_repo.return_value.get = AsyncMock(return_value=object())
+        m_bm.return_value.add = AsyncMock()
+        async with client as c:
+            resp = await c.post("/api/documents/doc-1/bookmark")
+    assert resp.status_code == 200
+    assert resp.json() == {"bookmarked": True}
+    m_bm.return_value.add.assert_awaited_once_with("tester", "doc-1")
+
+
+@pytest.mark.asyncio
+async def test_add_bookmark_404_when_document_missing(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.DocumentRepository") as m_repo:
+        m_repo.return_value.get = AsyncMock(return_value=None)
+        async with client as c:
+            resp = await c.post("/api/documents/missing/bookmark")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_remove_bookmark_returns_false(client: AsyncClient, as_user):
+    with patch("cloud.dashboard.api.BookmarkRepository") as m_bm:
+        m_bm.return_value.remove = AsyncMock()
+        async with client as c:
+            resp = await c.delete("/api/documents/doc-1/bookmark")
+    assert resp.status_code == 200
+    assert resp.json() == {"bookmarked": False}
+    m_bm.return_value.remove.assert_awaited_once_with("tester", "doc-1")

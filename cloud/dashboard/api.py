@@ -17,9 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import inspect as sa_inspect, text
 
 from cloud.dashboard import actions, audit, eval_queries, queries, sse
+from cloud.dashboard.bookmarks import BookmarkRepository
 from cloud.dashboard.session import (
     COOKIE_NAME,
     DEFAULT_MAX_AGE,
@@ -114,15 +115,17 @@ async def documents(
     status: str | None = None,
     match_status: str | None = None,
     search: str | None = None,
+    bookmarked: bool | None = None,
     offset: int = 0,
-    _user: str = Depends(require_session),
+    user: str = Depends(require_session),
 ) -> dict[str, Any]:
     filters = {"category": category, "status": status,
-               "match_status": match_status, "search": search}
+               "match_status": match_status, "search": search,
+               "bookmarked": bookmarked}
     async with session_scope() as session:
-        docs = await queries.list_documents(session, **filters,
+        docs = await queries.list_documents(session, username=user, **filters,
                                             limit=_PAGE_SIZE, offset=offset)
-        total = await queries.count_documents(session, **filters)
+        total = await queries.count_documents(session, username=user, **filters)
     return {"documents": docs, "total": total, "offset": offset, "limit": _PAGE_SIZE}
 
 
@@ -148,18 +151,44 @@ async def audit_view(
 
 
 @router.get("/documents/{document_id}")
-async def doc_detail(document_id: str, _user: str = Depends(require_session)) -> dict[str, Any]:
+async def doc_detail(document_id: str, user: str = Depends(require_session)) -> dict[str, Any]:
     async with session_scope() as session:
         doc = await DocumentRepository(session).get(document_id)
         if doc is None:
             raise HTTPException(status_code=404, detail="document not found")
         pages = await PageRepository(session).list_for_document(document_id)
+        bm = await session.execute(
+            text("SELECT EXISTS(SELECT 1 FROM document_bookmarks "
+                 "WHERE username = :u AND document_id = :d)"),
+            {"u": user, "d": document_id},
+        )
         doc_d = _to_dict(doc)
+        doc_d["bookmarked"] = bool(bm.scalar_one())
         pages_d = [_to_dict(p) for p in pages]
     ocr_done = sum(1 for p in pages if p.ocr_status == "done")
     structured_done = sum(1 for p in pages if p.structured_json is not None)
     return {"doc": doc_d, "pages": pages_d,
             "ocr_done": ocr_done, "structured_done": structured_done}
+
+
+@router.post("/documents/{document_id}/bookmark")
+async def add_bookmark(
+    document_id: str, user: str = Depends(require_session)
+) -> dict[str, bool]:
+    async with session_scope() as session:
+        if await DocumentRepository(session).get(document_id) is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        await BookmarkRepository(session).add(user, document_id)
+    return {"bookmarked": True}
+
+
+@router.delete("/documents/{document_id}/bookmark")
+async def remove_bookmark(
+    document_id: str, user: str = Depends(require_session)
+) -> dict[str, bool]:
+    async with session_scope() as session:
+        await BookmarkRepository(session).remove(user, document_id)
+    return {"bookmarked": False}
 
 
 @router.get("/documents/{document_id}/pages/{page_num}")
