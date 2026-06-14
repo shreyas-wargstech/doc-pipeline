@@ -4,8 +4,7 @@ import createCache from "@emotion/cache";
 import { CacheProvider } from "@emotion/react";
 import { useServerInsertedHTML } from "next/navigation";
 import { ThemeProvider, CssBaseline } from "@mui/material";
-import { lightTheme, darkTheme } from "@/lib/mui-theme";
-import { useThemeMode } from "./theme-mode";
+import { theme } from "@/lib/mui-theme";
 
 export function EmotionRegistry({ children }: { children: React.ReactNode }) {
   const [registry] = React.useState(() => {
@@ -44,10 +43,9 @@ export function EmotionRegistry({ children }: { children: React.ReactNode }) {
     );
   });
 
-  const { mode } = useThemeMode();
   return (
     <CacheProvider value={registry.cache}>
-      <ThemeProvider theme={mode === "dark" ? darkTheme : lightTheme}>
+      <ThemeProvider theme={theme}>
         <CssBaseline enableColorScheme={false} />
         {children}
       </ThemeProvider>

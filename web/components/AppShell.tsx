@@ -15,8 +15,6 @@ import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Typography from "@mui/material/Typography";
 import MenuIcon from "@mui/icons-material/Menu";
-import LightModeIcon from "@mui/icons-material/LightMode";
-import DarkModeIcon from "@mui/icons-material/DarkMode";
 import LogoutIcon from "@mui/icons-material/Logout";
 import AccountCircleIcon from "@mui/icons-material/AccountCircle";
 import DescriptionIcon from "@mui/icons-material/Description";
@@ -26,7 +24,6 @@ import TravelExploreIcon from "@mui/icons-material/TravelExplore";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { useThemeMode } from "@/app/theme-mode";
 import { useActionBarContent } from "@/app/action-bar";
 import { useLogout } from "@/hooks/useAuth";
 
@@ -43,7 +40,6 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { mode, toggle } = useThemeMode();
   const logout = useLogout();
   const actionBarContent = useActionBarContent();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -89,9 +85,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Breadcrumbs />
           </Box>
-          <IconButton color="inherit" onClick={toggle} aria-label="Toggle theme">
-            {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
-          </IconButton>
           <IconButton color="inherit" onClick={(e) => setUserMenuAnchor(e.currentTarget)} aria-label="Account menu">
             <AccountCircleIcon />
           </IconButton>

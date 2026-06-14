@@ -7,10 +7,6 @@ vi.mock("next/navigation", () => ({ usePathname }));
 
 vi.mock("@/hooks/useAuth", () => ({ useLogout: () => ({ mutate: vi.fn() }) }));
 
-vi.mock("@/app/theme-mode", () => ({
-  useThemeMode: () => ({ mode: "light", toggle: vi.fn() }),
-}));
-
 vi.mock("@/app/action-bar", () => ({
   useActionBarContent: () => null,
 }));
