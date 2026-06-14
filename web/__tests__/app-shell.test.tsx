@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AppShell } from "@/components/AppShell";
 
@@ -35,12 +36,12 @@ describe("AppShell", () => {
   });
 
   it("toggles the desktop sidebar collapsed state", async () => {
-    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
     usePathname.mockReturnValue("/");
     window.localStorage.clear();
     render(<AppShell><div>content</div></AppShell>);
     const toggle = screen.getByRole("button", { name: /collapse sidebar/i });
-    await userEvent.click(toggle);
+    await user.click(toggle);
     expect(window.localStorage.getItem("collapse:app-sidebar")).toBe("true");
   });
 });
