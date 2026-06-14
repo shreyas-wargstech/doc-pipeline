@@ -301,3 +301,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_document_id ON audit_log (document_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_username    ON audit_log (username);
 CREATE INDEX IF NOT EXISTS idx_audit_log_ts          ON audit_log (ts DESC);
+
+-- -----------------------------------------------------------------------------
+-- document_bookmarks: per-user private bookmarks. (username, document_id) is the
+-- natural key; the username always comes from the session, never a request body.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS document_bookmarks (
+    username     TEXT        NOT NULL REFERENCES dashboard_users(username) ON DELETE CASCADE,
+    document_id  TEXT        NOT NULL REFERENCES documents(document_id)    ON DELETE CASCADE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (username, document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bookmarks_username
+    ON document_bookmarks (username, created_at DESC);
