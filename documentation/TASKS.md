@@ -10,7 +10,7 @@
 
 ## P0 — FINISH TODAY (the active thread)
 
-- [ ] **Flush + full rerun on all 18 sample bundles** — PAUSED 2026-06-13 (OpenRouter credits exhausted; VLM-tier OCR + structure LLM hang/fail without them). **Resume sequence:**
+- [ ] **Flush + full run on 200-document directory** — PAUSED (OpenRouter credits exhausted). Scale-up from 18 → 200 docs; `LocalFolderSource` handles any directory size already. **Before starting:** (1) build Approach B persisted run history (server restart at hour 20 of a ~23h run = lost state), (2) top up OpenRouter credits (~300 VLM calls for identity pages). **Resume sequence:**
   1. Top up OpenRouter credits; confirm a live VLM test call OK.
   2. `make down-clean && make up && make init` (rebuilds all 4 datastores from `db/schema.sql` — authoritative, 8 tables incl. `document_bookmarks`/`eval_content_type`/index cols, so the `apply_*` scripts are NOT needed after a flush).
   3. `python -m scripts.load_reference_data` (92,389 rows).
@@ -71,7 +71,8 @@
 
 ## P2 — Pipeline folder runner follow-ups
 
-- [ ] **Persisted run history (Approach B)** — in-memory `RunRegistry` (Approach A) is ephemeral; run state is lost on server restart. Approach B = persist to Postgres (`pipeline_runs` / `pipeline_run_items` tables) so history survives restarts.
+- [ ] **Persisted run history (Approach B)** — **BLOCKER for 200-doc runs.** In-memory `RunRegistry` (Approach A) loses all state on server restart. A 200-doc run takes ~23 hours; a restart at hour 20 loses everything. Approach B = persist to Postgres (`pipeline_runs` / `pipeline_run_items` tables); skip-if-processed already works, but the run dashboard goes blank. Build before attempting large batches.
+- [ ] **RunTable virtualisation / summary view** — 200 docs × ~13 pages ≈ 2,600 SSE row-update events; the current `RunTable` becomes unusable at this scale. Needs either virtual scrolling or a summary-only mode (total counts + per-doc status, not per-page rows).
 - [ ] **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production runs (enumerate PDFs under an S3 prefix instead of a local folder). File: `cloud/pipeline_run/source.py`.
 - [ ] **Place `tests/fixtures/sample_bundle.pdf`** — the gated integration test in `tests/cloud/test_pipeline_run_integration.py` is skipped without this fixture; add a real sample PDF to unblock it.
 
