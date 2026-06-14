@@ -191,39 +191,50 @@ async def _graph_search(
 
 
 async def _vector_search(
+    session: AsyncSession,
     intent: QueryIntent,
     *,
     limit: int,
 ) -> list[RetrievalHit]:
-    """Tier 3: Qdrant semantic fallback."""
+    """Tier 3: pgvector semantic fallback over the ``document_pages`` table.
+
+    Cosine distance via the ``<=>`` operator (vector_cosine_ops); score = 1 -
+    distance. Runs in the caller's session -- same DB as the keyword tier.
+    """
     if not intent.raw:
         return []
 
     try:
+        from sqlalchemy import text as _text
+
+        from cloud.persist.pgvector_writer import vector_literal
         from sentence_transformers import SentenceTransformer
-        from shared.qdrant_client import get_qdrant
         from shared.config import get_settings as _gs
 
         s = _gs()
         model = SentenceTransformer(s.embedding_model)
-        vector = model.encode(intent.raw).tolist()
+        query_vec = vector_literal(model.encode(intent.raw).tolist())
 
-        client = get_qdrant()
-        results = await client.search(
-            collection_name=s.qdrant_collection,
-            query_vector=vector,
-            limit=limit,
+        result = await session.execute(
+            _text(
+                "SELECT document_id, page_type, "
+                "       1 - (embedding <=> CAST(:q AS vector)) AS score "
+                "FROM document_pages "
+                "ORDER BY embedding <=> CAST(:q AS vector) "
+                "LIMIT :limit"
+            ),
+            {"q": query_vec, "limit": limit},
         )
 
         hits: list[RetrievalHit] = []
-        for r in results:
+        for row in result.all():
             hits.append(
                 explain_vector_hit(
-                    document_id=r.payload.get("document_id", ""),
+                    document_id=row.document_id,
                     s3_key_pdf="",
                     document_type=None,
-                    score=r.score,
-                    page_type=r.payload.get("page_type", "unknown"),
+                    score=float(row.score),
+                    page_type=row.page_type or "unknown",
                 )
             )
         return hits
@@ -260,6 +271,6 @@ async def retrieve_documents(
     if len(hits) >= min_results:
         return hits[:limit]
 
-    vector_hits = await _vector_search(intent, limit=limit)
+    vector_hits = await _vector_search(session, intent, limit=limit)
     hits = _merge_hits(hits, vector_hits)
     return hits[:limit]

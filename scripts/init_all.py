@@ -1,7 +1,7 @@
 """Run all init scripts in order. Idempotent.
 
-Order: postgres (table check) → minio (bucket) → qdrant (collection) →
-neo4j (constraints) → sqs (elasticmq queue). All can be re-run safely.
+Order: postgres (table check) → minio (bucket) → pgvector (document_pages) →
+neo4j/neptune (constraints) → sqs (elasticmq queue). All can be re-run safely.
 
 Usage:
     python -m scripts.init_all
@@ -10,7 +10,7 @@ import asyncio
 import sys
 from collections.abc import Awaitable, Callable
 
-from scripts import init_minio, init_neo4j, init_postgres, init_qdrant, init_sqs
+from scripts import apply_pgvector, init_minio, init_neo4j, init_postgres, init_sqs
 from shared.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
@@ -23,7 +23,7 @@ async def main() -> int:
     steps: list[Step] = [
         ("postgres", init_postgres.main),
         ("minio", init_minio.main),
-        ("qdrant", init_qdrant.main),
+        ("pgvector", apply_pgvector._run),
         ("neo4j", init_neo4j.main),
         ("sqs", init_sqs.main),
     ]

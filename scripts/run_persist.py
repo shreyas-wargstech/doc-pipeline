@@ -1,9 +1,9 @@
 # scripts/run_persist.py
-"""Local Persist-stage runner — write one document to Qdrant + Neo4j.
+"""Local Persist-stage runner — write one document to pgvector + Neo4j/Neptune.
 
 Reads the document's Postgres state (Structure entities + Match results),
-embeds each text-bearing page into Qdrant, MERGEs the Neo4j graph, then marks
-documents.status='processed'. Idempotent: safe to re-run on the same id.
+embeds each identity page into the pgvector `document_pages` table, MERGEs the
+graph, then marks documents.status='processed'. Idempotent: safe to re-run.
 
 Run: `make persist DOC=<document_id>`
   (or `python -m scripts.run_persist --document-id <document_id>`).
