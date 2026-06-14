@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from cloud.app import app
 from cloud.dashboard.session import COOKIE_NAME, require_session
+from shared.exceptions import MatchError
 
 
 @pytest.fixture
@@ -285,4 +286,61 @@ async def test_eval_queue_returns_list_and_total(client: AsyncClient, as_user):
 async def test_eval_queue_requires_auth(client: AsyncClient):
     async with client as c:
         resp = await c.get("/api/eval/queue")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_eval_correction_updates_fields_and_rematches(client: AsyncClient, as_user):
+    doc_id = "a" * 64
+    updated_doc = AsyncMock()
+    repo = AsyncMock()
+    repo.update_fields = AsyncMock(return_value=None)
+    repo.get = AsyncMock(return_value=updated_doc)
+
+    match_result = AsyncMock()
+    match_result.match_status = "matched"
+    match_result.reference_data_id = 42
+    match_result.matched_on = "registration_no+name"
+    match_result.method = "exact"
+    match_result.score = None
+
+    with patch("cloud.dashboard.api.DocumentRepository", return_value=repo), \
+         patch("cloud.dashboard.api.match_document",
+               new=AsyncMock(return_value=match_result)), \
+         patch("cloud.dashboard.api._to_dict", return_value={"document_id": doc_id, "match_status": "matched"}):
+        async with client as c:
+            resp = await c.patch(
+                f"/api/eval/queue/{doc_id}",
+                json={"registration_no": "12345", "applicant_name_raw": "Jane Doe"},
+            )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["doc"]["match_status"] == "matched"
+    assert body["match_result"]["match_status"] == "matched"
+    assert body["match_result"]["reference_data_id"] == 42
+    repo.update_fields.assert_awaited_once_with(
+        doc_id, registration_no="12345", applicant_name_raw="Jane Doe"
+    )
+
+
+@pytest.mark.asyncio
+async def test_eval_correction_404_when_document_missing(client: AsyncClient, as_user):
+    doc_id = "b" * 64
+    repo = AsyncMock()
+    repo.update_fields = AsyncMock(side_effect=MatchError(f"document not found: {doc_id}"))
+
+    with patch("cloud.dashboard.api.DocumentRepository", return_value=repo), \
+         patch("cloud.dashboard.api.match_document",
+               new=AsyncMock(side_effect=MatchError(f"document not found: {doc_id}"))):
+        async with client as c:
+            resp = await c.patch(f"/api/eval/queue/{doc_id}", json={"registration_no": "1"})
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_eval_correction_requires_auth(client: AsyncClient):
+    async with client as c:
+        resp = await c.patch(f"/api/eval/queue/{'a' * 64}", json={"registration_no": "1"})
     assert resp.status_code == 401

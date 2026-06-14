@@ -10,6 +10,7 @@ come back as JSON {ok:false,message} with HTTP 200, matching DASH-1 toasts.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -33,8 +34,10 @@ from cloud.eval.content_type import (
     threshold_sweep,
 )
 from cloud.ingest.storage_db import DocumentRepository, PageRepository
+from cloud.match.service import match_document
 from shared.config import get_settings
 from shared.db import session_scope
+from shared.exceptions import MatchError
 from shared.logging import get_logger
 from shared.storage_s3 import get_s3_client
 
@@ -272,6 +275,47 @@ async def eval_queue(
         ],
         "total": total, "offset": offset, "limit": _PAGE_SIZE,
     }
+
+
+class EvalCorrectionBody(BaseModel):
+    registration_no: str | None = None
+    applicant_name_raw: str | None = None
+    dob: date | None = None
+    gender: str | None = None
+    application_no: int | None = None
+    document_reference_no: str | None = None
+
+
+@router.patch("/eval/queue/{document_id}")
+async def eval_correct(
+    document_id: str, body: EvalCorrectionBody, user: str = Depends(require_session)
+) -> dict[str, Any]:
+    patch = body.model_dump(exclude_unset=True)
+    try:
+        async with session_scope() as session:
+            repo = DocumentRepository(session)
+            await repo.update_fields(document_id, **patch)
+            result = await match_document(document_id, session=session)
+            doc = await repo.get(document_id)
+            doc_d = _to_dict(doc)
+        match_result_d = {
+            "match_status": result.match_status,
+            "reference_data_id": result.reference_data_id,
+            "method": result.method,
+            "score": result.score,
+            "candidate_registration_no": result.candidate_registration_no,
+            "matched_on": result.matched_on,
+        }
+        try:
+            await _audit(username=user, action="manual_correction", document_id=document_id,
+                         params={"patch": {k: str(v) for k, v in patch.items()},
+                                 "match_result": {k: str(v) for k, v in match_result_d.items()}},
+                         result="ok", detail=None)
+        except Exception:  # noqa: BLE001 — audit is best-effort, never blocks the response
+            log.exception("api_eval_correct_audit_failed", document_id=document_id)
+        return {"doc": doc_d, "match_result": match_result_d}
+    except MatchError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # --- eval lab (content-type calibration) -----------------------------------
