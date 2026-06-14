@@ -1,22 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { lightTheme, darkTheme } from "./mui-theme";
+import { theme } from "./mui-theme";
 
 describe("mui-theme", () => {
-  it("builds a light theme matching the CSS token palette", () => {
-    expect(lightTheme.palette.mode).toBe("light");
-    expect(lightTheme.palette.primary.main).toBe("rgb(30 64 175)");
-    expect(lightTheme.palette.background.default).toBe("rgb(248 250 252)");
-    expect(lightTheme.palette.background.paper).toBe("rgb(255 255 255)");
-    expect(lightTheme.palette.error.main).toBe("rgb(220 38 38)");
-    expect(lightTheme.palette.warning.main).toBe("rgb(146 64 10)");
-    expect(lightTheme.palette.success.main).toBe("rgb(15 96 48)");
-    expect(lightTheme.palette.info.main).toBe("rgb(67 56 202)");
+  it("is a single warm light theme", () => {
+    expect(theme.palette.mode).toBe("light");
+    expect(theme.palette.primary.main).toBe("rgb(13 148 136)");
+    expect(theme.palette.background.default).toBe("rgb(251 250 247)");
+    expect(theme.palette.background.paper).toBe("rgb(255 255 255)");
+    expect(theme.palette.warning.main).toBe("rgb(154 106 26)");
+    expect(theme.palette.error.main).toBe("rgb(180 35 24)");
   });
 
-  it("builds a dark theme matching the CSS token palette", () => {
-    expect(darkTheme.palette.mode).toBe("dark");
-    expect(darkTheme.palette.primary.main).toBe("rgb(59 130 246)");
-    expect(darkTheme.palette.background.default).toBe("rgb(11 18 32)");
-    expect(darkTheme.palette.background.paper).toBe("rgb(19 28 46)");
+  it("uses editorial typography and soft radius", () => {
+    expect(theme.shape.borderRadius).toBe(10);
+    expect(theme.typography.button.textTransform).toBe("none");
+    expect(String(theme.typography.h1.fontFamily)).toContain("--font-display");
+    expect(String(theme.typography.body1.fontFamily)).toContain("--font-sans");
+  });
+
+  it("applies warm shadows and component overrides", () => {
+    expect(theme.shadows[1]).toContain("rgba(70,55,30");
+    expect(theme.components?.MuiButton?.styleOverrides).toBeDefined();
+    expect(theme.components?.MuiAppBar?.defaultProps?.elevation).toBe(0);
   });
 });

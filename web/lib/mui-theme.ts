@@ -1,62 +1,112 @@
 import { createTheme, type Theme } from "@mui/material/styles";
+import { rgb, shadows as warm, radii } from "./tokens";
 
-const rgb = (r: number, g: number, b: number) => `rgb(${r} ${g} ${b})`;
+const DISPLAY = "var(--font-display), Georgia, serif";
+const SANS = "var(--font-sans), system-ui, sans-serif";
 
-// Mirrors :root in web/app/globals.css
-const lightTokens = {
-  background: rgb(248, 250, 252),
-  foreground: rgb(30, 58, 138),
-  card: rgb(255, 255, 255),
-  primary: rgb(30, 64, 175),
-  onPrimary: rgb(255, 255, 255),
-  secondary: rgb(59, 130, 246),
-  mutedFg: rgb(71, 85, 105),
-  border: rgb(219, 234, 254),
-  destructive: rgb(220, 38, 38),
-  ok: rgb(15, 96, 48),
-  warn: rgb(146, 64, 10),
-  danger: rgb(185, 28, 28),
-  info: rgb(67, 56, 202),
-};
+// MUI requires a 25-length shadow array. Map our warm scale onto the
+// commonly-used low elevations; reuse `lg` for the rest.
+const shadowScale = Array.from({ length: 25 }, (_, i) => {
+  if (i === 0) return "none";
+  if (i === 1) return warm.sm;
+  if (i === 2) return warm.md;
+  if (i <= 8) return warm.lg;
+  return warm.xl;
+}) as Theme["shadows"];
 
-// Mirrors .dark in web/app/globals.css
-const darkTokens = {
-  background: rgb(11, 18, 32),
-  foreground: rgb(226, 232, 240),
-  card: rgb(19, 28, 46),
-  primary: rgb(59, 130, 246),
-  onPrimary: rgb(11, 18, 32),
-  secondary: rgb(96, 165, 250),
-  mutedFg: rgb(148, 163, 184),
-  border: rgb(30, 42, 68),
-  destructive: rgb(248, 113, 113),
-  ok: rgb(74, 222, 128),
-  warn: rgb(251, 191, 36),
-  danger: rgb(248, 113, 113),
-  info: rgb(165, 180, 252),
-};
-
-function buildTheme(mode: "light" | "dark"): Theme {
-  const t = mode === "light" ? lightTokens : darkTokens;
-  return createTheme({
-    palette: {
-      mode,
-      primary: { main: t.primary, contrastText: t.onPrimary },
-      secondary: { main: t.secondary },
-      error: { main: t.destructive },
-      warning: { main: t.warn },
-      success: { main: t.ok },
-      info: { main: t.info },
-      background: { default: t.background, paper: t.card },
-      text: { primary: t.foreground, secondary: t.mutedFg },
-      divider: t.border,
+export const theme: Theme = createTheme({
+  palette: {
+    mode: "light",
+    primary: { main: rgb("primary"), dark: rgb("primary-hover"), contrastText: rgb("on-primary") },
+    secondary: { main: rgb("primary-hover") },
+    error: { main: rgb("danger") },
+    warning: { main: rgb("warn") },
+    success: { main: rgb("success") },
+    info: { main: rgb("info") },
+    background: { default: rgb("background"), paper: rgb("surface") },
+    text: { primary: rgb("foreground"), secondary: rgb("muted-fg") },
+    divider: rgb("border"),
+  },
+  shape: { borderRadius: radii.base },
+  shadows: shadowScale,
+  typography: {
+    fontFamily: SANS,
+    h1: { fontFamily: DISPLAY, fontWeight: 600, fontSize: "1.75rem", letterSpacing: "-0.3px" },
+    h2: { fontFamily: DISPLAY, fontWeight: 600, fontSize: "1.3125rem" },
+    h3: { fontFamily: SANS, fontWeight: 600, fontSize: "0.9375rem" },
+    body1: { fontFamily: SANS, fontSize: "0.875rem" },
+    body2: { fontFamily: SANS, fontSize: "0.8125rem" },
+    button: { fontFamily: SANS, fontWeight: 600, fontSize: "0.875rem", textTransform: "none" },
+    overline: { fontFamily: "var(--font-mono), ui-monospace, monospace", fontWeight: 600, fontSize: "0.65625rem", letterSpacing: "1px" },
+  },
+  components: {
+    MuiButton: {
+      defaultProps: { disableElevation: true },
+      styleOverrides: {
+        root: { borderRadius: radii.base, textTransform: "none", fontWeight: 600 },
+        containedPrimary: {
+          boxShadow: warm.md,
+          "&:hover": { backgroundColor: rgb("primary-hover"), boxShadow: warm.lg },
+        },
+        outlined: {
+          borderColor: rgb("border-strong"),
+          "&:hover": { borderColor: rgb("primary"), backgroundColor: rgb("primary-tint") },
+        },
+      },
     },
-    typography: {
-      fontFamily: "var(--font-sans), system-ui, sans-serif",
+    MuiPaper: {
+      styleOverrides: {
+        root: { backgroundImage: "none" },
+        outlined: { borderColor: rgb("border") },
+      },
     },
-    shape: { borderRadius: 8 },
-  });
-}
-
-export const lightTheme = buildTheme("light");
-export const darkTheme = buildTheme("dark");
+    MuiAppBar: {
+      defaultProps: { elevation: 0, color: "default" },
+      styleOverrides: {
+        root: { backgroundColor: rgb("surface"), borderBottom: `1px solid ${rgb("border")}` },
+      },
+    },
+    MuiDrawer: {
+      styleOverrides: {
+        paper: { backgroundColor: rgb("surface-alt"), borderRight: `1px solid ${rgb("border")}` },
+      },
+    },
+    MuiListItemButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 8,
+          "&.Mui-selected": {
+            backgroundColor: rgb("primary-tint"),
+            color: rgb("primary-hover"),
+            fontWeight: 600,
+            "&:hover": { backgroundColor: rgb("primary-tint") },
+            "& .MuiListItemIcon-root": { color: rgb("primary-hover") },
+          },
+        },
+      },
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: { borderRadius: radii.pill, fontWeight: 600 },
+      },
+    },
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: {
+          borderRadius: radii.base,
+          backgroundColor: rgb("surface"),
+          "& .MuiOutlinedInput-notchedOutline": { borderColor: rgb("border-strong") },
+          "&.Mui-focused .MuiOutlinedInput-notchedOutline": { borderColor: rgb("primary"), borderWidth: 1 },
+          "&.Mui-focused": { boxShadow: "0 0 0 4px rgba(13,148,136,.14)" },
+        },
+      },
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        root: { borderColor: rgb("border") },
+        head: { fontWeight: 600, color: rgb("muted-fg") },
+      },
+    },
+    MuiDivider: { styleOverrides: { root: { borderColor: rgb("border") } } },
+  },
+});
