@@ -86,6 +86,65 @@ async def test_list_and_count_documents_execute_with_and_without_filters():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_list_and_count_review_queue_filters_correctly():
+    rq_ids = {
+        "a": "test_sha_dashboard_db_int_rq_aaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "b": "test_sha_dashboard_db_int_rq_bbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "c": "test_sha_dashboard_db_int_rq_cccccccccccccccccccccccccccc",
+    }
+    rows_spec = [
+        # (key, status, match_status, included?)
+        ("a", "manual_review", None, True),
+        ("b", "processed", "manual_review", True),
+        ("c", "processed", "matched", False),
+    ]
+    try:
+        async with session_scope() as session:
+            for key, status, match_status, _ in rows_spec:
+                doc_id = rq_ids[key]
+                await session.execute(
+                    text("DELETE FROM documents WHERE document_id = :id"),
+                    {"id": doc_id},
+                )
+                await session.execute(
+                    text(
+                        "INSERT INTO documents (document_id, document_category, document_type, "
+                        "original_filename, s3_key_pdf, page_count, status, match_status) "
+                        "VALUES (:id, 'practitioner', 'new_registration', 'int_test_rq.pdf', "
+                        ":pdf, 1, :status, :match_status)"
+                    ),
+                    {
+                        "id": doc_id,
+                        "pdf": f"documents/{doc_id}/original.pdf",
+                        "status": status,
+                        "match_status": match_status,
+                    },
+                )
+            await session.commit()
+
+        async with session_scope() as session:
+            rows = await queries.list_review_queue(session, limit=1000)
+            count = await queries.count_review_queue(session)
+
+        returned_ids = {r["document_id"] for r in rows}
+        expected_included = {rq_ids[k] for k, _, _, inc in rows_spec if inc}
+        expected_excluded = {rq_ids[k] for k, _, _, inc in rows_spec if not inc}
+
+        assert expected_included <= returned_ids
+        assert returned_ids.isdisjoint(expected_excluded)
+        assert count >= len(expected_included)
+    finally:
+        async with session_scope() as session:
+            for doc_id in rq_ids.values():
+                await session.execute(
+                    text("DELETE FROM documents WHERE document_id = :id"),
+                    {"id": doc_id},
+                )
+            await session.commit()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_status_and_match_counts_execute():
     async with session_scope() as session:
         sc = await queries.status_counts(session)
