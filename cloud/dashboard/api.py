@@ -256,6 +256,24 @@ async def action_reclassify(
         return {"ok": False, "message": f"Re-classify failed: {exc}"}
 
 
+# --- eval review queue ------------------------------------------------------
+
+@router.get("/eval/queue")
+async def eval_queue(
+    offset: int = 0, _user: str = Depends(require_session)
+) -> dict[str, Any]:
+    async with session_scope() as session:
+        rows = await queries.list_review_queue(session, limit=_PAGE_SIZE, offset=offset)
+        total = await queries.count_review_queue(session)
+    return {
+        "documents": [
+            {**r, "updated_at": str(r["updated_at"]), "dob": str(r["dob"]) if r["dob"] else None}
+            for r in rows
+        ],
+        "total": total, "offset": offset, "limit": _PAGE_SIZE,
+    }
+
+
 # --- eval lab (content-type calibration) -----------------------------------
 
 class EnrolBody(BaseModel):

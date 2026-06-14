@@ -247,3 +247,30 @@ async def test_reclassify_action_ok(client: AsyncClient, as_user):
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
     assert "practitioner" in resp.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_eval_queue_returns_list_and_total(client: AsyncClient, as_user):
+    rows = [{"document_id": "a" * 64, "status": "manual_review", "match_status": None,
+             "applicant_name_raw": "Jane Doe", "registration_no": None,
+             "application_no": None, "document_reference_no": None,
+             "dob": None, "gender": None, "document_type": "registration",
+             "updated_at": "2026-06-14T00:00:00Z"}]
+    with patch("cloud.dashboard.api.queries.list_review_queue",
+               new=AsyncMock(return_value=rows)), \
+         patch("cloud.dashboard.api.queries.count_review_queue",
+               new=AsyncMock(return_value=1)):
+        async with client as c:
+            resp = await c.get("/api/eval/queue")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["documents"] == rows
+    assert body["offset"] == 0 and body["limit"] == 50
+
+
+@pytest.mark.asyncio
+async def test_eval_queue_requires_auth(client: AsyncClient):
+    async with client as c:
+        resp = await c.get("/api/eval/queue")
+    assert resp.status_code == 401
