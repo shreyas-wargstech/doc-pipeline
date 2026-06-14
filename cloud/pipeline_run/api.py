@@ -8,7 +8,6 @@ POST /pipelines/run/{id}/cancel-> best-effort cancel (stops after current doc)
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -17,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from cloud.dashboard.session import require_session
+from cloud.dashboard.sse import format_sse, heartbeat
 from cloud.pipeline_run.registry import registry
 from cloud.pipeline_run.runner import start_run
 from shared.exceptions import PipelineError
@@ -72,18 +72,22 @@ async def run_events(run_id: str, _user: str = Depends(require_session)) -> Stre
     async def gen() -> AsyncIterator[str]:
         q = registry.subscribe(run_id)
         # Replay current snapshot so a late subscriber is immediately consistent.
-        yield f"data: {json.dumps({'type': 'summary', **run.to_dict()})}\n\n"
+        yield format_sse({"type": "summary", **run.to_dict()})
         try:
             while True:
                 try:
                     evt = await asyncio.wait_for(q.get(), timeout=_HEARTBEAT_TIMEOUT)
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
+                    yield heartbeat()
                     continue
-                yield f"data: {json.dumps(evt)}\n\n"
+                yield format_sse(evt)
                 if evt.get("type") == "done":
                     break
         finally:
             registry.unsubscribe(run_id, q)
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
