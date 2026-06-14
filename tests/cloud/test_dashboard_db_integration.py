@@ -163,3 +163,40 @@ async def test_list_audit_executes_with_and_without_filters():
         assert await audit.list_audit(
             session, username="nobody", document_id=DOC_ID, action="ingest"
         ) == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_bookmarked_flag_is_per_user():
+    """alice bookmarks the seeded doc; bob does not. Each sees their own flag."""
+    async with session_scope() as session:
+        for u in ("bm_alice", "bm_bob"):
+            await session.execute(
+                text("INSERT INTO dashboard_users (username, password_hash) "
+                     "VALUES (:u, 'x') ON CONFLICT DO NOTHING"),
+                {"u": u},
+            )
+        await session.execute(
+            text("INSERT INTO document_bookmarks (username, document_id) "
+                 "VALUES ('bm_alice', :d) ON CONFLICT DO NOTHING"),
+            {"d": DOC_ID},
+        )
+        await session.commit()
+
+        alice = await queries.list_documents(session, username="bm_alice")
+        bob = await queries.list_documents(session, username="bm_bob")
+        a_row = next(r for r in alice if r["document_id"] == DOC_ID)
+        b_row = next(r for r in bob if r["document_id"] == DOC_ID)
+        assert a_row["bookmarked"] is True
+        assert b_row["bookmarked"] is False
+
+        only = await queries.list_documents(session, username="bm_alice", bookmarked=True)
+        assert any(r["document_id"] == DOC_ID for r in only)
+        none_for_bob = await queries.list_documents(session, username="bm_bob", bookmarked=True)
+        assert all(r["document_id"] != DOC_ID for r in none_for_bob)
+
+    async with session_scope() as session:
+        await session.execute(
+            text("DELETE FROM dashboard_users WHERE username IN ('bm_alice', 'bm_bob')")
+        )
+        await session.commit()
