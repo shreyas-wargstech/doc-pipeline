@@ -76,9 +76,11 @@ docs/     INTEGRATION.md
 - Retrieval: `owner × page_type` over Postgres (`cloud/retrieval/service.py`, `GET /retrieve`); owner filter requires `documents.match_status='matched'` (verified owners only). By-person scope = practitioner bundles only.
 - SQS = one message per page; enqueue before final DB write; FIFO dedup key `<document_id>:<page_num>`.
 
-## Current state (as of 2026-06-09)
+## Current state (as of 2026-06-14)
 
-Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), all merged to main; FastAPI `cloud/app.py` + Next.js `web/` SPA dashboard. **Validated on a real 13-page bundle 2026-06-09** (all 4 datastores clean, 13/13 pages through the `vlm` tier). DASH-3 **content-type eval lab built** on `feat/content-type-eval-lab` (not yet merged). Backend **250 unit green** (integration deselected, need Docker); web **28 green** + tsc/build clean. `main` is local-only, ahead of origin (not pushed, user's choice).
+Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist), all merged to main; FastAPI `cloud/app.py` + Next.js `web/` SPA dashboard. **Validated on a real 13-page bundle 2026-06-09** (all 4 datastores clean, 13/13 pages through the `vlm` tier). DASH-3 **content-type eval lab built** on `feat/content-type-eval-lab` (not yet merged). Backend **407 unit green** (1 pre-existing unrelated env-dependent failure `test_config_index.py::test_index_defaults`; integration deselected, need Docker); web **64+ green** + tsc/build clean. `main` is local-only, ahead of origin (not pushed, user's choice).
+
+**Eval review workflow (UX roadmap step 2)** built on `feat/eval-review-workflow` (2026-06-14, not yet merged): `/eval` tabbed page (Review queue + Content-type lab), `/eval/[id]` correction workspace — `GET/PATCH /api/eval/queue[/{id}]`, re-runs `match_document()` inline, audits `manual_correction`. Pending: final code review + merge.
 
 > Per-stage durable detail (gotchas, signatures, txn models) lives in **`session_log.md`** (`Key X facts` were migrated there) and the **code**. This file keeps only cross-cutting facts + active threads. Treat `make test` as ground truth.
 
