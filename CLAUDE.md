@@ -9,12 +9,12 @@
 3. Treat `make test` as ground truth, NOT the docs. Docs lag the repo; when they disagree, the code + tests win.
 4. Confirm scope (stage, input/output contract) before writing code. Push back on unstated assumptions.
 
-**At the END of EVERY task (not just session end): update documentation.** After finishing any task — a feature, a fix, a merge, a doc — update the relevant docs before reporting done:
+**At the END of EACH session (wrap-up signal or major context switch): update documentation.** Before wrapping, update the relevant docs:
 - `documentation/session_log.md` — append an entry (append only, never delete history; cap ~15 lines).
 - `documentation/error_fixes.md` — add a FIX entry if bugs were fixed (symptom / root cause / fix / files / rule).
 - `documentation/TASKS.md` — check off completed items, add any new open work surfaced.
 - `CLAUDE.md` "Current state" / "Active threads" — reflect what changed.
-Then commit the doc update. Do this per-task, not batched at session end.
+Then commit the doc update.
 
 ## How to talk to me
 
