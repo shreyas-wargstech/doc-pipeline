@@ -1,34 +1,5 @@
 # Session Log — Document Intelligence Pipeline
 
-## 2026-06-14 — Evaluation review workflow (UX roadmap step 2) — DONE
-- Branch `feat/eval-review-workflow`, subagent-driven-development, all 10 tasks complete.
-- Backend: `GET /api/eval/queue` + `PATCH /api/eval/queue/{document_id}` (`cloud/dashboard/api.py`,
-  `cloud/dashboard/queries.py`) — review queue = `status='manual_review' OR match_status='manual_review'`
-  (practitioner only); correction patches the 6 whitelisted identity fields, re-runs `match_document()`
-  inline, writes `manual_correction` audit row (best-effort, matches existing pattern).
-- Frontend: `/eval` tabbed (Review queue + Content-type lab, lab preserved verbatim),
-  `EvalQueueTable`, `EvalCorrectionForm`, `/eval/[id]` detail/correction page (defaults to
-  `application_form` page). New `useEvalQueue`/`useCorrectDocument` hooks, `apiPatch` helper,
-  added `useToastSafe()` to `app/providers.tsx` (non-throwing variant for standalone-rendered components).
-- Verification: backend 407/408 unit green (1 pre-existing unrelated failure,
-  `test_config_index.py::test_index_defaults`, env-dependent); frontend 64/66 green
-  (1 "error" was a worker-kill artifact from an overlong full-suite run, not a real failure);
-  `tsc --noEmit` clean; `next build` 12/12 static pages clean.
-- Spec: `docs/superpowers/specs/2026-06-14-eval-review-workflow-design.md`.
-  Plan: `docs/superpowers/plans/2026-06-14-eval-review-workflow.md`.
-- **Next step:** final code review + finishing-a-development-branch (merge to `main`).
-
-## 2026-06-13 — Plan B: Document Workspace (page rail, viewer revamp, action-bar, MUI list) — DONE
-- Stage worked on: web (Next.js/MUI dashboard), builds on Plan A's MUI shell (merged `58795cb`).
-- Done: all 4 tasks implemented/reviewed/merged directly to `main` via subagent-driven-development.
-  - T1 (`f2b9bbd`): `PageRail.tsx` + shared `documents/[id]/layout.tsx` (persistent page rail w/ thumbnails, OCR status dots, active-page highlight).
-  - T2 (`a0c7970`): page-viewer revamp — MUI tabs (Summary/Structured/Raw), prev/next nav + keyboard arrows, copy-link, image prefetch.
-  - T3 (`63c7675`): overview page wires `ActionButtons` into action bar via `useSetActionBar`; deleted superseded `PageGrid.tsx`.
-  - T4 (`e523551`): `KpiCard`/`Filters`/`DocumentsTable`/`(dash)/page.tsx` converted to MUI (Card, native Select, Table, TablePagination).
-- Rule discovered: in this worktree, React 19 `use(params)` does NOT resolve synchronously under jsdom/RTL for a plain `Promise.resolve()` — pages needing `params` in tests must resolve via `useEffect`/`useState` (Skeleton fallback) instead, with `findBy*`/`waitFor` in tests. Used consistently across T2/T3.
-- `npx tsc --noEmit` clean, `npm run build` succeeds (12 routes). Minor non-blocking follow-ups noted by reviewers (TablePagination rows-per-page selector is a no-op single-option dropdown; Filters `Select native` + `labelId` redundancy) — not addressed, low priority polish.
-- Next step: none queued — Plan B complete. finishing-a-development-branch not needed (work committed directly to `main`, no feature branch).
-
 ## 2026-05-16 — Ingest v1 built, architecture revised mid-session
 - Stage worked on: ingest → architecture redesign (preprocess + persist scope expanded)
 - Done: Built ingest v1 (sha256 stream-hash, S3 `put_if_absent`, Postgres idempotent upsert via SQLAlchemy 2.0 async, structured logging, stage-specific exceptions). User then redesigned: NAS handles preprocessing + upload, S3 event drives cloud pipeline. Proposed 3-table Postgres schema (`documents` + `pages` + `reference_data`) and manifest.json contract.
@@ -688,6 +659,35 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Resume:** top up OpenRouter credits, check bl9rhl00h/bmwl4er4c task status, then run sweeper + stage-workers (structure/match/persist) once OCR drains.
 
 
+
+## 2026-06-13 — Plan B: Document Workspace (page rail, viewer revamp, action-bar, MUI list) — DONE
+- Stage worked on: web (Next.js/MUI dashboard), builds on Plan A's MUI shell (merged `58795cb`).
+- Done: all 4 tasks implemented/reviewed/merged directly to `main` via subagent-driven-development.
+  - T1 (`f2b9bbd`): `PageRail.tsx` + shared `documents/[id]/layout.tsx` (persistent page rail w/ thumbnails, OCR status dots, active-page highlight).
+  - T2 (`a0c7970`): page-viewer revamp — MUI tabs (Summary/Structured/Raw), prev/next nav + keyboard arrows, copy-link, image prefetch.
+  - T3 (`63c7675`): overview page wires `ActionButtons` into action bar via `useSetActionBar`; deleted superseded `PageGrid.tsx`.
+  - T4 (`e523551`): `KpiCard`/`Filters`/`DocumentsTable`/`(dash)/page.tsx` converted to MUI (Card, native Select, Table, TablePagination).
+- Rule discovered: in this worktree, React 19 `use(params)` does NOT resolve synchronously under jsdom/RTL for a plain `Promise.resolve()` — pages needing `params` in tests must resolve via `useEffect`/`useState` (Skeleton fallback) instead, with `findBy*`/`waitFor` in tests. Used consistently across T2/T3.
+- `npx tsc --noEmit` clean, `npm run build` succeeds (12 routes). Minor non-blocking follow-ups noted by reviewers (TablePagination rows-per-page selector is a no-op single-option dropdown; Filters `Select native` + `labelId` redundancy) — not addressed, low priority polish.
+- Next step: none queued — Plan B complete. finishing-a-development-branch not needed (work committed directly to `main`, no feature branch).
+
+## 2026-06-14 — Evaluation review workflow (UX roadmap step 2) — DONE
+- Branch `feat/eval-review-workflow`, subagent-driven-development, all 10 tasks complete.
+- Backend: `GET /api/eval/queue` + `PATCH /api/eval/queue/{document_id}` (`cloud/dashboard/api.py`,
+  `cloud/dashboard/queries.py`) — review queue = `status='manual_review' OR match_status='manual_review'`
+  (practitioner only); correction patches the 6 whitelisted identity fields, re-runs `match_document()`
+  inline, writes `manual_correction` audit row (best-effort, matches existing pattern).
+- Frontend: `/eval` tabbed (Review queue + Content-type lab, lab preserved verbatim),
+  `EvalQueueTable`, `EvalCorrectionForm`, `/eval/[id]` detail/correction page (defaults to
+  `application_form` page). New `useEvalQueue`/`useCorrectDocument` hooks, `apiPatch` helper,
+  added `useToastSafe()` to `app/providers.tsx` (non-throwing variant for standalone-rendered components).
+- Verification: backend 407/408 unit green (1 pre-existing unrelated failure,
+  `test_config_index.py::test_index_defaults`, env-dependent); frontend 64/66 green
+  (1 "error" was a worker-kill artifact from an overlong full-suite run, not a real failure);
+  `tsc --noEmit` clean; `next build` 12/12 static pages clean.
+- Spec: `docs/superpowers/specs/2026-06-14-eval-review-workflow-design.md`.
+  Plan: `docs/superpowers/plans/2026-06-14-eval-review-workflow.md`.
+- **Next step:** final code review + finishing-a-development-branch (merge to `main`).
 
 ## 2026-06-14 (continued) — Frontend foundation redesign (warm-editorial), merged to main
 
