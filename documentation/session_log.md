@@ -716,3 +716,14 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
   `main` still local-only (not pushed, per prior choice).
 - **Next (UX roadmap):** feature-page redesigns on the new foundation —
   document viewer first, then evaluation/retrieval/pipelines/observability/admin.
+
+## 2026-06-14 (continued) — Document viewer redesign: brainstorm + plan (no code yet)
+- Stage: web UX roadmap step — first feature-page redesign on the warm-editorial foundation.
+- Resumed from SESSION_HANDOFF.md (account switch mid-brainstorm). Brainstormed via superpowers + visual companion.
+- Decisions: direction **B (refined workspace split)**; scope = all 3 surfaces (overview + rail + page viewer); depth = restyle + rich UX.
+  - Rail → **flat** icon+title list (no sections), minimizes to icon-only strip.
+  - Page data panel (Summary/Structured/Raw) minimizes to hidden; **main app sidebar** also collapsible (icon-rail). All collapse state localStorage-persisted via new `useCollapsible(key,default)` hook.
+  - Image **zoom/pan** via `react-zoom-pan-pinch` (approved). **bbox overlays excluded** — no bbox data (VLM writes (0,0,0,0)).
+  - Bookmarks: user wants **server-side per-user** → split into its OWN spec (Spec 2, not yet brainstormed). Viewer overview only reserves a disabled bookmark-star slot.
+- Spec: `docs/superpowers/specs/2026-06-14-document-viewer-redesign-design.md` (committed). Plan: `docs/superpowers/plans/2026-06-14-document-viewer-redesign.md` (committed, 8 tasks, TDD, written for a Sonnet-4.6 executor).
+- **Next step:** execute the plan (subagent-driven or inline) — user switching to Sonnet 4.6 medium for implementation. After: brainstorm Spec 2 (bookmarks).
