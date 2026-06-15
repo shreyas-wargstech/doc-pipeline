@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from cloud.dashboard import admin_api as admin_dashboard_api
 from cloud.dashboard import api as dashboard_api
 from cloud.ingest.service import handle_manifest
 from cloud.pipeline_run import api as pipeline_run_api
@@ -64,6 +65,7 @@ app = FastAPI(
 # web/ (one origin via Next rewrites). The legacy HTMX dashboard + HTTP Basic
 # auth were removed in the Next.js cutover; FastAPI serves /api only.
 app.include_router(dashboard_api.router, prefix="/api")
+app.include_router(admin_dashboard_api.router, prefix="/api")
 app.include_router(pipeline_run_api.router, prefix="/api")
 app.include_router(retrieval_api.router, prefix="/api")
 
