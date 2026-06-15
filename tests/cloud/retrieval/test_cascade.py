@@ -56,8 +56,7 @@ async def test_dedup_across_tiers(session, intent, monkeypatch):
     from cloud.retrieval.explainer import RetrievalHit
     hit = RetrievalHit(document_id="doc1", s3_key_pdf="x", document_type=None, score=0.9, tier=1, why_matched="kw")
     with patch("cloud.retrieval.service._keyword_search", return_value=[hit]), \
-         patch("cloud.retrieval.service._graph_search", return_value=[hit]), \
-         patch("cloud.retrieval.service._vector_search", return_value=[hit]):
+         patch("cloud.retrieval.service._graph_search", return_value=[hit]):
         result = await retrieve_documents(session, intent)
     doc_ids = [h.document_id for h in result]
     assert doc_ids.count("doc1") == 1

@@ -22,25 +22,17 @@ class Settings(BaseSettings):
     s3_bucket: str = Field(..., alias="S3_BUCKET")
     s3_region: str = Field("us-east-1", alias="S3_REGION")
 
-    # Vector store: pgvector in `document_pages` (same DATABASE_URL).
-    # qdrant_url/qdrant_collection are retained (optional) only for backwards
-    # compat with old .env files; the code no longer reads them.
-    qdrant_url: str = Field("", alias="QDRANT_URL")
+    # Qdrant
+    qdrant_url: str = Field(..., alias="QDRANT_URL")
     qdrant_collection: str = Field("document_pages", alias="QDRANT_COLLECTION")
     embedding_model: str = Field(
         "paraphrase-multilingual-MiniLM-L12-v2", alias="EMBEDDING_MODEL"
     )
 
-    # Graph store: Neo4j locally / Amazon Neptune on AWS (openCypher over Bolt).
-    # The neo4j driver connects to both; on Neptune the URI is the cluster
-    # endpoint (neo4j+s://<endpoint>:8182). With IAM auth disabled (in-VPC dev),
-    # user/password are unused but kept for the driver's auth tuple.
+    # Neo4j
     neo4j_uri: str = Field(..., alias="NEO4J_URI")
-    neo4j_user: str = Field("neo4j", alias="NEO4J_USER")
-    neo4j_password: str = Field("", alias="NEO4J_PASSWORD")
-    # "neo4j" (supports CREATE CONSTRAINT/INDEX DDL) | "neptune" (auto-indexed,
-    # rejects schema DDL -> ensure_constraints() becomes a no-op).
-    graph_backend: str = Field("neo4j", alias="GRAPH_BACKEND")
+    neo4j_user: str = Field(..., alias="NEO4J_USER")
+    neo4j_password: str = Field(..., alias="NEO4J_PASSWORD")
 
     # OCR
     ocr_confidence_threshold: int = Field(70, alias="OCR_CONFIDENCE_THRESHOLD")

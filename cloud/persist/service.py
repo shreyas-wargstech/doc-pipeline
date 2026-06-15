@@ -11,15 +11,17 @@ from typing import Any
 
 import structlog
 from neo4j import AsyncSession as Neo4jSession
+from qdrant_client import AsyncQdrantClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cloud.ingest.storage_db import DocumentRepository, PageRepository
 from cloud.persist.embeddings import embed as default_embed
 from cloud.persist.graph import GraphDoc, GraphMention, GraphPage, write_document_graph
-from cloud.persist.pgvector_writer import PageVector, upsert_page_vectors
+from cloud.persist.qdrant_writer import PagePoint, upsert_page_points
 from cloud.persist.summary import build_page_summary
 from shared.exceptions import PersistError
 from shared.neo4j_client import session_scope as neo4j_session_scope
+from shared.qdrant_client import get_qdrant
 
 log = structlog.get_logger()
 
@@ -64,16 +66,16 @@ async def persist_document(
     document_id: str,
     *,
     session: AsyncSession,
+    qdrant: AsyncQdrantClient | None = None,
     neo4j_session: Neo4jSession | None = None,
     embedder: Any | None = None,
 ) -> None:
     """Run the Persist stage on one document. Idempotent on document_id.
 
-    The Postgres read, the page vectors (pgvector ``document_pages``), and the
-    status write all run inside the caller's ``session_scope`` -- one
-    transaction, no cross-store consistency gap. Neo4j/Neptune cannot share
-    that transaction; it is independently idempotent (MERGE), and the status
-    flip is the completion signal (re-run redoes both harmlessly).
+    The Postgres read + status write run inside the caller's ``session_scope``.
+    Qdrant and Neo4j cannot share that transaction; each is independently
+    idempotent, and the status flip is the completion signal (re-run redoes
+    both harmlessly).
     """
     doc_repo = DocumentRepository(session)
     page_repo = PageRepository(session)
@@ -99,27 +101,36 @@ async def persist_document(
             GraphPage(page_id=page.page_id, mentions=mentions, page_type=page.page_type)
         )
 
-    # --- pgvector (document_pages) ---
+    # --- Qdrant ---
     vectors = await embedder(summaries) if summaries else []
-    points: list[PageVector] = []
+    points: list[PagePoint] = []
     for page, vector in zip(text_pages, vectors, strict=True):
         entities = (page.structured_json or {}).get("entities") or []
         entity_types = sorted({e.get("type") for e in entities if e.get("type")})
         points.append(
-            PageVector(
+            PagePoint(
                 page_id=page.page_id,
-                document_id=doc.document_id,
-                page_num=page.page_num,
                 vector=vector,
-                page_type=page.page_type,
-                document_category=doc.document_category,
-                registration_no=doc.registration_no,
-                s3_key_image=page.s3_key_image,
-                entity_types=entity_types,
+                payload={
+                    "document_id": doc.document_id,
+                    "page_num": page.page_num,
+                    "page_id": page.page_id,
+                    "page_type": page.page_type,
+                    "document_category": doc.document_category,
+                    "entity_types": entity_types,
+                    "registration_no": doc.registration_no,
+                    "s3_key_image": page.s3_key_image,
+                },
             )
         )
 
-    n_points = await upsert_page_vectors(points, session=session)
+    own_qdrant = qdrant is None
+    client = qdrant or get_qdrant()
+    try:
+        n_points = await upsert_page_points(points, client=client)
+    finally:
+        if own_qdrant:
+            await client.close()
 
     # --- Neo4j ---
     graph_doc = GraphDoc(

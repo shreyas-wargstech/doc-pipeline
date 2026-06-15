@@ -77,15 +77,7 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
 
 async def ensure_constraints() -> None:
     """Drop superseded constraints, then apply current constraints + indexes.
-    Idempotent (IF EXISTS / IF NOT EXISTS).
-
-    No-op on Amazon Neptune: Neptune's openCypher auto-indexes every property
-    and rejects ``CREATE CONSTRAINT`` / ``CREATE INDEX`` schema DDL. Uniqueness
-    there is enforced by our MERGE-on-natural-key writes, not by DB constraints.
-    """
-    if get_settings().graph_backend == "neptune":
-        log.info("neo4j.constraints.skipped", reason="neptune auto-indexes")
-        return
+    Idempotent (IF EXISTS / IF NOT EXISTS)."""
     try:
         async with session_scope() as sess:
             for cypher in DROP_CONSTRAINTS:
