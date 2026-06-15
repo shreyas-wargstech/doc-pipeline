@@ -6,7 +6,10 @@ import { AppShell } from "@/components/AppShell";
 const { usePathname } = vi.hoisted(() => ({ usePathname: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname }));
 
-vi.mock("@/hooks/useAuth", () => ({ useLogout: () => ({ mutate: vi.fn() }) }));
+vi.mock("@/hooks/useAuth", () => ({
+  useLogout: () => ({ mutate: vi.fn() }),
+  useRole: () => "administrator",
+}));
 
 vi.mock("@/app/action-bar", () => ({
   useActionBarContent: () => null,
