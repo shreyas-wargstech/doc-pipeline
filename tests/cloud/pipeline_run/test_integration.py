@@ -23,6 +23,10 @@ from shared.db import session_scope
 
 pytestmark = pytest.mark.integration
 
+
+async def _noop_event(_e: object) -> None:
+    return None
+
 # ---------------------------------------------------------------------------
 # Fixture detection
 # ---------------------------------------------------------------------------
@@ -50,7 +54,7 @@ async def test_single_pdf_folder_reaches_processed(tmp_path: Path) -> None:
         target,
         category="practitioner",
         force=False,
-        on_event=lambda e: None,
+        on_event=_noop_event,
     )
 
     assert result.status == "done", f"Expected 'done', got {result.status!r} (error={result.error!r})"
@@ -68,7 +72,7 @@ async def test_single_pdf_folder_reaches_processed(tmp_path: Path) -> None:
         target,
         category="practitioner",
         force=False,
-        on_event=lambda e: None,
+        on_event=_noop_event,
     )
     assert again.status == "skipped", (
         f"Second run should be 'skipped', got {again.status!r}"

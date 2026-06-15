@@ -6,6 +6,10 @@ import cloud.pipeline_run.orchestrator as orch
 from cloud.ingest.service import IngestPlan
 
 
+async def _noop_event(_e):
+    return None
+
+
 @pytest.fixture
 def patched(monkeypatch):
     calls: list[str] = []
@@ -62,7 +66,7 @@ async def test_runs_all_stages_in_order(patched, fake_session_scope, monkeypatch
     monkeypatch.setattr(orch, "_get_status", fake_get_status)
 
     result = await orch.run_all_stages(Path("a.pdf"), category="practitioner",
-                                       force=False, on_event=lambda e: None)
+                                       force=False, on_event=_noop_event)
     assert result.status == "done"
     assert result.document_id == "doc123"
     assert patched == ["upload", "ingest", "ocr", "structure", "match", "persist", "index"]
@@ -74,7 +78,7 @@ async def test_skips_already_processed(patched, fake_session_scope, monkeypatch)
     monkeypatch.setattr(orch, "_get_status", fake_get_status)
 
     result = await orch.run_all_stages(Path("a.pdf"), category="practitioner",
-                                       force=False, on_event=lambda e: None)
+                                       force=False, on_event=_noop_event)
     assert result.status == "skipped"
     assert "structure" not in patched
 
@@ -85,7 +89,7 @@ async def test_force_reprocesses_even_if_processed(patched, fake_session_scope, 
     monkeypatch.setattr(orch, "_get_status", fake_get_status)
 
     result = await orch.run_all_stages(Path("a.pdf"), category="practitioner",
-                                       force=True, on_event=lambda e: None)
+                                       force=True, on_event=_noop_event)
     assert result.status == "done"
     assert "structure" in patched
 
@@ -100,7 +104,7 @@ async def test_stage_failure_marks_failed_with_message(patched, fake_session_sco
     monkeypatch.setattr(orch, "match_document", boom)
 
     result = await orch.run_all_stages(Path("a.pdf"), category="practitioner",
-                                       force=False, on_event=lambda e: None)
+                                       force=False, on_event=_noop_event)
     assert result.status == "failed"
     assert "match blew up" in result.error
 
@@ -115,6 +119,6 @@ async def test_other_category_short_circuit_is_done(patched, fake_session_scope,
     monkeypatch.setattr(orch, "prepare_ingest", fake_prepare)
 
     result = await orch.run_all_stages(Path("a.pdf"), category="practitioner",
-                                       force=False, on_event=lambda e: None)
+                                       force=False, on_event=_noop_event)
     assert result.status == "done"
     assert "structure" not in patched
