@@ -859,3 +859,9 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Gotcha: web test `Response` stub needs `headers.get` — `lib/api.ts::parse` reads `content-type` before `res.ok`; a bare `{ok,json}` stub makes apiGet reject silently.
 - Verified: backend 492 unit green (only pre-existing env failure `test_config_index::test_index_defaults`); 34 `tests/cloud/pipeline_run` green; web tsc clean (bar pre-existing `.next/types` PageRailToggle generated-file error); web 118/120 tests (1 file = pre-existing `action-bar` tinypool crash); new `useRunPipeline.test.tsx` 5 green.
 - Still open (CLAUDE.md): RunTable virtualisation for 2,600-event 200-doc runs; `S3PrefixSource` for AWS folder runs. Live-DB: run `python -m scripts.apply_pipeline_runs` once.
+
+## 2026-06-15 — RunTable virtualization
+
+- Closed the "RunTable scale" active thread: `web/components/pipelines/RunTable.tsx` now switches to a `@tanstack/react-virtual`-backed list when `items.length > VIRTUALIZE_THRESHOLD (30)`; small runs (e.g. 13-page bundle) keep the original `<Table>` path unchanged. Virtualized rows are `React.memo`'d (`VirtualRow`) so an SSE update touching a few items doesn't re-render the whole list.
+- New `web/components/pipelines/__tests__/RunTable.test.tsx` (empty state, small-list, 200-item virtualized, failed-row tooltip). Added `@tanstack/react-virtual` dependency.
+- Verified: vitest 122/124 passed (40/41 test files; 1 pre-existing `action-bar` tinypool/heap-OOM crash, unrelated), `next build` clean (exit 0).

@@ -116,7 +116,6 @@ Active threads:
 - AWS auto-trigger wiring (Structure→Match→Persist chain) — next pipeline milestone.
 - Manual dashboard smoke NOT yet run (needs `make up` + `make serve` + `make web-dev` + seeded user via `python -m scripts.add_dashboard_user`).
 - **Persisted run history (Approach B)** — **DONE 2026-06-15.** `PgPipelineRunStore` (Postgres) is now the single source of truth; `RunRegistry` deleted. api.py = store-backed DB-polling SSE (`summary`/`update`/`heartbeat`/`done`); recovery (`GET /pipelines/runs`) + pause/resume endpoints; runner `_drive_run` pause branch + `resume_run()` (re-drives only non-terminal items). Frontend on-mount recovery + pause/resume. **Live-DB: run `python -m scripts.apply_pipeline_runs` once.**
-- **RunTable scale** — 200 docs × 13 pages ≈ 2,600 SSE events; current table unusable at that volume. Needs virtual scroll or summary-only mode.
 - **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production folder runs; currently only `LocalFolderSource` exists.
 - **NAS batch ingestion (scale path)** — for 200–20k docs, do NOT use the folder runner (sequential, no fan-out). Correct path: `nas/uploader/service.py` batch-loops the directory → S3 manifests → S3 event → SQS → Lambda fan-out. Missing piece: `scripts/batch_upload.py` wrapper (loop + skip-if-uploaded + progress log).
 

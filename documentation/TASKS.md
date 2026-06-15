@@ -83,7 +83,7 @@
 ## P2 — Pipeline folder runner follow-ups
 
 - [ ] **Persisted run history (Approach B)** — **BLOCKER for 200-doc runs.** In-memory `RunRegistry` (Approach A) loses all state on server restart. A 200-doc run takes ~23 hours; a restart at hour 20 loses everything. Approach B = persist to Postgres (`pipeline_runs` / `pipeline_run_items` tables); skip-if-processed already works, but the run dashboard goes blank. Build before attempting large batches.
-- [ ] **RunTable virtualisation / summary view** — 200 docs × ~13 pages ≈ 2,600 SSE row-update events; the current `RunTable` becomes unusable at this scale. Needs either virtual scrolling or a summary-only mode (total counts + per-doc status, not per-page rows).
+- [x] **RunTable virtualisation / summary view** — 200 docs × ~13 pages ≈ 2,600 SSE row-update events; the current `RunTable` becomes unusable at this scale. Needs either virtual scrolling or a summary-only mode (total counts + per-doc status, not per-page rows). Done 2026-06-15 — see session_log.md
 - [ ] **`S3PrefixSource`** — drop-in `DocumentSource` for AWS production runs (enumerate PDFs under an S3 prefix instead of a local folder). File: `cloud/pipeline_run/source.py`.
 - [ ] **Place `tests/fixtures/sample_bundle.pdf`** — the gated integration test in `tests/cloud/test_pipeline_run_integration.py` is skipped without this fixture; add a real sample PDF to unblock it.
 
