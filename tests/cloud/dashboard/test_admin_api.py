@@ -64,14 +64,21 @@ async def test_list_users_forbidden_for_viewer(client: AsyncClient, as_viewer):
 
 @pytest.mark.asyncio
 async def test_create_user(client: AsyncClient):
+    new_user = {"username": "newuser", "role": "viewer", "is_active": True, "created_at": "2026-01-03T00:00:00Z"}
     with patch("cloud.dashboard.admin_api.UserRepository") as MockRepo:
-        MockRepo.return_value.get = AsyncMock(return_value=None)
+        # First call: conflict check (None = not exists); second call: fetch created user
+        MockRepo.return_value.get = AsyncMock(side_effect=[None, new_user])
         MockRepo.return_value.create = AsyncMock()
         async with client as c:
             resp = await c.post("/api/admin/users", json={
                 "username": "newuser", "password": "secret123", "role": "viewer"
             })
     assert resp.status_code == 201
+    data = resp.json()
+    assert data["username"] == "newuser"
+    assert data["role"] == "viewer"
+    assert "is_active" in data
+    assert "created_at" in data
 
 
 @pytest.mark.asyncio
@@ -87,13 +94,20 @@ async def test_create_user_conflict(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_change_role(client: AsyncClient):
+    updated_bob = {"username": "bob", "role": "reviewer", "is_active": True, "created_at": "2026-01-02T00:00:00Z"}
     with patch("cloud.dashboard.admin_api.UserRepository") as MockRepo:
-        MockRepo.return_value.get = AsyncMock(return_value=_USERS[1])
+        # First call: fetch existing user; second call: fetch updated user
+        MockRepo.return_value.get = AsyncMock(side_effect=[_USERS[1], updated_bob])
         MockRepo.return_value.update_role = AsyncMock()
         MockRepo.return_value.count_active_admins = AsyncMock(return_value=1)
         async with client as c:
             resp = await c.patch("/api/admin/users/bob/role", json={"role": "reviewer"})
     assert resp.status_code == 200
+    data = resp.json()
+    assert data["username"] == "bob"
+    assert data["role"] == "reviewer"
+    assert "is_active" in data
+    assert "created_at" in data
 
 
 @pytest.mark.asyncio
@@ -119,13 +133,20 @@ async def test_cannot_demote_last_admin(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_set_active_deactivates_user(client: AsyncClient):
+    updated_bob = {"username": "bob", "role": "viewer", "is_active": False, "created_at": "2026-01-02T00:00:00Z"}
     with patch("cloud.dashboard.admin_api.UserRepository") as MockRepo:
-        MockRepo.return_value.get = AsyncMock(return_value=_USERS[1])
+        # First call: fetch existing user; second call: fetch updated user
+        MockRepo.return_value.get = AsyncMock(side_effect=[_USERS[1], updated_bob])
         MockRepo.return_value.set_active = AsyncMock()
         MockRepo.return_value.count_active_admins = AsyncMock(return_value=1)
         async with client as c:
             resp = await c.patch("/api/admin/users/bob/active", json={"is_active": False})
     assert resp.status_code == 200
+    data = resp.json()
+    assert data["username"] == "bob"
+    assert data["is_active"] is False
+    assert "role" in data
+    assert "created_at" in data
 
 
 @pytest.mark.asyncio
@@ -152,3 +173,14 @@ async def test_cannot_delete_self(client: AsyncClient):
     async with client as c:
         resp = await c.delete("/api/admin/users/admin")
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reset_password(client: AsyncClient):
+    with patch("cloud.dashboard.admin_api.UserRepository") as MockRepo:
+        MockRepo.return_value.get = AsyncMock(return_value=_USERS[1])
+        MockRepo.return_value.update_password = AsyncMock()
+        async with client as c:
+            resp = await c.patch("/api/admin/users/bob/password", json={"password": "newpass123"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True

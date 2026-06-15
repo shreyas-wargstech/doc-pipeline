@@ -86,6 +86,7 @@ async def create_user(
             password_hash=bcrypt.hash(body.password),
             role=body.role,
         )
+        created = await repo.get(body.username)
     await _audit_admin(
         username=session.username,
         action="admin_create_user",
@@ -93,7 +94,7 @@ async def create_user(
         result="ok",
         detail=f"role={body.role}",
     )
-    return {"username": body.username, "role": body.role}
+    return created
 
 
 @router.patch("/admin/users/{username}/role")
@@ -119,6 +120,7 @@ async def change_role(
                     detail="cannot demote the last active administrator",
                 )
         await repo.update_role(username, body.role)
+        updated = await repo.get(username)
     await _audit_admin(
         username=session.username,
         action="admin_change_role",
@@ -126,7 +128,7 @@ async def change_role(
         result="ok",
         detail=f"role={body.role}",
     )
-    return {"username": username, "role": body.role}
+    return updated
 
 
 @router.patch("/admin/users/{username}/password")
@@ -170,6 +172,7 @@ async def set_active(
                     detail="cannot deactivate the last active administrator",
                 )
         await repo.set_active(username, body.is_active)
+        updated = await repo.get(username)
     await _audit_admin(
         username=session.username,
         action="admin_set_active",
@@ -177,7 +180,7 @@ async def set_active(
         result="ok",
         detail=f"is_active={body.is_active}",
     )
-    return {"username": username, "is_active": body.is_active}
+    return updated
 
 
 @router.delete("/admin/users/{username}")
