@@ -61,8 +61,7 @@ describe("RunTable", () => {
     const total = 50;
     const items = Array.from({ length: total }, (_, i) => makeItem(i));
     render(<RunTable items={items} />);
-    // file-0 is index 0, 0 % 7 === 0 -> failed with error "boom"
-    const failedBadge = screen.getByText("failed");
-    expect(failedBadge.closest("[title='boom']")).not.toBeNull();
+    const failedBadges = screen.getAllByText("failed");
+    expect(failedBadges.some((el) => el.closest("[title='boom']") !== null)).toBe(true);
   });
 });
