@@ -831,3 +831,97 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 **Done since v2.0 (2026-06-12 session):** 12 pipeline-accuracy fixes (reg_no length cap, `app_cover` retirement, cover→VLM-first, registry back-fill with `ocr_extracted` audit trail, FUZZY_REVIEW_LOW 75→65, DOB ±1day fuzzy), bare `R-NNNNN` regex (FIX-037-bare), full `cloud/index/` + `cloud/retrieval/` 3-tier cascade (16 tasks, merged to `main`), NAS-side `classify_page_type` → manifest `page_type="form"` (FIX-041). 3-bundle re-validation: all `matched`.
 
 **Done since v2.1 (2026-06-15 session):** Observability page + DASH-2 cost tracking, document viewer redesign + bookmarks, frontend foundation (warm-editorial), pipeline folder runner + persisted run history, RunTable virtualization. **Cost optimization (FIX-047/047b/048):** keyword typer coverage (blank short-circuit + invoice/letter_body rules), page-type eval harness, VLM classify image resize (768px, 4–10× token reduction). Deployed, measurement pending.
+
+## 9. AWS Cloud Infrastructure (Phase 0, 2026-06-16)
+
+### 9.1 Architecture Overview
+
+- **Principle**: Zero Docker in production. All services are AWS managed: S3, SQS, RDS PostgreSQL, ElastiCache Redis, Lambda, ECS Fargate, CloudWatch, Secrets Manager.
+- **Region**: `ap-south-1` (Mumbai) — lowest latency for India.
+- **Deployment**: SAM CLI for CloudFormation. `Terraform-prod` branch preserves original Terraform for reference.
+- **Compute**: Lambda for async pipeline stages (serverless, pay-per-invocation). ECS Fargate for API (always-on, WebSocket-capable).
+- **Storage**: S3 for documents/images. RDS PostgreSQL 16 (t3.micro) for data + pgvector. ElastiCache Redis (cache.t4g.micro) for sessions + rate limiting.
+- **Messaging**: SQS FIFO queues (ocr → vlm → structure → match → persist). S3 event notifications trigger pipeline. DLQs for all queues.
+- **Security**: Secrets Manager (KMS-encrypted). IAM least-privilege. VPC security groups. CloudTrail audit logging.
+- **Monitoring**: CloudWatch dashboard + 4 alarms. Custom metrics: queue depths, latency, error rates, cost per doc.
+- **Cost**: ~$89/month base + ~$6 per 200-document batch.
+
+### 9.2 SAM Template Resources
+
+- **S3**: Bucket with event notification (`s3:ObjectCreated:*` on `manifest.json`) → SQS `ocr-queue.fifo`.
+- **SQS**: 5 FIFO queues (ocr, vlm, structure, match, persist) + DLQs. 14-day retention, 5-minute visibility timeout, 1-day message retention, max 10,000 in-flight messages.
+- **RDS**: PostgreSQL 16, t3.micro, 20GB gp2, Multi-AZ disabled, automated backups 7 days, `pg_trgm` + `pgvector` extensions.
+- **ElastiCache**: Redis 7, cache.t4g.micro, cluster mode disabled, 3-day snapshot retention, no-multi-AZ.
+- **Lambda**: 6 functions (OCR, VLM, Structure, Match, Persist, Index). Python 3.13, 2048MB memory, 15 min timeout, 10 concurrency. Environment variables: queue URLs, S3 bucket, region, secrets ARN. DLQ for all. Dead letter config.
+- **ECS Fargate**: Service "api", 1 task (1 CPU / 2GB), FARGATE:FARGATE_SPOT weighted 3:1, desired count 1, health check grace 60s, deployment circuit breaker enabled, CloudWatch logging.
+- **ALB**: Internet-facing, HTTP (80), target group `api-tg`, health check `/api/health`, 30s interval, 5s timeout, 2 healthy / 3 unhealthy thresholds.
+- **CloudWatch**: Dashboard with 8 widgets (queue depths, lambda errors, processing latency, cost per doc, DB connections, Redis memory, API latency, document throughput). 4 alarms: queue depth, error rate, API latency, cost threshold.
+- **Secrets Manager**: Single secret `docintel-{env}/credentials`, KMS-encrypted, auto-rotation disabled. Stores: DB password, Redis password, LLM API key, VLM API key, Tesseract API key, JWT secret, admin password.
+- **IAM**: 6 Lambda roles (least-privilege), ECS task role, ECS execution role, deploy user (CloudFormation + SAM + ECR).
+- **VPC**: Security groups for RDS (port 5432, no public IP), ElastiCache (port 6379, no public IP), ALB (port 80), ECS tasks (all outbound).
+
+### 9.3 Deploy/Destroy Scripts
+
+- **deploy.py**: One-command interactive deploy. Steps: validate prereqs (SAM CLI, AWS CLI, Docker), prompt for VPC/subnets (default VPC auto-detected), prompt for external credentials (LLM, VLM, Tesseract), create `samconfig.toml` or run `sam deploy`, output all endpoints, save to `docintel-{env}-outputs.json`. Non-interactive mode: `--non-interactive` reads from env vars.
+- **destroy.py**: One-command teardown. Steps: confirm, destroy non-retained resources (S3 objects, then CloudFormation stack), full deletion ~20 min. S3 bucket retained for safety (empty + manual delete).
+
+### 9.4 NAS Upload Agent
+
+- **File**: `nas/upload_agent.py` — zero-Docker, Python-only.
+- **Pipeline**: Render PDF → Preprocess image → Classify page → Upload to S3 → Upload manifest.json (triggers pipeline).
+- **Render**: PyMuPDF, 300 DPI, max dimensions 4096×4096, PNG format.
+- **Preprocess**: OpenCV — grayscale, denoise, deskew, adaptive threshold.
+- **Classify**: Tesseract OCR + keyword-based matching (marks, certificate, internship, letter, application, exam, score, transcript, ID, photo, signature, stamp, fee, receipt, challan).
+- **Upload**: S3 `s3://{bucket}/uploads/{timestamp}/{category}/{filename}/{page_num}.png` + `manifest.json` LAST.
+- **Batch**: asyncio.Semaphore(workers) for concurrent uploads. Category: "practitioner" (default) or other.
+- **Makefile targets**: `upload-aws` (single PDF), `upload-aws-batch` (folder).
+
+### 9.5 Lambda Stubs (Phase 0)
+
+- **6 functions**: OCR, VLM, Structure, Match, Persist, Index.
+- **Pattern**: `lambda_handler(event, context)` → parse SQS records → log receipt → return `{"batchItemFailures": []}`.
+- **Phase 1**: Replace stub bodies with actual imports from `cloud/{ocr,structure,match,persist,index}`. Each handler will import the relevant service, call it with S3 object key, and push result to next SQS queue.
+- **Error handling**: Partial batch responses (`batchItemFailures`) for retry. DLQ for permanent failures.
+- **Cold starts**: ~1-2s per stage. Acceptable for async processing. Provisioned Concurrency considered for high-volume stages.
+
+### 9.6 AWS Client Factories
+
+- **File**: `shared/aws_clients.py`.
+- **Pattern**: `@lru_cache(maxsize=1)` singleton. Lazy initialization. Config: max_pool_connections=50, retries max_attempts=3 adaptive mode.
+- **Services**: S3, SQS, Secrets Manager, CloudWatch, ECS, RDS, ElastiCache.
+- **Auth**: Local dev — env vars + endpoint URLs. Production — IAM role (no credentials in code).
+- **Config**: `shared/config.py` extended with AWS fields. `database_url` property auto-falls-back from RDS to local.
+
+### 9.7 Makefile AWS Targets
+
+- `aws-deploy` — Interactive deploy
+- `aws-destroy` — Destroy with confirmation
+- `aws-deploy-non-interactive` — Non-interactive deploy (reads env vars)
+- `aws-logs-{ocr,vlm,structure,match,persist,index}` — Tail CloudWatch logs for each Lambda
+- `aws-sqs-status` — Show all queue depths
+- `ecr-login` — Authenticate Docker with ECR
+- `build-api` — Build API Docker image
+- `push-api` — Push API image to ECR
+- `upload-aws` — Upload single PDF via NAS agent
+- `upload-aws-batch` — Upload folder of PDFs via NAS agent
+- `aws-cost-estimate` — Show cost breakdown
+
+### 9.8 Phased Roadmap (from REIMAGINING_GROUNDED.md)
+
+- **Phase 0 (Infrastructure)** ✅: SAM template, deploy/destroy scripts, Lambda stubs, NAS upload agent, config updates, Makefile targets. COMPLETE.
+- **Phase 1 (TDD Pipeline)**: Replace Lambda stubs with actual imports. Build API Docker image. Deploy to Vercel. WebSocket real-time. Aether chat v1. Engine Room v1. Estimated 2–3 weeks.
+- **Phase 2 (Polish + Vercel)**: Next.js deploy. Frontend polish. Cost dashboard. Advanced Aether features. Estimated 2 weeks.
+- **Phase 3 (Advanced)**: Multi-tenant. Batch processing. Export formats. Advanced matching. Admin dashboard. Estimated 3 weeks.
+- **Phase 4 (Scale)**: CDN. Caching. Performance optimization. Multi-region. Estimated 2 weeks.
+- **Total estimated**: 9–10 weeks for full production deployment.
+
+### 9.9 Design Philosophy (Reimagining)
+
+- **Warm Editorial Minimalism**: Inspired by Linear, Notion, Perplexity, Apple. Clean typography, generous whitespace, subtle warm tones, progressive disclosure.
+- **Accessibility-first**: WCAG 2.1 AA minimum, semantic HTML, ARIA labels, keyboard navigation, screen reader support, reduced motion, high contrast mode.
+- **AI-native workspace**: Not a chat interface bolted onto a traditional app. Aether is a first-class omniscient interface that can answer questions, take actions, and learn from user behavior.
+- **Engineer-first**: Engine Room is a real control panel for engineers, not a marketing dashboard. Shows actual pipeline state, costs, errors, and allows real-time intervention.
+- **Self-healing pipeline**: Pipeline detects its own failures, retries with exponential backoff, and escalates to humans only when necessary. Cost-neutral: no extra infrastructure, just smarter error handling.
+- **Dynamic cost routing**: Game theory-based cost optimization. Routes to cheaper models when quality is sufficient, more expensive models when accuracy is critical. No rigid model tiers.
+- **Document autopsy**: Text-only deep dive into why a document failed. No heatmaps, no 3D visualization. Just clear, structured analysis of what went wrong and how to fix it.
+- **Learning from corrections**: Every human correction feeds back into the model. Feedback loop is automatic, not manual. Quality improves over time without explicit retraining.

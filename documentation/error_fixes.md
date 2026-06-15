@@ -920,3 +920,11 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 **Measurement pending:** Worker + serve restarted 2026-06-15 ~10:37 UTC; awaiting a fresh pipeline run to confirm token count reduction.
 
 **Rule:** When paying for a vision-LLM fallback on an input the text model can't handle, don't assume the original input size is necessary for classification. Resize to the minimal content-bearing resolution (e.g., 768px for page structure, 512px for text OCR confidence) and measure the impact. Image token cost often dominates; downsizing is safe and high-impact.
+
+## FIX-049: Design philosophy conflict resolution (Reimagining brainstorm, 2026-06-16)
+
+- **Context**: User asked to "brainstorm beyond imagination" with complete freedom. Generated wild futuristic vision (REIMAGINING.md): spatial canvas, 3D visualization, gamification, real-time collaboration, fraud detection, mobile app, AR/VR, metaverse, voice/stylus/gesture, world government portals.
+- **User rejection**: All of the above rejected as "too much," "dull," "not useful." User explicitly: "Do not compromise on UI/UX." Current design is "Warm Editorial Minimalism" inspired by Linear, Notion, Perplexity, Apple.
+- **Resolution**: Grounded revision (REIMAGINING_GROUNDED.md) — practical, cost-conscious, user-directed. Kept only features that solve real problems without adding complexity. Rejected: spatial canvas, 3D viz, gamification, collaboration, mobile app, fraud detection, regulatory analytics, AR/VR, voice/gesture, metaverse. Accepted: Aether chat (with autocomplete), Engine Room (engineer control panel), self-healing pipeline (cost-neutral), dynamic cost routing (game theory), identity consistency scoring (not fraud), document autopsy (text-only), accessibility-first, AI summaries, learning from corrections.
+- **Lesson**: When user says "complete freedom," still validate against stated design philosophy. Document all rejected ideas to prevent accidental re-introduction. Maintain "Reimagining Comparison" document (REIMAGINING_COMPARISON.md) as permanent reference for what was rejected vs accepted.
+- **Files**: REIMAGINING.md, REIMAGINING_GROUNDED.md, REIMAGINING_COMPARISON.md, REIMAGINING_ADDENDUM.md.

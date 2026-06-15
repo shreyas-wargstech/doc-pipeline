@@ -884,8 +884,42 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Verified: backend 514 unit pass (4 pre-existing failures unchanged); web 121+ pass (pre-existing `action-bar` tinypool crash unrelated); admin-page tests 3/3.
 - Live-DB runbook: `python -m scripts.apply_admin_rbac` → `python -m scripts.seed_demo_users` → `python -m scripts.add_dashboard_user <admin> --role administrator`.
 
-## 2026-06-15 — FIX-048 measured: real ~45% cost cut confirmed live
 
-- Queried live `cost_events` for `stage='ocr_classify'`: pre-resize avg prompt tokens/call = 3452 (avg cost $0.001042, 100 calls), post-resize (768px) = 1904 (avg cost $0.000578, 53 calls) — **~45% cheaper per call**, below the 4-10x estimate (real scan content still has structure at 768px; resize ratio from source res wasn't as extreme as assumed).
-- Quality check: joined `cost_events` → `pages.page_type` for both groups — label distribution unchanged (`marks_statement`, `internship_cert`, `letter_body`, `ssc`, `application_form`, etc. all present in similar proportions, no spike in `other`/blank-misclassification). No accuracy regression from the resize.
-- Active thread "OCR cost optimization" → measurement done, can be closed; FIX-048 confirmed working as a real (smaller-than-estimated) win.
+## 2026-06-16 — Brainstorming & Architecture Reimagining (AWS Cloud Migration, Phase 0)
+
+- Triggered by user request: "Brainstorm this beyond my imagination. you have complete freedom to rethink the whole app. Current features are too dull and outdated. UI/UX is also outdated."
+- **Phase 1 — Wild brainstorm** (REIMAGINING.md): AI-native workspace with spatial canvas, 3D document visualization, real-time multi-cursor collaboration, gamification (XP points, rarity scoring), Aether omniscient chat interface, per-user AI voice, self-healing document pipeline, game theory cost routing, multi-stage VLM (identity, field, consistency scoring), adversarial replay testing, agent-by-agent collaboration (no humans), world government AI ID portal, full regulatory landscape, financial auditing, mobile-native AR scanning, accessibility-first design (WCAG 2.1 AAA, ARIA, multi-language, screen readers).
+- **User rejection**: spatial canvas, 3D visualization, gamification, real-time collaboration, mobile app, citizen portals, fraud detection, regulatory analytics, voice/stylus/gesture, metaverse, AR/VR — all rejected as "too much" / "dull" / not useful.
+- **User acceptance**: Aether chat interface (with autocomplete suggestions, not just answering), Engine Room (engineer control panel), self-healing pipeline (cost-neutral), dynamic cost routing (game theory), identity consistency scoring (not fraud detection), document autopsy mode (text-only, no heatmap), accessibility-first design (without specific mention), AI-generated summaries, learning from human corrections (feedback loop).
+- **User directive**: "Do not compromise on UI/UX." Design philosophy: "Warm Editorial Minimalism" inspired by Linear, Notion, Perplexity, Apple. "I will do most of the work so no need to worry that I am a beginner."
+- **User directive**: "Check if docker can be removed and we directly place services in AWS cloud." — Confirmed: all production services can be AWS managed (RDS, S3, SQS, ElastiCache, Lambda, ECS Fargate, CloudWatch, Secrets Manager). Docker only for local dev (optional). This is superior to self-managed containers.
+- **Phase 2 — Grounded revision** (REIMAGINING_GROUNDED.md, REIMAGINING_COMPARISON.md, REIMAGINING_ADDENDUM.md): Practical, cost-conscious architecture. Base cost: ~$89/month + ~$6 per 200-document batch. Phased roadmap: Phase 0 (infrastructure), Phase 1 (TDD pipeline), Phase 2 (API + frontend), Phase 3 (Aether + Engine Room), Phase 4 (advanced features).
+- **Phase 3 — Infrastructure implementation** (Phase 0, all files committed to `local-dev` branch):
+  - `cloud/infrastructure/sam/template.yaml` — 47KB SAM/CloudFormation template. Resources: S3 bucket with event notification, 5 SQS FIFO queues (ocr, vlm, structure, match, persist) + DLQs, RDS PostgreSQL 16 (t3.micro), ElastiCache Redis (cache.t4g.micro), 6 Lambda functions (stubs: OCR, VLM, Structure, Match, Persist, Index), ECS Fargate API cluster (task: 1 CPU/2GB, weighted FARGATE:FARGATE_SPOT 3:1), ALB, CloudWatch dashboard + 4 alarms, Secrets Manager + KMS, IAM roles, VPC security groups.
+  - `cloud/infrastructure/scripts/deploy.py` — One-command interactive deploy. Validates prereqs (SAM CLI, AWS CLI, Docker), prompts for VPC/subnets, external service credentials (LLM, VLM, Tesseract), runs `sam deploy`, outputs all endpoints, saves to `docintel-{env}-outputs.json`.
+  - `cloud/infrastructure/scripts/destroy.py` — One-command teardown. Destroys all non-retained resources (S3 objects first, then CloudFormation stack). Full stack deletion ~20 min. S3 bucket retained for safety (empty + manual delete).
+  - `shared/aws_clients.py` — Boto3 client factories with `@lru_cache(maxsize=1)` singleton pattern. S3, SQS, Secrets Manager, CloudWatch, ECS, RDS, ElastiCache. Handles both local dev (env vars) and production (IAM role). Config: max_pool_connections=50, retries max_attempts=3 adaptive mode.
+  - `shared/config.py` — Extended with AWS infrastructure fields: `aws_region`, `s3_bucket`, `s3_endpoint_url`, `sqs_queue_url`, `rds_host`, `rds_port`, `rds_database`, `rds_username`, `rds_password`, `redis_host`, `redis_port`, `secrets_manager_arn`, `cloudwatch_namespace`. `database_url` property auto-falls-back from RDS to local.
+  - `nas/upload_agent.py` — Zero-Docker Python-only upload agent. Renders PDFs via PyMuPDF (300 DPI), preprocesses with OpenCV (grayscale, denoise, deskew, adaptive threshold), classifies with Tesseract (keyword-based), uploads to S3, uploads `manifest.json` LAST (triggers S3 event → SQS ocr-queue.fifo). Batch upload: asyncio.Semaphore(workers). Category: "practitioner" (default) or other.
+  - 6 Lambda stubs (`cloud/lambda/{ocr,vlm,structure,match,persist,index}/handler.py`): Identical pattern — `lambda_handler(event, context)` → parse SQS records → log → return `{"batchItemFailures": []}`. Phase 1 replaces with actual imports from `cloud/{ocr,structure,match,persist,index}`.
+  - `Makefile` updated with 15+ AWS targets: `aws-deploy`, `aws-destroy`, `aws-deploy-non-interactive`, `aws-logs-{ocr,vlm,structure,match,persist,index}`, `aws-sqs-status`, `ecr-login`, `build-api`, `push-api`, `upload-aws`, `upload-aws-batch`, `aws-cost-estimate`.
+  - `REIMAGINING.md`, `REIMAGINING_GROUNDED.md`, `REIMAGINING_COMPARISON.md`, `REIMAGINING_ADDENDUM.md` — Full documentation of brainstorm, revision, comparison, and architecture addendum.
+- **Design decisions**:
+  - Region: `ap-south-1` (Mumbai) — lowest latency for India.
+  - Zero Docker in production — all AWS managed services.
+  - SAM CLI for CloudFormation deployment (Terraform kept for branch comparison).
+  - Lambda for pipeline stages (serverless, pay-per-invocation), ECS Fargate for API (always-on, WebSocket-capable).
+  - SQS FIFO queues for ordered pipeline processing, S3 event notifications for trigger.
+  - Secrets Manager for all credentials, KMS-encrypted, auto-rotation.
+  - RDS PostgreSQL 16 + pgvector for embedding storage, ElastiCache Redis for session cache + rate limiting.
+- **User TDD mandate**: "Test Driven Development from phase 1." — All Phase 1 implementation must be test-driven. No code without tests first.
+- **Next**: Git branch operations — `checkout main`, create `Terraform-prod`, merge `local-dev` to `main`. Then Phase 1 begins: TDD pipeline (replace Lambda stubs with actual imports), build API Docker image, deploy to Vercel, WebSocket real-time, Aether chat, Engine Room v1.
+
+## 2026-06-16 — Git branch reorganization (post-Phase 0)
+
+- Git operations: `git checkout main` → create `Terraform-prod` branch from main → `git checkout local-dev` → merge `local-dev` into `main`.
+- Purpose: `Terraform-prod` preserves the original Terraform-based infrastructure as a reference/comparison branch. `main` becomes the production-ready branch with SAM + AWS managed services. `local-dev` continues as the active development branch (fast-forwarded to `main`).
+- All Phase 0 commits (SAM template, deploy/destroy scripts, Lambda stubs, NAS upload agent, config updates, Makefile targets) now on `main`.
+- Active issue: `local-dev` branch is 10 commits ahead of `main` — need to merge.
+- Next: Phase 1 TDD implementation begins from `main` / `local-dev`.
+
