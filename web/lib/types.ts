@@ -161,7 +161,7 @@ export interface CorrectionResult {
 }
 
 export type RunItemStatus = "pending" | "running" | "done" | "skipped" | "failed";
-export type RunStatus = "running" | "completed" | "cancelled" | "failed";
+export type RunStatus = "running" | "paused" | "completed" | "cancelled" | "failed";
 
 export interface RunItem {
   filename: string;
@@ -185,10 +185,11 @@ export interface RunState {
   items: RunItem[];
 }
 
-// SSE frames: {type:"item",...partial item}, {type:"summary",...RunState},
-// {type:"done",...RunState}
+// SSE frames: {type:"item",...partial item}, {type:"summary"|"update",...RunState},
+// {type:"done",...RunState}. The store-backed API emits summary/update/done
+// (full RunState); "item" remains for the reducer's partial-item branch.
 export interface RunEvent {
-  type: "item" | "summary" | "done";
+  type: "item" | "summary" | "update" | "done";
   filename?: string;
   status?: RunItemStatus;
   stage?: string | null;

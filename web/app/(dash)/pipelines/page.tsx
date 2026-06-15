@@ -8,7 +8,7 @@ import { RunTable } from "@/components/pipelines/RunTable";
 import { useRunPipeline } from "@/hooks/useRunPipeline";
 
 export default function PipelinesPage() {
-  const { run, error, start, cancel, isRunning } = useRunPipeline();
+  const { run, error, start, cancel, pause, resume, isRunning, isPaused } = useRunPipeline();
 
   return (
     <div className="flex flex-col gap-4">
@@ -17,16 +17,26 @@ export default function PipelinesPage() {
         subtitle="Run a folder of PDFs through the full pipeline, one document at a time."
       />
       {error && <p className="text-sm text-danger">{error}</p>}
-      <RunForm onRun={start} disabled={isRunning} />
+      <RunForm onRun={start} disabled={isRunning || isPaused} />
       {run && (
         <Card className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-4">
             <RunSummary run={run} />
-            {isRunning && (
-              <Button variant="destructive" onClick={cancel}>
-                Cancel
-              </Button>
-            )}
+            <div className="flex gap-2">
+              {isRunning && (
+                <>
+                  <Button variant="secondary" onClick={pause}>
+                    Pause
+                  </Button>
+                  <Button variant="destructive" onClick={cancel}>
+                    Cancel
+                  </Button>
+                </>
+              )}
+              {isPaused && (
+                <Button onClick={resume}>Resume</Button>
+              )}
+            </div>
           </div>
           <RunTable items={run.items} />
         </Card>
