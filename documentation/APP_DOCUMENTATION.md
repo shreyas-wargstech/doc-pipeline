@@ -1,6 +1,6 @@
 # Document Intelligence Pipeline — Full Application Documentation
 
-> **Version:** 2.1 · **Last updated:** 2026-06-12 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→index→retrieve); validated on 3 real practitioner bundles, all `matched`. Retrieval-first transition (`cloud/index/` + 3-tier `cloud/retrieval/` cascade + `GET /search`) implemented on `claude/confident-albattani-b184b8`, not yet merged to `main`. `main` local-only, ahead of origin.
+> **Version:** 2.2 · **Last updated:** 2026-06-15 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→index→retrieve); validated on 3 real practitioner bundles, all `matched`. All major merges complete on local `main` (retrieval-first, bookmarks, pipeline runner, observability/cost tracking, document viewer redesign, frontend foundation). Cost optimization underway: FIX-048 (image resize for page-type classify, 4–10× token reduction) deployed, measurement pending.
 
 ---
 
@@ -332,9 +332,14 @@ SESSION_SECRET=                     # HMAC signing key for signed-cookie auth
 **Identity-scoped transcription (lean retrieval, 2026-06-10):**
 - **Identity pages** (coarse `page_type` `cover`/`form`) get the full Tesseract→VLM ladder (real transcription).
 - **Every other page** is **Tesseract-only** (no paid VLM transcription). Its fine `page_type` is assigned by a cheap keyword typer (`cloud/ocr/page_type.py`), escalating to a VLM **classify** call (a single label, NOT a transcription) only when keyword confidence < 0.5.
+- **Cost optimization (FIX-047/047b/048, 2026-06-15):** blank-page short-circuit + keyword rules for uncovered types (`invoice`/`letter_body`) + image resize (768px) before VLM classify reduces classify cost ~75% ($0.069→$0.007–0.017 estimated on a 13-page bundle).
 - Cuts a 13-page bundle from ~26 paid LLM calls to ~4–6.
 
 **VLM tier notes** (`cloud/ocr/tiers/vlm.py`): no per-word confidence — words get a fixed `_CONF_PRIOR = 85.0` (above the 70 net) + `bbox=(0,0,0,0)`. An unavailable VLM on a handwritten page fails cleanly → `manual_review` (NO fall-back to Tesseract, by design). Unavailable START tier **escalates** (`continue`, not `break` — FIX-028).
+
+**VLM classify image optimization (FIX-048, 2026-06-15):** The classify-only path (for non-identity pages) resizes PNGs to 768px wide before base64-encoding — page-type classification doesn't need full-resolution pixels. OpenCV resize (INTER_AREA, aspect-preserving) reduces image tokens 4–10×. Fallback pass-through if narrower or decode fails.
+
+
 
 **Status race guard (FIX-029):** ingest's bulk `QUEUED` write runs *after* SQS enqueue, so it is a guarded transition (`only_from=[PENDING]`) — never downgrades a page a fast worker already marked `done`.
 
@@ -804,6 +809,7 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 
 | Item | Priority | Notes |
 |---|---|---|
+| **Measure FIX-048 cost savings** | High | Image resize (768px) for classify VLM deployed 2026-06-15; awaiting live pipeline run to confirm token count reduction. Expected: $0.069→$0.007–0.017 per 13-page bundle. |
 | **Merge retrieval-first transition to `main`** | High | `claude/confident-albattani-b184b8` (16 tasks, 45 unit green) — `cloud/index/`, `cloud/retrieval/{query_parser,explainer}.py`, `GET /search` + `GET /search/{doc_id}/pages`. Needs PR + merge. |
 | **Wire index stage end-to-end** | High | Add `SQS_INDEX_QUEUE_URL` to `.env`; run `python -m scripts.apply_index_schema` once against live DB (adds `document_summary`/`page_summary`/`search_keywords`/`index_entities`/`index_status` + GIN index). Persist consumer already chains to it post-merge. |
 | **AWS auto-trigger wiring** | High | Structure→Match→Persist→Index chaining (Lambda-per-stage+SQS vs Step Functions UNDECIDED); Lambda container images for Tesseract/OpenCV/PyMuPDF; Terraform vs SAM/CDK. The next pipeline milestone. |
@@ -822,4 +828,6 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 
 **Done since v1.0** (was TBD, now built): `load_reference_data` (92K rows), `cloud/{classifier,ocr,structure,match,persist,retrieval}/`, NAS uploader + local elasticmq end-to-end, schema (`queued` status, `app_no` BIGINT, `eval_content_type`, `page_types` tables), Next.js dashboard + JSON API + eval lab, NAS-side page-type detection (FIX-041 — `shared/page_type.py`).
 
-**Done since v2.0 (2026-06-12 session):** 12 pipeline-accuracy fixes (reg_no length cap, `app_cover` retirement, cover→VLM-first, registry back-fill with `ocr_extracted` audit trail, FUZZY_REVIEW_LOW 75→65, DOB ±1day fuzzy), bare `R-NNNNN` regex (FIX-037-bare), full `cloud/index/` + `cloud/retrieval/` 3-tier cascade (16 tasks, branch not merged), NAS-side `classify_page_type` → manifest `page_type="form"` (FIX-041). 3-bundle re-validation: all `matched`.
+**Done since v2.0 (2026-06-12 session):** 12 pipeline-accuracy fixes (reg_no length cap, `app_cover` retirement, cover→VLM-first, registry back-fill with `ocr_extracted` audit trail, FUZZY_REVIEW_LOW 75→65, DOB ±1day fuzzy), bare `R-NNNNN` regex (FIX-037-bare), full `cloud/index/` + `cloud/retrieval/` 3-tier cascade (16 tasks, merged to `main`), NAS-side `classify_page_type` → manifest `page_type="form"` (FIX-041). 3-bundle re-validation: all `matched`.
+
+**Done since v2.1 (2026-06-15 session):** Observability page + DASH-2 cost tracking, document viewer redesign + bookmarks, frontend foundation (warm-editorial), pipeline folder runner + persisted run history, RunTable virtualization. **Cost optimization (FIX-047/047b/048):** keyword typer coverage (blank short-circuit + invoice/letter_body rules), page-type eval harness, VLM classify image resize (768px, 4–10× token reduction). Deployed, measurement pending.
