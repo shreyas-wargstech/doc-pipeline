@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from cloud.dashboard.session import require_session
+from cloud.dashboard.session import SessionData, require_session
 from cloud.dashboard.sse import format_sse, heartbeat
 from cloud.pipeline_run.runner import resume_run, start_run
 from cloud.pipeline_run.store import is_terminal, store
@@ -48,7 +48,7 @@ class RunBody(BaseModel):
 
 @router.post("/pipelines/run", status_code=status.HTTP_202_ACCEPTED)
 async def run_pipeline(
-    body: RunBody, _user: str = Depends(require_session)
+    body: RunBody, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     try:
         run_id, total = await start_run(
@@ -62,14 +62,14 @@ async def run_pipeline(
 
 
 @router.get("/pipelines/runs")
-async def active_run(_user: str = Depends(require_session)) -> Any:
+async def active_run(_session: SessionData = Depends(require_session)) -> Any:
     """Most recent active (running/paused) run, or null — browser-reload recovery."""
     return await store.get_active_run()
 
 
 @router.get("/pipelines/run/{run_id}")
 async def run_snapshot(
-    run_id: str, _user: str = Depends(require_session)
+    run_id: str, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     run = await store.get_run(run_id)
     if run is None:
@@ -79,7 +79,7 @@ async def run_snapshot(
 
 @router.post("/pipelines/run/{run_id}/cancel")
 async def cancel_run(
-    run_id: str, _user: str = Depends(require_session)
+    run_id: str, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     if await store.get_run(run_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown run")
@@ -89,7 +89,7 @@ async def cancel_run(
 
 @router.post("/pipelines/run/{run_id}/pause")
 async def pause_run(
-    run_id: str, _user: str = Depends(require_session)
+    run_id: str, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     if await store.get_run(run_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown run")
@@ -99,7 +99,7 @@ async def pause_run(
 
 @router.post("/pipelines/run/{run_id}/resume", status_code=status.HTTP_202_ACCEPTED)
 async def resume_run_endpoint(
-    run_id: str, _user: str = Depends(require_session)
+    run_id: str, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     run = await store.get_run(run_id)
     if run is None:
@@ -112,7 +112,7 @@ async def resume_run_endpoint(
 
 @router.get("/pipelines/run/{run_id}/events")
 async def run_events(
-    run_id: str, _user: str = Depends(require_session)
+    run_id: str, _session: SessionData = Depends(require_session)
 ) -> StreamingResponse:
     if await store.get_run(run_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown run")

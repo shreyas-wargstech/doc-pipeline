@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import cloud.pipeline_run.api as api
-from cloud.dashboard.session import require_session
+from cloud.dashboard.session import SessionData, require_session
 from shared.exceptions import PipelineError
 from tests.cloud.pipeline_run.test_runner import FakeStore
 
@@ -27,7 +27,7 @@ def fake_store(monkeypatch):
 def client(fake_store):
     app = FastAPI()
     app.include_router(api.router, prefix="/api")
-    app.dependency_overrides[require_session] = lambda: "tester"
+    app.dependency_overrides[require_session] = lambda: SessionData(username="tester", role="administrator")
     return TestClient(app)
 
 

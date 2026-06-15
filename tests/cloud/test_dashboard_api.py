@@ -8,7 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from cloud.app import app
-from cloud.dashboard.session import COOKIE_NAME, require_session
+from cloud.dashboard.session import COOKIE_NAME, SessionData, require_session
 from shared.exceptions import MatchError
 
 
@@ -19,19 +19,20 @@ def client():
 
 @pytest.fixture
 def as_user():
-    """Override require_session so endpoints see an authenticated user."""
-    app.dependency_overrides[require_session] = lambda: "tester"
+    """Override require_session so endpoints see an authenticated admin user."""
+    app.dependency_overrides[require_session] = lambda: SessionData(username="tester", role="administrator")
     yield "tester"
     app.dependency_overrides.pop(require_session, None)
 
 
 @pytest.mark.asyncio
 async def test_login_sets_cookie_on_valid_credentials(client: AsyncClient):
-    with patch("cloud.dashboard.api.verify_credentials", new=AsyncMock(return_value=True)):
+    with patch("cloud.dashboard.api.verify_credentials", new=AsyncMock(return_value=True)), \
+         patch("cloud.dashboard.api._lookup_role", new=AsyncMock(return_value="administrator")):
         async with client as c:
             resp = await c.post("/api/login", json={"username": "alice", "password": "pw"})
     assert resp.status_code == 200
-    assert resp.json() == {"user": "alice"}
+    assert resp.json() == {"user": "alice", "role": "administrator"}
     assert COOKIE_NAME in resp.cookies
 
 
@@ -56,7 +57,7 @@ async def test_me_returns_user_with_session(client: AsyncClient, as_user):
     async with client as c:
         resp = await c.get("/api/me")
     assert resp.status_code == 200
-    assert resp.json() == {"user": "tester"}
+    assert resp.json() == {"user": "tester", "role": "administrator"}
 
 
 @pytest.mark.asyncio
