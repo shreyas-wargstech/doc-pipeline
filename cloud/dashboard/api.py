@@ -24,7 +24,10 @@ from cloud.dashboard.bookmarks import BookmarkRepository
 from cloud.dashboard.session import (
     COOKIE_NAME,
     DEFAULT_MAX_AGE,
+    SessionData,
+    _lookup_role,
     issue_session,
+    require_role,
     require_session,
     verify_credentials,
 )
@@ -74,23 +77,24 @@ async def login(body: LoginBody, response: Response) -> dict[str, str]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "invalid credentials"},
         )
-    token = issue_session(body.username)
+    role = await _lookup_role(body.username) or "viewer"
+    token = issue_session(body.username, role)
     response.set_cookie(
         COOKIE_NAME, token, httponly=True, samesite="lax",
         max_age=DEFAULT_MAX_AGE, path="/",
     )
-    return {"user": body.username}
+    return {"user": body.username, "role": role}
 
 
 @router.post("/logout")
-async def logout(response: Response, _user: str = Depends(require_session)) -> dict[str, bool]:
+async def logout(response: Response, _session: SessionData = Depends(require_session)) -> dict[str, bool]:
     response.delete_cookie(COOKIE_NAME, path="/")
     return {"ok": True}
 
 
 @router.get("/me")
-async def me(user: str = Depends(require_session)) -> dict[str, str]:
-    return {"user": user}
+async def me(session: SessionData = Depends(require_session)) -> dict[str, str]:
+    return {"user": session.username, "role": session.role}
 
 
 # --- read endpoints --------------------------------------------------------
@@ -117,20 +121,20 @@ async def documents(
     search: str | None = None,
     bookmarked: bool | None = None,
     offset: int = 0,
-    user: str = Depends(require_session),
+    session: SessionData = Depends(require_session),
 ) -> dict[str, Any]:
     filters = {"category": category, "status": status,
                "match_status": match_status, "search": search,
                "bookmarked": bookmarked}
-    async with session_scope() as session:
-        docs = await queries.list_documents(session, username=user, **filters,
+    async with session_scope() as db:
+        docs = await queries.list_documents(db, username=session.username, **filters,
                                             limit=_PAGE_SIZE, offset=offset)
-        total = await queries.count_documents(session, username=user, **filters)
+        total = await queries.count_documents(db, username=session.username, **filters)
     return {"documents": docs, "total": total, "offset": offset, "limit": _PAGE_SIZE}
 
 
 @router.get("/metrics")
-async def metrics(_user: str = Depends(require_session)) -> dict[str, Any]:
+async def metrics(_session: SessionData = Depends(require_session)) -> dict[str, Any]:
     async with session_scope() as session:
         sc = await queries.status_counts(session)
         mc = await queries.match_status_counts(session)
@@ -143,7 +147,7 @@ async def audit_view(
     document_id: str | None = None,
     action: str | None = None,
     result: str | None = None,
-    _user: str = Depends(require_session),
+    _session: SessionData = Depends(require_session),
 ) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await audit.list_audit(session, username=username,
@@ -153,7 +157,7 @@ async def audit_view(
 
 
 @router.get("/costs")
-async def costs_view(_user: str = Depends(require_session)) -> dict[str, Any]:
+async def costs_view(_session: SessionData = Depends(require_session)) -> dict[str, Any]:
     async with session_scope() as session:
         summary = await cost_queries.cost_summary(session)
         by_stage = await cost_queries.cost_by_stage(session)
@@ -165,7 +169,7 @@ async def costs_view(_user: str = Depends(require_session)) -> dict[str, Any]:
 async def cost_events_view(
     stage: str | None = None,
     limit: int = 50,
-    _user: str = Depends(require_session),
+    _session: SessionData = Depends(require_session),
 ) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await cost_queries.recent_cost_events(session, stage=stage, limit=limit)
@@ -173,16 +177,16 @@ async def cost_events_view(
 
 
 @router.get("/documents/{document_id}")
-async def doc_detail(document_id: str, user: str = Depends(require_session)) -> dict[str, Any]:
-    async with session_scope() as session:
-        doc = await DocumentRepository(session).get(document_id)
+async def doc_detail(document_id: str, session: SessionData = Depends(require_session)) -> dict[str, Any]:
+    async with session_scope() as db:
+        doc = await DocumentRepository(db).get(document_id)
         if doc is None:
             raise HTTPException(status_code=404, detail="document not found")
-        pages = await PageRepository(session).list_for_document(document_id)
-        bm = await session.execute(
+        pages = await PageRepository(db).list_for_document(document_id)
+        bm = await db.execute(
             text("SELECT EXISTS(SELECT 1 FROM document_bookmarks "
                  "WHERE username = :u AND document_id = :d)"),
-            {"u": user, "d": document_id},
+            {"u": session.username, "d": document_id},
         )
         doc_d = _to_dict(doc)
         doc_d["bookmarked"] = bool(bm.scalar_one())
@@ -195,27 +199,27 @@ async def doc_detail(document_id: str, user: str = Depends(require_session)) -> 
 
 @router.post("/documents/{document_id}/bookmark")
 async def add_bookmark(
-    document_id: str, user: str = Depends(require_session)
+    document_id: str, session: SessionData = Depends(require_session)
 ) -> dict[str, bool]:
-    async with session_scope() as session:
-        if await DocumentRepository(session).get(document_id) is None:
+    async with session_scope() as db:
+        if await DocumentRepository(db).get(document_id) is None:
             raise HTTPException(status_code=404, detail="document not found")
-        await BookmarkRepository(session).add(user, document_id)
+        await BookmarkRepository(db).add(session.username, document_id)
     return {"bookmarked": True}
 
 
 @router.delete("/documents/{document_id}/bookmark")
 async def remove_bookmark(
-    document_id: str, user: str = Depends(require_session)
+    document_id: str, session: SessionData = Depends(require_session)
 ) -> dict[str, bool]:
-    async with session_scope() as session:
-        await BookmarkRepository(session).remove(user, document_id)
+    async with session_scope() as db:
+        await BookmarkRepository(db).remove(session.username, document_id)
     return {"bookmarked": False}
 
 
 @router.get("/documents/{document_id}/pages/{page_num}")
 async def page_detail(
-    document_id: str, page_num: int, _user: str = Depends(require_session)
+    document_id: str, page_num: int, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     async with session_scope() as session:
         page = await PageRepository(session).get(document_id, page_num)
@@ -231,7 +235,7 @@ async def page_detail(
 
 @router.get("/documents/{document_id}/pages/{page_num}/image")
 async def page_image(
-    document_id: str, page_num: int, _user: str = Depends(require_session)
+    document_id: str, page_num: int, _session: SessionData = Depends(require_session)
 ):
     async with session_scope() as session:
         page = await PageRepository(session).get(document_id, page_num)
@@ -252,32 +256,32 @@ class RequeueBody(BaseModel):
 
 
 @router.post("/documents/{document_id}/ingest")
-async def action_ingest(document_id: str, user: str = Depends(require_session)) -> dict[str, Any]:
+async def action_ingest(document_id: str, session: SessionData = Depends(require_role("operator", "administrator"))) -> dict[str, Any]:
     try:
         await actions.reingest(document_id)
-        await _audit(username=user, action="ingest", document_id=document_id,
+        await _audit(username=session.username, action="ingest", document_id=document_id,
                      params={}, result="ok", detail=None)
         return {"ok": True, "message": "Ingest re-run started."}
     except Exception as exc:  # noqa: BLE001 — surface as JSON, audit the failure
         log.exception("api_ingest_failed", document_id=document_id)
-        await _audit(username=user, action="ingest", document_id=document_id,
+        await _audit(username=session.username, action="ingest", document_id=document_id,
                      params={}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Ingest failed: {exc}"}
 
 
 @router.post("/documents/{document_id}/requeue-ocr")
 async def action_requeue(
-    document_id: str, body: RequeueBody | None = None, user: str = Depends(require_session)
+    document_id: str, body: RequeueBody | None = None, session: SessionData = Depends(require_role("operator", "administrator"))
 ) -> dict[str, Any]:
     page_nums = body.page_nums if body else None
     try:
         n = await actions.requeue_ocr(document_id, page_nums=page_nums)
-        await _audit(username=user, action="requeue_ocr", document_id=document_id,
+        await _audit(username=session.username, action="requeue_ocr", document_id=document_id,
                      params={"page_nums": page_nums}, result="ok", detail=f"{n} pages")
         return {"ok": True, "message": f"Requeued {n} page(s) for OCR."}
     except Exception as exc:  # noqa: BLE001
         log.exception("api_requeue_failed", document_id=document_id)
-        await _audit(username=user, action="requeue_ocr", document_id=document_id,
+        await _audit(username=session.username, action="requeue_ocr", document_id=document_id,
                      params={"page_nums": page_nums}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Requeue failed: {exc}"}
 
@@ -285,7 +289,7 @@ async def action_requeue(
 # --- SSE live status -------------------------------------------------------
 
 @router.get("/stream")
-async def stream(_user: str = Depends(require_session)) -> StreamingResponse:
+async def stream(_session: SessionData = Depends(require_session)) -> StreamingResponse:
     return StreamingResponse(
         sse.stream_document_changes(),
         media_type="text/event-stream",
@@ -295,17 +299,17 @@ async def stream(_user: str = Depends(require_session)) -> StreamingResponse:
 
 @router.post("/documents/{document_id}/reclassify")
 async def action_reclassify(
-    document_id: str, user: str = Depends(require_session)
+    document_id: str, session: SessionData = Depends(require_role("operator", "administrator"))
 ) -> dict[str, Any]:
     try:
         res = await actions.reclassify(document_id)
-        await _audit(username=user, action="reclassify", document_id=document_id,
+        await _audit(username=session.username, action="reclassify", document_id=document_id,
                      params={}, result="ok", detail=str(res))
         return {"ok": True,
                 "message": f"Re-classified as {res['document_category']}/{res['document_type']}."}
     except Exception as exc:  # noqa: BLE001
         log.exception("api_reclassify_failed", document_id=document_id)
-        await _audit(username=user, action="reclassify", document_id=document_id,
+        await _audit(username=session.username, action="reclassify", document_id=document_id,
                      params={}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Re-classify failed: {exc}"}
 
@@ -314,7 +318,7 @@ async def action_reclassify(
 
 @router.get("/eval/queue")
 async def eval_queue(
-    offset: int = 0, _user: str = Depends(require_session)
+    offset: int = 0, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await queries.list_review_queue(session, limit=_PAGE_SIZE, offset=offset)
@@ -339,14 +343,14 @@ class EvalCorrectionBody(BaseModel):
 
 @router.patch("/eval/queue/{document_id}")
 async def eval_correct(
-    document_id: str, body: EvalCorrectionBody, user: str = Depends(require_session)
+    document_id: str, body: EvalCorrectionBody, session: SessionData = Depends(require_role("reviewer", "administrator"))
 ) -> dict[str, Any]:
     patch = body.model_dump(exclude_unset=True)
     try:
-        async with session_scope() as session:
-            repo = DocumentRepository(session)
+        async with session_scope() as db:
+            repo = DocumentRepository(db)
             await repo.update_fields(document_id, **patch)
-            result = await match_document(document_id, session=session)
+            result = await match_document(document_id, session=db)
             doc = await repo.get(document_id)
             doc_d = _to_dict(doc)
         match_result_d = {
@@ -358,7 +362,7 @@ async def eval_correct(
             "matched_on": result.matched_on,
         }
         try:
-            await _audit(username=user, action="manual_correction", document_id=document_id,
+            await _audit(username=session.username, action="manual_correction", document_id=document_id,
                          params={"patch": {k: str(v) for k, v in patch.items()},
                                  "match_result": {k: str(v) for k, v in match_result_d.items()}},
                          result="ok", detail=None)
@@ -380,26 +384,26 @@ class LabelBody(BaseModel):
 
 
 @router.post("/eval/enrol")
-async def eval_enrol(body: EnrolBody, user: str = Depends(require_session)) -> dict[str, Any]:
+async def eval_enrol(body: EnrolBody, session: SessionData = Depends(require_role("reviewer", "administrator"))) -> dict[str, Any]:
     try:
         bucket = get_settings().s3_bucket
-        async with session_scope() as session, get_s3_client() as s3:
+        async with session_scope() as db, get_s3_client() as s3:
             n = await eval_queries.enrol(
-                session, s3=s3, bucket=bucket, document_id=body.document_id
+                db, s3=s3, bucket=bucket, document_id=body.document_id
             )
-        await _audit(username=user, action="eval_enrol", document_id=body.document_id,
+        await _audit(username=session.username, action="eval_enrol", document_id=body.document_id,
                      params={"document_id": body.document_id}, result="ok", detail=f"{n} pages")
         return {"ok": True, "enrolled": n}
     except Exception as exc:  # noqa: BLE001
         log.exception("api_eval_enrol_failed", document_id=body.document_id)
-        await _audit(username=user, action="eval_enrol", document_id=body.document_id,
+        await _audit(username=session.username, action="eval_enrol", document_id=body.document_id,
                      params={"document_id": body.document_id}, result="error", detail=str(exc))
         return {"ok": False, "message": f"Enrol failed: {exc}"}
 
 
 @router.get("/eval/pages")
 async def eval_pages(
-    only_unlabeled: bool = False, _user: str = Depends(require_session)
+    only_unlabeled: bool = False, _session: SessionData = Depends(require_session)
 ) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await eval_queries.list_eval_pages(session, only_unlabeled=only_unlabeled)
@@ -411,27 +415,27 @@ async def eval_pages(
 
 @router.post("/eval/pages/{page_id:path}/label")
 async def eval_label(
-    page_id: str, body: LabelBody, user: str = Depends(require_session)
+    page_id: str, body: LabelBody, session: SessionData = Depends(require_role("reviewer", "administrator"))
 ) -> dict[str, Any]:
     try:
-        async with session_scope() as session:
+        async with session_scope() as db:
             await eval_queries.set_label(
-                session, page_id=page_id, label=body.label, labeled_by=user
+                db, page_id=page_id, label=body.label, labeled_by=session.username
             )
-        await _audit(username=user, action="eval_label", document_id=None,
+        await _audit(username=session.username, action="eval_label", document_id=None,
                      params={"page_id": page_id, "label": body.label},
                      result="ok", detail=None)
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         log.exception("api_eval_label_failed", page_id=page_id)
-        await _audit(username=user, action="eval_label", document_id=None,
+        await _audit(username=session.username, action="eval_label", document_id=None,
                      params={"page_id": page_id, "label": body.label},
                      result="error", detail=str(exc))
         return {"ok": False, "message": str(exc)}
 
 
 @router.get("/eval/score")
-async def eval_score(_user: str = Depends(require_session)) -> dict[str, Any]:
+async def eval_score(_session: SessionData = Depends(require_session)) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await eval_queries.labeled_rows(session)
     cm = confusion_matrix(rows, Thresholds())
@@ -446,7 +450,7 @@ async def eval_score(_user: str = Depends(require_session)) -> dict[str, Any]:
 
 
 @router.get("/eval/sweep")
-async def eval_sweep(_user: str = Depends(require_session)) -> dict[str, Any]:
+async def eval_sweep(_session: SessionData = Depends(require_session)) -> dict[str, Any]:
     async with session_scope() as session:
         rows = await eval_queries.labeled_rows(session)
     res = threshold_sweep(rows)

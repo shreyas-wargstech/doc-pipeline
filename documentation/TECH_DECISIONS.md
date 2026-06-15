@@ -608,3 +608,29 @@ inputs up front.
 
 **Status:** implemented on `claude/confident-albattani-b184b8` (16 tasks, 45 unit
 green, integration + benchmark scaffolds gated), not yet merged to `main`.
+
+## 10. Cloud Infrastructure (AWS Phase 0, 2026-06-16)
+
+- **Principle**: Zero Docker in production. All production services are AWS managed (RDS, S3, SQS, ElastiCache, Lambda, ECS Fargate, CloudWatch, Secrets Manager). Docker only for local dev (optional, can be eliminated).
+- **Region**: `ap-south-1` (Mumbai) — lowest latency for India, no data residency concerns.
+- **Deployment tool**: SAM CLI for CloudFormation (Phase 0). Terraform branch (`Terraform-prod`) preserved as reference for comparison. SAM chosen for faster iteration, YAML-native, Lambda-native. Terraform may be re-evaluated for production if complexity grows.
+- **Compute model**: Lambda for pipeline stages (serverless, pay-per-invocation, auto-scaling, cold starts acceptable for async processing). ECS Fargate for API (always-on, WebSocket-capable, FARGATE_SPOT weighted 3:1 for cost).
+- **Storage**: S3 for raw documents, rendered images, manifest.json. RDS PostgreSQL 16 (t3.micro) for structured data + pgvector for embeddings. ElastiCache Redis (cache.t4g.micro) for session cache, rate limiting, job queues.
+- **Messaging**: SQS FIFO queues for ordered pipeline processing (ocr → vlm → structure → match → persist). S3 event notifications trigger `ocr-queue.fifo`. Each Lambda stage pushes to next queue. Dead-letter queues (DLQs) for all.
+- **Security**: Secrets Manager for all credentials (LLM, VLM, Tesseract, database, Redis), KMS-encrypted, auto-rotation. IAM roles with least-privilege. VPC security groups for RDS/ElastiCache (no public IP). CloudTrail for audit logging.
+- **Monitoring**: CloudWatch dashboard with custom metrics (queue depths, processing latency, error rates, cost per document). 4 alarms: queue depth, error rate, API latency, cost threshold. CloudWatch Logs for Lambda/ECS.
+- **Cost target**: ~$89/month base + ~$6 per 200-document batch. Breakdown: RDS ~$45, ElastiCache ~$12, ECS ~$15, S3 ~$2, Vercel ~$15. Lambda: ~$0.05 per 200 docs. SQS: ~$0.05 per 200 docs.
+- **Config**: `shared/config.py` extended with AWS fields. `database_url` property auto-falls-back from RDS to local (for dev). `aws_clients.py` uses `@lru_cache(maxsize=1)` singleton pattern for boto3 clients.
+- **NAS upload agent**: `nas/upload_agent.py` — zero-Docker Python-only. Renders PDFs (PyMuPDF 300 DPI), preprocesses (OpenCV: grayscale, denoise, deskew, adaptive threshold), classifies (Tesseract keyword-based), uploads to S3. `manifest.json` uploaded LAST to trigger S3 event → SQS. Batch mode: asyncio.Semaphore(workers) for concurrent uploads.
+- **Lambda stubs**: 6 functions (`cloud/lambda/{ocr,vlm,structure,match,persist,index}/handler.py`) — identical pattern: `lambda_handler(event, context)` → parse SQS records → log → return `{"batchItemFailures": []}`. Phase 1 replaces with actual imports from `cloud/{ocr,structure,match,persist,index}`.
+- **Deploy/Destroy**: `cloud/infrastructure/scripts/deploy.py` — one-command interactive deploy. `cloud/infrastructure/scripts/destroy.py` — one-command teardown with confirmation. Both validate prereqs, handle VPC/subnet detection, prompt for external credentials.
+- **Makefile**: 15+ AWS targets: `aws-deploy`, `aws-destroy`, `aws-deploy-non-interactive`, `aws-logs-{ocr,vlm,structure,match,persist,index}`, `aws-sqs-status`, `ecr-login`, `build-api`, `push-api`, `upload-aws`, `upload-aws-batch`, `aws-cost-estimate`.
+- **Trade-off**: Lambda cold starts add ~1-2s per stage. Acceptable for async batch processing. For real-time (Phase 2), ECS Fargate API is always warm. Consider Lambda Provisioned Concurrency for high-volume stages if cold starts become problematic.
+- **Trade-off**: S3 + SQS adds latency vs direct Lambda invocation. Benefit: decoupling, retry, DLQ, ordered processing. S3 event notifications are reliable and free. SQS costs are negligible (~$0.05 per 200 docs).
+- **Trade-off**: RDS t3.micro is burstable, may throttle under sustained load. For 200-doc batches (takes ~30 min), it's sufficient. Consider t3.small or t3.medium if concurrent batches are needed.
+- **Trade-off**: ElastiCache cache.t4g.micro is tiny. For session cache + rate limiting, it's sufficient. For larger workloads, upgrade to cache.t4g.small.
+- **Risk**: SAM template is 47KB and complex. Consider splitting into nested stacks if it grows. CloudFormation has a 500KB template limit. Use `AWS::Serverless::Application` for nested stacks.
+- **Risk**: Secrets Manager auto-rotation requires a rotation Lambda. For now, manual rotation is acceptable. Add rotation Lambda in Phase 2.
+- **Risk**: ECS Fargate SPOT tasks can be interrupted. Weighted 3:1 means ~25% of tasks are SPOT. For a single-task API, this means ~25% chance of interruption. For development, this is acceptable. For production, use FARGATE only or implement graceful shutdown.
+- **Risk**: Lambda stubs are non-functional. Phase 1 must replace them with actual pipeline imports. This is the highest risk item for Phase 1.
+- **Next**: Phase 1 (TDD) begins. All implementation must be test-driven. First tests: S3→SQS→Lambda chain integration, Lambda stub replacement, API Docker image build, Vercel deploy.

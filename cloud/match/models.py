@@ -46,6 +46,9 @@ class ReferenceMatch:
     f_name: str = ""
     m_name: str = ""
     l_name: str = ""
+    f_name_change: str = ""
+    m_name_change: str = ""
+    l_name_change: str = ""
     gender: str = ""
 
 

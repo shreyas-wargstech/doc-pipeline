@@ -1,0 +1,1327 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  DocIntel — Zero Docker, Full AWS Managed Services.
+  Production infrastructure: S3, SQS, RDS, ElastiCache, Lambda, ECS Fargate,
+  CloudWatch, Secrets Manager. One-command deploy. One-command teardown.
+
+# ────────────────────────────────────────────────────────────────────────────
+# Parameters
+# ────────────────────────────────────────────────────────────────────────────
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Deployment environment name.
+
+  Region:
+    Type: String
+    Default: ap-south-1
+    Description: AWS region. Mumbai (ap-south-1) is recommended for India.
+
+  RdsInstanceClass:
+    Type: String
+    Default: db.t3.medium
+    AllowedValues: [db.t3.micro, db.t3.small, db.t3.medium, db.t3.large]
+    Description: RDS instance class. Start with db.t3.medium; scale up as needed.
+
+  RdsAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 100
+    Description: RDS allocated storage in GB. Auto-scales up to 100 GB.
+
+  EnableMultiAz:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable Multi-AZ for RDS (adds cost, provides HA). Set to 'true' for production.
+
+  EcsTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 4
+    Description: Number of ECS Fargate tasks for the API server. Auto-scaling configured separately.
+
+  EcsCpu:
+    Type: Number
+    Default: 512
+    AllowedValues: [256, 512, 1024, 2048]
+    Description: ECS task CPU units (256 = 0.25 vCPU, 512 = 0.5 vCPU).
+
+  EcsMemory:
+    Type: Number
+    Default: 1024
+    AllowedValues: [512, 1024, 2048, 4096]
+    Description: ECS task memory in MB.
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for RDS, ElastiCache, and ECS. Use default VPC or create one.
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 1 for RDS and ElastiCache.
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Private subnet 2 for RDS and ElastiCache (different AZ from subnet 1).
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet 1 for ECS ALB.
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet 2 for ECS ALB.
+
+  S3BucketName:
+    Type: String
+    Default: ''
+    Description: >
+      S3 bucket name for document storage. Leave blank for auto-generated name.
+      Must be globally unique. If blank, generates docintel-documents-{account}-{env}.
+
+  QdrantUrl:
+    Type: String
+    Description: Qdrant Cloud URL (e.g., https://xyz.cloud.qdrant.io:6333).
+
+  QdrantApiKey:
+    Type: String
+    Description: Qdrant Cloud API key.
+    NoEcho: true
+
+  Neo4jUri:
+    Type: String
+    Description: Neo4j Aura URI (e.g., bolt+s://xyz.databases.neo4j.io).
+
+  Neo4jUser:
+    Type: String
+    Default: neo4j
+    Description: Neo4j Aura username.
+
+  Neo4jPassword:
+    Type: String
+    Description: Neo4j Aura password.
+    NoEcho: true
+
+  OpenRouterApiKey:
+    Type: String
+    Description: OpenRouter API key for VLM tier.
+    NoEcho: true
+
+  OpenRouterBaseUrl:
+    Type: String
+    Default: https://openrouter.ai/api/v1
+    Description: OpenRouter base URL.
+
+  OpenRouterModel:
+    Type: String
+    Default: google/gemini-2.5-flash
+    Description: OpenRouter model ID for VLM.
+
+  DashboardSessionSecret:
+    Type: String
+    Description: HMAC secret for dashboard signed-cookie sessions.
+    NoEcho: true
+
+  AllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed to access the ALB. Restrict to your office IP for production.
+
+# ────────────────────────────────────────────────────────────────────────────
+# Globals
+# ────────────────────────────────────────────────────────────────────────────
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Handler: handler.lambda_handler
+    Timeout: 60
+    MemorySize: 1024
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        AWS_REGION: !Ref Region
+        ENVIRONMENT: !Ref Environment
+        SECRETS_MANAGER_ARN: !Ref DocIntelSecrets
+        S3_BUCKET: !Ref DocumentsBucket
+        SQS_OCR_QUEUE_URL: !Ref OcrQueue
+        SQS_STRUCTURE_QUEUE_URL: !Ref StructureQueue
+        SQS_MATCH_QUEUE_URL: !Ref MatchQueue
+        SQS_PERSIST_QUEUE_URL: !Ref PersistQueue
+        SQS_INDEX_QUEUE_URL: !Ref IndexQueue
+        RDS_HOST: !GetAtt Database.Endpoint.Address
+        RDS_PORT: '5432'
+        RDS_DATABASE: 'doc_pipeline'
+        RDS_USERNAME: 'pipeline'
+        REDIS_HOST: !GetAtt RedisCluster.RedisEndpoint
+        REDIS_PORT: '6379'
+        QDRANT_URL: !Ref QdrantUrl
+        NEO4J_URI: !Ref Neo4jUri
+        NEO4J_USER: !Ref Neo4jUser
+        OPENROUTER_BASE_URL: !Ref OpenRouterBaseUrl
+        OPENROUTER_MODEL: !Ref OpenRouterModel
+    VpcConfig:
+      SecurityGroupIds:
+        - !Ref LambdaSecurityGroup
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+    Tracing: Active
+
+# ────────────────────────────────────────────────────────────────────────────
+# Conditions
+# ────────────────────────────────────────────────────────────────────────────
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, production]
+  CustomBucketName: !Not [!Equals [!Ref S3BucketName, '']]
+  EnableMultiAzCondition: !Equals [!Ref EnableMultiAz, 'true']
+
+# ────────────────────────────────────────────────────────────────────────────
+# Resources
+# ────────────────────────────────────────────────────────────────────────────
+
+Resources:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SECRETS MANAGER
+  # ─────────────────────────────────────────────────────────────────────────
+
+  DocIntelSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub docintel/${Environment}/credentials
+      Description: All credentials for DocIntel pipeline and services
+      GenerateSecretString:
+        SecretStringTemplate: !Sub |
+          {
+            "RDS_PASSWORD": "",
+            "OPENROUTER_API_KEY": "${OpenRouterApiKey}",
+            "NEO4J_PASSWORD": "${Neo4jPassword}",
+            "QDRANT_API_KEY": "${QdrantApiKey}",
+            "DASHBOARD_SESSION_SECRET": "${DashboardSessionSecret}"
+          }
+        GenerateStringKey: RDS_PASSWORD
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+      KmsKeyId: !Ref SecretsKmsKey
+
+  SecretsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for encrypting DocIntel secrets
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Lambda and ECS to decrypt
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt LambdaExecutionRole.Arn
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: '*'
+
+  SecretsKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/docintel-${Environment}-secrets
+      TargetKeyId: !Ref SecretsKmsKey
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SECURITY GROUPS
+  # ─────────────────────────────────────────────────────────────────────────
+
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub docintel-${Environment}-rds-sg
+      GroupDescription: Security group for DocIntel RDS PostgreSQL
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref EcsSecurityGroup
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub docintel-${Environment}-redis-sg
+      GroupDescription: Security group for DocIntel ElastiCache Redis
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref EcsSecurityGroup
+
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub docintel-${Environment}-lambda-sg
+      GroupDescription: Security group for DocIntel Lambda functions
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub docintel-${Environment}-ecs-sg
+      GroupDescription: Security group for DocIntel ECS Fargate tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub docintel-${Environment}-alb-sg
+      GroupDescription: Security group for DocIntel Application Load Balancer
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AllowedCidr
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # S3 BUCKET — Document Storage
+  # ─────────────────────────────────────────────────────────────────────────
+
+  DocumentsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !If
+        - CustomBucketName
+        - !Ref S3BucketName
+        - !Sub docintel-documents-${AWS::AccountId}-${Environment}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToInfrequentAccess
+            Status: Enabled
+            Transition:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+          - Id: ArchiveToGlacier
+            Status: Enabled
+            Transition:
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              KeyFilterRules:
+                - Name: suffix
+                  Value: manifest.json
+            Queue: !GetAtt OcrQueue.Arn
+
+  DocumentsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DocumentsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub arn:aws:s3:::${DocumentsBucket}
+              - !Sub arn:aws:s3:::${DocumentsBucket}/*
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # SQS QUEUES — FIFO with Dead-Letter Queues
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # Dead-Letter Queues
+  OcrDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-ocr-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  StructureDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-structure-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+  MatchDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-match-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+  PersistDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-persist-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+  IndexDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-index-dlq.fifo
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600
+
+  # Main Queues
+  OcrQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-ocr-queue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt OcrDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      KmsMasterKeyId: !Ref SecretsKmsKey
+
+  StructureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-structure-queue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt StructureDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      KmsMasterKeyId: !Ref SecretsKmsKey
+
+  MatchQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-match-queue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt MatchDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      KmsMasterKeyId: !Ref SecretsKmsKey
+
+  PersistQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-persist-queue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PersistDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      KmsMasterKeyId: !Ref SecretsKmsKey
+
+  IndexQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub docintel-${Environment}-index-queue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IndexDeadLetterQueue.Arn
+        maxReceiveCount: 3
+      KmsMasterKeyId: !Ref SecretsKmsKey
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # RDS — PostgreSQL 16
+  # ─────────────────────────────────────────────────────────────────────────
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets for DocIntel RDS
+      DBSubnetGroupName: !Sub docintel-${Environment}-db-subnet-group
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub docintel-${Environment}-postgres
+      DBInstanceClass: !Ref RdsInstanceClass
+      Engine: postgres
+      EngineVersion: '16.3'
+      MasterUsername: pipeline
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DocIntelSecrets}:SecretString:RDS_PASSWORD}}'
+      AllocatedStorage: !Ref RdsAllocatedStorage
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      MultiAZ: !Ref EnableMultiAz
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      BackupRetentionPeriod: 7
+      DeletionProtection: !If [IsProduction, true, false]
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: DocIntel
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ELASTICACHE — Redis
+  # ─────────────────────────────────────────────────────────────────────────
+
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnets for DocIntel ElastiCache Redis
+      SubnetGroupName: !Sub docintel-${Environment}-cache-subnet-group
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      CacheNodeType: cache.t3.micro
+      Engine: redis
+      EngineVersion: '7.1'
+      NumCacheNodes: 1
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      SecurityGroupIds:
+        - !Ref RedisSecurityGroup
+      PreferredMaintenanceWindow: sun:03:00-sun:04:00
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: DocIntel
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # IAM — Roles & Policies
+  # ─────────────────────────────────────────────────────────────────────────
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub docintel-${Environment}-lambda-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: DocIntelLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${DocumentsBucket}
+                  - !Sub arn:aws:s3:::${DocumentsBucket}/*
+              - Sid: SQSAccess
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt OcrQueue.Arn
+                  - !GetAtt StructureQueue.Arn
+                  - !GetAtt MatchQueue.Arn
+                  - !GetAtt PersistQueue.Arn
+                  - !GetAtt IndexQueue.Arn
+                  - !GetAtt OcrDeadLetterQueue.Arn
+                  - !GetAtt StructureDeadLetterQueue.Arn
+                  - !GetAtt MatchDeadLetterQueue.Arn
+                  - !GetAtt PersistDeadLetterQueue.Arn
+                  - !GetAtt IndexDeadLetterQueue.Arn
+              - Sid: SecretsManagerAccess
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource: !Ref DocIntelSecrets
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/docintel-${Environment}-*:*
+              - Sid: XRayAccess
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+              - Sid: KMSDecrypt
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !GetAtt SecretsKmsKey.Arn
+              - Sid: RDSConnect
+                Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource: '*'
+              - Sid: ElastiCacheConnect
+                Effect: Allow
+                Action:
+                  - elasticache:DescribeCacheClusters
+                Resource: '*'
+
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub docintel-${Environment}-ecs-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: EcsSecretsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SecretsManagerRead
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DocIntelSecrets
+              - Sid: KMSDecrypt
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !GetAtt SecretsKmsKey.Arn
+
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub docintel-${Environment}-ecs-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DocIntelEcsTaskPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${DocumentsBucket}
+                  - !Sub arn:aws:s3:::${DocumentsBucket}/*
+              - Sid: SQSAccess
+                Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !GetAtt OcrQueue.Arn
+                  - !GetAtt StructureQueue.Arn
+                  - !GetAtt MatchQueue.Arn
+                  - !GetAtt PersistQueue.Arn
+                  - !GetAtt IndexQueue.Arn
+              - Sid: SecretsManagerRead
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DocIntelSecrets
+              - Sid: KMSDecrypt
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !GetAtt SecretsKmsKey.Arn
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/docintel-${Environment}:*
+              - Sid: XRayAccess
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # LAMBDA FUNCTIONS — Stage Workers (Stubs for Phase 0)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # Note: In Phase 1, these CodeUri paths will point to the actual
+  # Lambda handler code. For Phase 0, they reference stub handlers
+  # that simply log the event and return success.
+
+  OcrFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-ocr
+      CodeUri: ../../lambda/ocr/
+      Handler: handler.lambda_handler
+      MemorySize: 1024
+      Timeout: 60
+      Events:
+        SQSJob:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt OcrQueue.Arn
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      ReservedConcurrentExecutions: 100
+
+  VlmFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-vlm
+      CodeUri: ../../lambda/vlm/
+      Handler: handler.lambda_handler
+      MemorySize: 2048
+      Timeout: 120
+      ReservedConcurrentExecutions: 50
+      # Invoked by OCR function, not by SQS directly
+      Events: {}
+
+  StructureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-structure
+      CodeUri: ../../lambda/structure/
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Timeout: 30
+      Events:
+        SQSJob:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt StructureQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      ReservedConcurrentExecutions: 50
+
+  MatchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-match
+      CodeUri: ../../lambda/match/
+      Handler: handler.lambda_handler
+      MemorySize: 256
+      Timeout: 15
+      Events:
+        SQSJob:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt MatchQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      ReservedConcurrentExecutions: 50
+
+  PersistFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-persist
+      CodeUri: ../../lambda/persist/
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Timeout: 30
+      Events:
+        SQSJob:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PersistQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      ReservedConcurrentExecutions: 50
+
+  IndexFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-index
+      CodeUri: ../../lambda/index/
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Timeout: 30
+      Events:
+        SQSJob:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt IndexQueue.Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      ReservedConcurrentExecutions: 50
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ECS — API Server (FastAPI + WebSocket)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  ApiCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub docintel-${Environment}-api-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 3
+        - CapacityProvider: FARGATE
+          Weight: 1
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: DocIntel
+
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub docintel-${Environment}-api
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: !Ref EcsCpu
+      Memory: !Ref EcsMemory
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/docintel-${Environment}-api:latest
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: DATABASE_URL
+              Value: !Sub postgresql+asyncpg://pipeline:{{resolve:secretsmanager:${DocIntelSecrets}:SecretString:RDS_PASSWORD}}@${Database.Endpoint.Address}:5432/doc_pipeline
+            - Name: S3_BUCKET
+              Value: !Ref DocumentsBucket
+            - Name: SQS_OCR_QUEUE_URL
+              Value: !Ref OcrQueue
+            - Name: SQS_STRUCTURE_QUEUE_URL
+              Value: !Ref StructureQueue
+            - Name: SQS_MATCH_QUEUE_URL
+              Value: !Ref MatchQueue
+            - Name: SQS_PERSIST_QUEUE_URL
+              Value: !Ref PersistQueue
+            - Name: SQS_INDEX_QUEUE_URL
+              Value: !Ref IndexQueue
+            - Name: REDIS_HOST
+              Value: !GetAtt RedisCluster.RedisEndpoint
+            - Name: QDRANT_URL
+              Value: !Ref QdrantUrl
+            - Name: NEO4J_URI
+              Value: !Ref Neo4jUri
+            - Name: NEO4J_USER
+              Value: !Ref Neo4jUser
+            - Name: OPENROUTER_BASE_URL
+              Value: !Ref OpenRouterBaseUrl
+            - Name: OPENROUTER_MODEL
+              Value: !Ref OpenRouterModel
+            - Name: SECRETS_MANAGER_ARN
+              Value: !Ref DocIntelSecrets
+          Secrets:
+            - Name: OPENROUTER_API_KEY
+              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:OPENROUTER_API_KEY::
+            - Name: NEO4J_PASSWORD
+              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:NEO4J_PASSWORD::
+            - Name: QDRANT_API_KEY
+              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:QDRANT_API_KEY::
+            - Name: DASHBOARD_SESSION_SECRET
+              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:DASHBOARD_SESSION_SECRET::
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8000/health || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/ecs/docintel-${Environment}-api
+      RetentionInDays: 30
+
+  ApiService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ApiListenerRule
+    Properties:
+      ServiceName: !Sub docintel-${Environment}-api
+      Cluster: !Ref ApiCluster
+      TaskDefinition: !Ref ApiTaskDefinition
+      DesiredCount: !Ref EcsTaskCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          AssignPublicIp: DISABLED
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8000
+          TargetGroupArn: !Ref ApiTargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      PropagateTags: SERVICE
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: DocIntel
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # APPLICATION LOAD BALANCER
+  # ─────────────────────────────────────────────────────────────────────────
+
+  ApiAlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub docintel-${Environment}-api-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: DocIntel
+
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub docintel-${Environment}-api-tg
+      Port: 8000
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  ApiListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApiAlb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  ApiListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ApiListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ['/*']
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # CLOUDWATCH — Dashboard & Alarms
+  # ─────────────────────────────────────────────────────────────────────────
+
+  PipelineDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub DocIntel-${Environment}-Pipeline
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "OCR Lambda Invocations",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "docintel-${Environment}-ocr", { "stat": "Sum" } ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "VLM Lambda Invocations",
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "docintel-${Environment}-vlm", { "stat": "Sum" } ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "SQS Queue Depth (Approximate Messages Visible)",
+                "metrics": [
+                  [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "docintel-${Environment}-ocr-queue.fifo" ],
+                  [ "...", "docintel-${Environment}-structure-queue.fifo" ],
+                  [ "...", "docintel-${Environment}-match-queue.fifo" ],
+                  [ "...", "docintel-${Environment}-persist-queue.fifo" ],
+                  [ "...", "docintel-${Environment}-index-queue.fifo" ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "Lambda Error Rate",
+                "metrics": [
+                  [ "AWS/Lambda", "Errors", "FunctionName", "docintel-${Environment}-ocr", { "stat": "Sum" } ],
+                  [ "...", "docintel-${Environment}-structure" ],
+                  [ "...", "docintel-${Environment}-match" ],
+                  [ "...", "docintel-${Environment}-persist" ],
+                  [ "...", "docintel-${Environment}-index" ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 12, "width": 12, "height": 6,
+              "properties": {
+                "title": "RDS CPU Utilization",
+                "metrics": [
+                  [ "AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "docintel-${Environment}-postgres" ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0, "max": 100 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 12, "width": 12, "height": 6,
+              "properties": {
+                "title": "ECS API Task Count",
+                "metrics": [
+                  [ "AWS/ECS", "RunningTaskCount", "ServiceName", "docintel-${Environment}-api", "ClusterName", "docintel-${Environment}-api-cluster" ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 18, "width": 12, "height": 6,
+              "properties": {
+                "title": "ALB Request Count",
+                "metrics": [
+                  [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${ApiAlb}" ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 18, "width": 12, "height": 6,
+              "properties": {
+                "title": "ALB 5xx Error Rate",
+                "metrics": [
+                  [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${ApiAlb}" ]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}",
+                "yAxis": { "left": { "min": 0 } }
+              }
+            }
+          ]
+        }
+
+  # ── CloudWatch Alarms ──
+
+  OcrQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub DocIntel-${Environment}-OCR-Queue-Depth-High
+      AlarmDescription: Alert when OCR queue depth exceeds 100 messages for > 10 minutes
+      MetricName: ApproximateNumberOfMessagesVisible
+      Namespace: AWS/SQS
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt OcrQueue.QueueName
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  LambdaErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub DocIntel-${Environment}-Lambda-Error-Rate-High
+      AlarmDescription: Alert when Lambda error rate exceeds 5% for any function
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  RdsCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub DocIntel-${Environment}-RDS-CPU-High
+      AlarmDescription: Alert when RDS CPU exceeds 80% for > 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  Alb5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub DocIntel-${Environment}-ALB-5xx-Errors
+      AlarmDescription: Alert when ALB 5xx errors exceed 10 in 5 minutes
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt ApiAlb.LoadBalancerFullName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertSnsTopic
+
+  AlertSnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub docintel-${Environment}-alerts
+      DisplayName: DocIntel Alerts
+
+# ────────────────────────────────────────────────────────────────────────────
+# Outputs
+# ────────────────────────────────────────────────────────────────────────────
+
+Outputs:
+  ApiEndpoint:
+    Description: Application Load Balancer DNS name (API endpoint)
+    Value: !GetAtt ApiAlb.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEndpoint
+
+  S3Bucket:
+    Description: Document storage bucket name
+    Value: !Ref DocumentsBucket
+    Export:
+      Name: !Sub ${AWS::StackName}-S3Bucket
+
+  RdsEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsEndpoint
+
+  RdsPort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt Database.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsPort
+
+  RedisEndpoint:
+    Description: ElastiCache Redis endpoint
+    Value: !GetAtt RedisCluster.RedisEndpoint
+    Export:
+      Name: !Sub ${AWS::StackName}-RedisEndpoint
+
+  RedisPort:
+    Description: ElastiCache Redis port
+    Value: !GetAtt RedisCluster.RedisEndpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-RedisPort
+
+  OcrQueueUrl:
+    Description: SQS OCR queue URL
+    Value: !Ref OcrQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-OcrQueueUrl
+
+  StructureQueueUrl:
+    Description: SQS Structure queue URL
+    Value: !Ref StructureQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-StructureQueueUrl
+
+  MatchQueueUrl:
+    Description: SQS Match queue URL
+    Value: !Ref MatchQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-MatchQueueUrl
+
+  PersistQueueUrl:
+    Description: SQS Persist queue URL
+    Value: !Ref PersistQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-PersistQueueUrl
+
+  IndexQueueUrl:
+    Description: SQS Index queue URL
+    Value: !Ref IndexQueue
+    Export:
+      Name: !Sub ${AWS::StackName}-IndexQueueUrl
+
+  SecretsArn:
+    Description: Secrets Manager ARN for credentials
+    Value: !Ref DocIntelSecrets
+    Export:
+      Name: !Sub ${AWS::StackName}-SecretsArn
+
+  DashboardUrl:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${PipelineDashboard}
+    Export:
+      Name: !Sub ${AWS::StackName}-DashboardUrl

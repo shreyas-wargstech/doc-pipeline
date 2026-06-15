@@ -8,7 +8,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from cloud.app import app
-from cloud.dashboard.session import COOKIE_NAME, require_session
+from cloud.dashboard.session import COOKIE_NAME, SessionData, require_session
 from shared.exceptions import MatchError
 
 
@@ -19,19 +19,20 @@ def client():
 
 @pytest.fixture
 def as_user():
-    """Override require_session so endpoints see an authenticated user."""
-    app.dependency_overrides[require_session] = lambda: "tester"
+    """Override require_session so endpoints see an authenticated admin user."""
+    app.dependency_overrides[require_session] = lambda: SessionData(username="tester", role="administrator")
     yield "tester"
     app.dependency_overrides.pop(require_session, None)
 
 
 @pytest.mark.asyncio
 async def test_login_sets_cookie_on_valid_credentials(client: AsyncClient):
-    with patch("cloud.dashboard.api.verify_credentials", new=AsyncMock(return_value=True)):
+    with patch("cloud.dashboard.api.verify_credentials", new=AsyncMock(return_value=True)), \
+         patch("cloud.dashboard.api._lookup_role", new=AsyncMock(return_value="administrator")):
         async with client as c:
             resp = await c.post("/api/login", json={"username": "alice", "password": "pw"})
     assert resp.status_code == 200
-    assert resp.json() == {"user": "alice"}
+    assert resp.json() == {"user": "alice", "role": "administrator"}
     assert COOKIE_NAME in resp.cookies
 
 
@@ -56,7 +57,7 @@ async def test_me_returns_user_with_session(client: AsyncClient, as_user):
     async with client as c:
         resp = await c.get("/api/me")
     assert resp.status_code == 200
-    assert resp.json() == {"user": "tester"}
+    assert resp.json() == {"user": "tester", "role": "administrator"}
 
 
 @pytest.mark.asyncio
@@ -448,3 +449,34 @@ async def test_remove_bookmark_returns_false(client: AsyncClient, as_user):
     assert resp.status_code == 200
     assert resp.json() == {"bookmarked": False}
     m_bm.return_value.remove.assert_awaited_once_with("tester", "doc-1")
+
+
+# --- role guard (403) tests ------------------------------------------------
+
+@pytest.fixture
+def as_viewer():
+    """Authenticated as a viewer (read-only)."""
+    app.dependency_overrides[require_session] = lambda: SessionData(username="viewer", role="viewer")
+    yield
+    app.dependency_overrides.pop(require_session, None)
+
+
+@pytest.mark.asyncio
+async def test_ingest_requires_operator_role(client: AsyncClient, as_viewer):
+    async with client as c:
+        resp = await c.post("/api/documents/abc/ingest")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_requeue_requires_operator_role(client: AsyncClient, as_viewer):
+    async with client as c:
+        resp = await c.post("/api/documents/abc/requeue-ocr")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_eval_correct_requires_reviewer_role(client: AsyncClient, as_viewer):
+    async with client as c:
+        resp = await c.patch("/api/eval/queue/abc", json={})
+    assert resp.status_code == 403

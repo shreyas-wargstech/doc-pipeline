@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from shared.config import get_settings
 from shared.neo4j_client import ensure_constraints
 from shared.neo4j_client import session_scope as neo4j_session
+from shared.qdrant_client import VECTOR_SIZE, ensure_collection, get_qdrant
 from shared.storage_s3 import S3Storage, get_s3_client
 
 
@@ -50,29 +51,18 @@ async def test_s3_put_if_absent_is_idempotent() -> None:
     assert await s3.get_bytes(key) == payload
 
 
-# ─── pgvector (document_pages) ───────────────────────────────────────
+# ─── Qdrant ──────────────────────────────────────────────────────────
 @pytest.mark.integration
-async def test_pgvector_table_present() -> None:
-    """The pgvector extension is enabled and document_pages exists, 384-dim."""
+async def test_qdrant_collection_is_idempotent() -> None:
     s = get_settings()
-    engine = create_async_engine(s.database_url)
+    client = get_qdrant()
     try:
-        async with engine.connect() as conn:
-            ext = await conn.execute(
-                text("SELECT 1 FROM pg_extension WHERE extname = 'vector'")
-            )
-            assert ext.scalar() == 1, "pgvector extension not installed"
-            r = await conn.execute(
-                text(
-                    "SELECT a.atttypmod FROM pg_attribute a "
-                    "JOIN pg_class c ON c.oid = a.attrelid "
-                    "WHERE c.relname = 'document_pages' AND a.attname = 'embedding'"
-                )
-            )
-            # pgvector stores the declared dimension in atttypmod.
-            assert r.scalar() == 384
+        await ensure_collection(client)
+        await ensure_collection(client)  # no-op second call
+        info = await client.get_collection(s.qdrant_collection)
+        assert info.config.params.vectors.size == VECTOR_SIZE
     finally:
-        await engine.dispose()
+        await client.close()
 
 
 # ─── Neo4j ───────────────────────────────────────────────────────────

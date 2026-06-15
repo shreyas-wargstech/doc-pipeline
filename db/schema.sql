@@ -277,10 +277,15 @@ CREATE TRIGGER set_eval_content_type_updated_at
 -- -----------------------------------------------------------------------------
 -- dashboard_users: credentials for the operations dashboard (HTTP Basic).
 -- Seeded via scripts/add_dashboard_user.py. password_hash = bcrypt.
+-- role = administrator | reviewer | operator | viewer (default: viewer).
+-- is_active = soft-delete flag for access control.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dashboard_users (
     username      TEXT        PRIMARY KEY,
     password_hash TEXT        NOT NULL,
+    role          TEXT        NOT NULL DEFAULT 'viewer'
+                              CHECK (role IN ('administrator','reviewer','operator','viewer')),
+    is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -339,83 +344,3 @@ CREATE TABLE IF NOT EXISTS cost_events (
 CREATE INDEX IF NOT EXISTS idx_cost_events_ts       ON cost_events (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_cost_events_stage    ON cost_events (stage);
 CREATE INDEX IF NOT EXISTS idx_cost_events_document ON cost_events (document_id);
--- -----------------------------------------------------------------------------
--- pipeline_runs / pipeline_run_items: durable folder-runner state.
---
--- The dashboard reads run progress by POLLING these tables, so the read path is
--- decoupled from whatever process does the work — the local in-process runner
--- writes these rows directly today; on AWS the SQS/Lambda dispatcher + stage
--- Lambdas write the SAME rows. A browser reload (or API-instance failover)
--- recovers the live run from here; a server restart no longer loses history.
---
--- control = cooperative signal the runner/dispatcher polls BETWEEN documents:
---   run   -> keep going (default)
---   cancel-> stop after the current document (status -> cancelled)
---   pause -> stop dispatching, stay resumable (extension point; no endpoint yet)
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS pipeline_runs (
-    run_id     TEXT        PRIMARY KEY,
-    folder     TEXT        NOT NULL,
-    category   TEXT        NOT NULL,
-    force      BOOLEAN     NOT NULL DEFAULT FALSE,
-    status     TEXT        NOT NULL DEFAULT 'running'
-               CHECK (status IN ('running', 'paused', 'completed', 'cancelled', 'failed')),
-    control    TEXT        NOT NULL DEFAULT 'run'
-               CHECK (control IN ('run', 'pause', 'cancel')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status
-    ON pipeline_runs (status, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS pipeline_run_items (
-    run_id      TEXT        NOT NULL REFERENCES pipeline_runs(run_id) ON DELETE CASCADE,
-    seq         INTEGER     NOT NULL,           -- 0-based position in the folder listing
-    filename    TEXT        NOT NULL,
-    status      TEXT        NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'running', 'done', 'skipped', 'failed')),
-    document_id TEXT,                            -- set once ingest computes the SHA-256
-    stage       TEXT,                            -- current stage: ingest|ocr|structure|...
-    error       TEXT,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (run_id, seq)
-);
-
-CREATE INDEX IF NOT EXISTS idx_pipeline_run_items_run
-    ON pipeline_run_items (run_id, seq);
-
--- -----------------------------------------------------------------------------
--- document_pages: page-level embedding vectors (pgvector).
--- Replaces the external Qdrant `document_pages` collection: vectors now live in
--- Postgres beside the relational data, so the persist stage writes them inside
--- the same transaction (no cross-store consistency gap).
--- Locked: 384-dim, Cosine; identity pages only (app_cover / application_form /
--- form) get a row -- retrieval is structured with light semantic backup.
--- One row per embedded page; PK = page_id makes the upsert idempotent.
--- Requires the `vector` extension (CREATE EXTENSION vector) -- see
--- scripts/apply_pgvector.py for the live-DB migration.
--- -----------------------------------------------------------------------------
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE IF NOT EXISTS document_pages (
-    page_id           TEXT        PRIMARY KEY,
-    document_id       TEXT        NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
-    page_num          INTEGER     NOT NULL,
-    page_type         TEXT,
-    document_category TEXT,
-    registration_no   TEXT,
-    s3_key_image      TEXT,
-    entity_types      TEXT[]      NOT NULL DEFAULT '{}',
-    embedding         vector(384) NOT NULL,
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_document_pages_doc
-    ON document_pages (document_id);
-
--- Approximate nearest-neighbour index for cosine distance (<=>).
--- ivfflat needs ANALYZE/data before it helps; with the tiny identity-page volume
--- a seq scan is fine, but the index keeps the query plan stable as data grows.
-CREATE INDEX IF NOT EXISTS idx_document_pages_embedding
-    ON document_pages USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);

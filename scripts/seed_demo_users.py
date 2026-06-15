@@ -19,12 +19,21 @@ from shared.logging import configure_logging, get_logger
 log = get_logger(__name__)
 
 DEMO_PASSWORD = "demo1234"
-DEMO_USERNAMES = ("aarav", "priya", "rohan", "sneha")
+
+DEMO_USERS: list[dict[str, str]] = [
+    {"username": "aarav", "role": "administrator"},
+    {"username": "priya", "role": "reviewer"},
+    {"username": "rohan", "role": "operator"},
+    {"username": "sneha", "role": "viewer"},
+]
 
 
 def build_demo_rows(password: str = DEMO_PASSWORD) -> list[dict[str, str]]:
     """Return upsert params for every demo user (pure — unit-testable)."""
-    return [{"username": u, "password_hash": bcrypt.hash(password)} for u in DEMO_USERNAMES]
+    return [
+        {"username": u["username"], "password_hash": bcrypt.hash(password), "role": u["role"]}
+        for u in DEMO_USERS
+    ]
 
 
 async def _seed() -> None:
@@ -33,19 +42,21 @@ async def _seed() -> None:
         for row in rows:
             await session.execute(
                 text(
-                    "INSERT INTO dashboard_users (username, password_hash) "
-                    "VALUES (:username, :password_hash) "
-                    "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash"
+                    "INSERT INTO dashboard_users (username, password_hash, role) "
+                    "VALUES (:username, :password_hash, :role) "
+                    "ON CONFLICT (username) DO UPDATE "
+                    "SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role"
                 ),
                 row,
             )
-            log.info("demo_user_upserted", username=row["username"])
+            log.info("demo_user_upserted", username=row["username"], role=row["role"])
 
 
 def main() -> int:
     configure_logging(fmt="console")
     asyncio.run(_seed())
-    print(f"seeded {len(DEMO_USERNAMES)} demo users ({', '.join(DEMO_USERNAMES)}); password: {DEMO_PASSWORD!r}")
+    names = ", ".join(u["username"] for u in DEMO_USERS)
+    print(f"seeded {len(DEMO_USERS)} demo users ({names}); password: {DEMO_PASSWORD!r}")
     return 0
 
 

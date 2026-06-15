@@ -918,3 +918,31 @@ Building `infra/docker/Dockerfile.ocr` (Tesseract/zbar harvested from a builder 
 **Files:** `infra/docker/Dockerfile.ocr`
 
 **Rule:** When harvesting native libs across images, the **builder's glibc must match (or be older than) the target's** — `DT_RELR` (glibc ≥ 2.36) is the silent tripwire (`GLIBC_ABI_DT_RELR not found`). Map distros by glibc: AL2023 ≈ RHEL 9 / AlmaLinux 9 / Rocky 9 = glibc 2.34; Fedora 40 = 2.39. Pick a glibc-matched builder (EPEL gives RHEL 9 the same packages). Corollaries: never harvest the glibc/loader core (it's bound to the target's `ld.so`); don't rely on `ldconfig` on minimal bases; place bundled libs in a dir already on the runtime loader path (`/var/task/lib`, `/opt/lib`).
+
+## 2026-06-15 — VLM page-type classify sends oversized images (FIX-048)
+
+**Symptom:** Live cost data showed `ocr_classify` ($0.069, 66 calls, 227k prompt tokens ≈ 3,452 tokens/call) dominating the spend. Page-type classification is a single-label task; the 4×–10× image token overhead (full-res scan PNGs at 1700–2500px wide) is unjustified.
+
+**Root cause:** `cloud/ocr/page_type.py::VlmPageTyper._classify_sync()` base64-encodes the raw full-resolution PNG without resizing. For a label-only task, the model doesn't need pixel-level detail — page structure visible at 768px wide is sufficient.
+
+**Fix:** Added `_resize_for_classify(image: bytes) → bytes` using OpenCV (`cv2.imdecode` → `cv2.resize(..., fx/fy scale, INTER_AREA)` → `cv2.imencode(".png", ...)`). Caps at `_CLASSIFY_MAX_WIDTH=768px` wide, aspect-preserving. Pass-through if narrower or decode fails (safety). Called at the top of `_classify_sync` before base64-encoding.
+
+**Estimated impact:** Typical scans 1700–2500px → 768px = 4–10× fewer image tokens per classify call. Expected cost drop from ~$0.069 to ~$0.007–0.017 (assuming token count is the linear cost driver).
+
+**Measured (2026-06-15, live `cost_events`):** avg prompt tokens/call 3452 → 1904, avg cost/call $0.001042 → $0.000578 — **~45% reduction**, smaller than the 4-10x estimate (real scans don't compress as much as assumed at 768px). `page_type` label distribution unchanged across both groups — no accuracy regression. **Rule:** image-token cost estimates from raw resize ratios overstate savings; measure against live `cost_events` before relying on them.
+
+**Files:** `cloud/ocr/page_type.py`.
+
+**Verified:** `tests/cloud/test_ocr_page_type.py` 3/3 pass. No behaviour change — output is still a single label string. Model classifies page type accurately from 768px.
+
+**Measurement pending:** Worker + serve restarted 2026-06-15 ~10:37 UTC; awaiting a fresh pipeline run to confirm token count reduction.
+
+**Rule:** When paying for a vision-LLM fallback on an input the text model can't handle, don't assume the original input size is necessary for classification. Resize to the minimal content-bearing resolution (e.g., 768px for page structure, 512px for text OCR confidence) and measure the impact. Image token cost often dominates; downsizing is safe and high-impact.
+
+## FIX-049: Design philosophy conflict resolution (Reimagining brainstorm, 2026-06-16)
+
+- **Context**: User asked to "brainstorm beyond imagination" with complete freedom. Generated wild futuristic vision (REIMAGINING.md): spatial canvas, 3D visualization, gamification, real-time collaboration, fraud detection, mobile app, AR/VR, metaverse, voice/stylus/gesture, world government portals.
+- **User rejection**: All of the above rejected as "too much," "dull," "not useful." User explicitly: "Do not compromise on UI/UX." Current design is "Warm Editorial Minimalism" inspired by Linear, Notion, Perplexity, Apple.
+- **Resolution**: Grounded revision (REIMAGINING_GROUNDED.md) — practical, cost-conscious, user-directed. Kept only features that solve real problems without adding complexity. Rejected: spatial canvas, 3D viz, gamification, collaboration, mobile app, fraud detection, regulatory analytics, AR/VR, voice/gesture, metaverse. Accepted: Aether chat (with autocomplete), Engine Room (engineer control panel), self-healing pipeline (cost-neutral), dynamic cost routing (game theory), identity consistency scoring (not fraud), document autopsy (text-only), accessibility-first, AI summaries, learning from corrections.
+- **Lesson**: When user says "complete freedom," still validate against stated design philosophy. Document all rejected ideas to prevent accidental re-introduction. Maintain "Reimagining Comparison" document (REIMAGINING_COMPARISON.md) as permanent reference for what was rejected vs accepted.
+- **Files**: REIMAGINING.md, REIMAGINING_GROUNDED.md, REIMAGINING_COMPARISON.md, REIMAGINING_ADDENDUM.md.

@@ -29,7 +29,7 @@ import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useActionBarContent } from "@/app/action-bar";
-import { useLogout } from "@/hooks/useAuth";
+import { useLogout, useRole } from "@/hooks/useAuth";
 import { useCollapsible } from "@/hooks/useCollapsible";
 
 const DRAWER_WIDTH = 240;
@@ -53,12 +53,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [userMenuAnchor, setUserMenuAnchor] = useState<HTMLElement | null>(null);
   const { collapsed, toggle } = useCollapsible("app-sidebar", false);
   const sidebarWidth = collapsed ? COLLAPSED_WIDTH : DRAWER_WIDTH;
+  const role = useRole();
+  const visibleNavItems = NAV_ITEMS.filter(
+    ({ href }) => href !== "/admin" || role === "administrator",
+  );
 
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   const navList = (
     <List>
-      {NAV_ITEMS.map(({ href, label, icon: Icon }) => (
+      {visibleNavItems.map(({ href, label, icon: Icon }) => (
         <Tooltip key={href} title={collapsed ? label : ""} placement="right">
           <ListItemButton
             component={Link}

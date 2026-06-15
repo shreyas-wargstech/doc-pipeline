@@ -7,7 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from cloud.app import app
-from cloud.dashboard.session import require_session
+from cloud.dashboard.session import SessionData, require_session
 
 
 @pytest.fixture
@@ -17,8 +17,8 @@ def client():
 
 @pytest.fixture
 def as_user():
-    """Override require_session so endpoints see an authenticated user."""
-    app.dependency_overrides[require_session] = lambda: "tester"
+    """Override require_session so endpoints see an authenticated admin user."""
+    app.dependency_overrides[require_session] = lambda: SessionData(username="tester", role="administrator")
     yield "tester"
     app.dependency_overrides.pop(require_session, None)
 

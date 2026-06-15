@@ -42,3 +42,20 @@ dist/
 build/
 .superpowers/
 .worktrees/
+
+# Node
+node_modules/
+
+# Terraform — state, provider binaries, plans, and var files may hold secrets
+infra/.terraform/
+infra/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan
+infra/tfplan
+*.tfvars
+!*.tfvars.example
+
+# Tooling
+.understand-anything/

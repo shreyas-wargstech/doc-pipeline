@@ -5,7 +5,7 @@ Lambdas run: prepare_ingest, ocr.consumer.process_record (per page), then the
 structure/match/persist/index service functions."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,7 +24,9 @@ from shared.logging import get_logger
 
 log = get_logger(__name__)
 
-EventFn = Callable[[dict[str, Any]], None]
+# Async so each progress signal is a durable write (DB row) rather than an
+# in-process push — the AWS-compatible model (see cloud/pipeline_run/store.py).
+EventFn = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 @dataclass
@@ -50,15 +52,15 @@ async def run_all_stages(
     filename = pdf_path.name
     document_id: str | None = None
 
-    def emit(stage: str, status: str, **extra: Any) -> None:
-        on_event({"type": "item", "filename": filename, "stage": stage,
-                  "status": status, **extra})
+    async def emit(stage: str, status: str, **extra: Any) -> None:
+        await on_event({"type": "item", "filename": filename, "stage": stage,
+                        "status": status, **extra})
 
     try:
-        emit("ingest", "running")
+        await emit("ingest", "running")
         manifest = await upload_document(pdf_path, category=category)
         document_id = manifest.document_id
-        emit("ingest", "running", document_id=document_id)
+        await emit("ingest", "running", document_id=document_id)
 
         if not force and (await _get_status(document_id)) == DocumentStatus.PROCESSED:
             log.info("pipeline_run.skip_processed", document_id=document_id)
@@ -69,7 +71,7 @@ async def run_all_stages(
             # Classified 'other' → manual review; nothing more to run.
             return RunItemResult(filename, document_id, "done")
 
-        emit("ocr", "running", document_id=document_id)
+        await emit("ocr", "running", document_id=document_id)
         router = router or OcrRouter()
         for msg in plan.ocr_messages:
             await ocr_process_record(msg.model_dump_json(), router=router)
@@ -80,7 +82,7 @@ async def run_all_stages(
             ("persist", persist_document),
             ("index", index_document),
         ):
-            emit(stage, "running", document_id=document_id)
+            await emit(stage, "running", document_id=document_id)
             async with session_scope() as session:
                 await fn(document_id, session=session)
 

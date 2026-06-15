@@ -850,6 +850,8 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Committed: `6fd0e63` (ingest handler), `b627f06` (pgvector/neptune app), `44bd78c` (terraform infra).
 - Next: `terraform init` + `terraform validate` (terraform not on WSL/PowerShell PATH yet — user to run from their terminal). Then phase-1 apply (ECR only) → docker build/push → full apply.
 
+  - Next: `terraform init` + `terraform validate` (terraform not on WSL/PowerShell PATH yet — user to run from their terminal). Then phase-1 apply (ECR only) → docker build/push → full apply.
+
 ## 2026-06-15 (continued) — AWS Docker image builds: package debugging + OCR multi-stage fix
 
 - **Context (carried from prior session):** `terraform apply` completed (RDS + Neptune Serverless provisioned); `pyproject.toml` fixed (`sentence-transformers` moved to `[ml]` optional group, `qdrant-client` removed) so torch is NOT pulled into non-ml images. `light:latest` was built cleanly and pushed to ECR successfully. `ingest` build then started.
@@ -860,3 +862,76 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Status at session end:** `light:latest` pushed. `ingest` build was retried but final result not confirmed (context closed before completion). `ocr` multi-stage build submitted, result pending next session. `persist-index` and the full `terraform apply --refresh` (Lambdas need image URIs) not yet done.
 - **Files touched:** `infra/docker/Dockerfile.ingest` (removed zbar), `infra/docker/Dockerfile.ocr` (rewrote to multi-stage Fedora→AL2023).
 - **Next step:** confirm `ingest` and `ocr` builds pass; then build + push `persist-index`; then `terraform apply` to wire Lambda image URIs + finalize all resources; then RDS schema init (bastion/SSH tunnel) + 100-doc smoke test.
+
+## 2026-06-15 — Pipeline-run persistence (Approach B): durable DB state + pause/resume
+
+- Goal (CLAUDE.md BLOCKER before 200-doc run): replace ephemeral in-memory `RunRegistry` with Postgres-backed `PgPipelineRunStore` as single source of truth → browser reload / server restart recovers the live run.
+- Found already done on working tree (prior session): `cloud/pipeline_run/store.py` (`PgPipelineRunStore` + `PipelineRunStore` Protocol + `_summarize`/`is_terminal`), runner store-backed (`start_run` async → `(run_id,total)`), orchestrator `EventFn` async (`Awaitable[None]`), `scripts/apply_pipeline_runs.py` migration, `tests/cloud/pipeline_run/test_store.py`. Updated the plan doc (`docs/superpowers/plans/2026-06-15-pipeline-run-persist-approach-b.md`) to mark Tasks 1-2 done + correct test paths (repo uses `tests/cloud/pipeline_run/` subdir; in-memory fake = `FakeStore` in `test_runner.py`, not the draft's duplicated `FakePipelineRunStore`).
+- Built remaining: runner `pause` branch in `_drive_run` (`control=pause` → stop, status `paused`, NOT terminal) + `resume_run()` (re-drives only non-terminal items, resets control→run / status→running). api.py full rewrite — store-backed, **DB-polling SSE** (poll every 1.5s, diff snapshot → `summary`/`update`/`heartbeat`/`done`; no asyncio.Queue, so any process writing the row is reflected), new endpoints `GET /pipelines/runs` (recovery), `POST .../pause`, `POST .../resume` (409 if not paused). Deleted dead `registry.py` + `test_registry.py`.
+- Frontend: `types.ts` `RunStatus += "paused"`, `RunEvent.type += "update"` (reducer's `{...rest}` branch already handles non-`item` frames — no reducer change). `useRunPipeline` on-mount recovery via `GET /api/pipelines/runs` (re-subscribes SSE only if running, not paused) + `pause`/`resume`/`isPaused`. Page: Pause(secondary)+Cancel when running, Resume when paused; RunForm disabled when running OR paused.
+- Gotcha: web test `Response` stub needs `headers.get` — `lib/api.ts::parse` reads `content-type` before `res.ok`; a bare `{ok,json}` stub makes apiGet reject silently.
+- Verified: backend 492 unit green (only pre-existing env failure `test_config_index::test_index_defaults`); 34 `tests/cloud/pipeline_run` green; web tsc clean (bar pre-existing `.next/types` PageRailToggle generated-file error); web 118/120 tests (1 file = pre-existing `action-bar` tinypool crash); new `useRunPipeline.test.tsx` 5 green.
+- Still open (CLAUDE.md): RunTable virtualisation for 2,600-event 200-doc runs; `S3PrefixSource` for AWS folder runs. Live-DB: run `python -m scripts.apply_pipeline_runs` once.
+
+## 2026-06-15 — RunTable virtualization
+
+- Closed the "RunTable scale" active thread: `web/components/pipelines/RunTable.tsx` now switches to a `@tanstack/react-virtual`-backed list when `items.length > VIRTUALIZE_THRESHOLD (30)`; small runs (e.g. 13-page bundle) keep the original `<Table>` path unchanged. Virtualized rows are `React.memo`'d (`VirtualRow`) so an SSE update touching a few items doesn't re-render the whole list.
+- New `web/components/pipelines/__tests__/RunTable.test.tsx` (empty state, small-list, 200-item virtualized, failed-row tooltip). Added `@tanstack/react-virtual` dependency.
+- Verified: vitest 122/124 passed (40/41 test files; 1 pre-existing `action-bar` tinypool/heap-OOM crash, unrelated), `next build` clean (exit 0).
+
+## 2026-06-15 — FIX-048: ocr_classify image resize (cost reduction)
+
+- Context: live `cost_events` showed `ocr_classify` (66 calls, $0.069, 227k prompt tokens) dominating over `ocr_vlm` ($0.021). Baseline avg prompt tokens/classify call = ~3,452 — full-res PNG sent for a single-label task.
+- Fix: added `_resize_for_classify(image: bytes) → bytes` in `cloud/ocr/page_type.py`. Uses OpenCV (`cv2.imdecode` → `cv2.resize` w/ `INTER_AREA` → `cv2.imencode`). Caps image at `_CLASSIFY_MAX_WIDTH=768px` wide (aspect-preserving). Called at top of `VlmPageTyper._classify_sync` before base64-encoding. Pass-through if already narrower or decode fails. Typical scan pages (1700–2500px wide) → 4–10× fewer image tokens per classify call → estimated cost $0.007–0.017 vs $0.069.
+- No behaviour change — output is still a single label string; model classifies accurately from 768px.
+- Verified: `tests/cloud/test_ocr_page_type.py` 3/3 pass. Worker + serve restarted; no new classify calls yet to measure (needs a fresh pipeline run).
+- File: `cloud/ocr/page_type.py`.
+
+## 2026-06-15 — Admin page + RBAC (all 13 tasks, fully merged)
+
+- Built full Admin/RBAC feature end-to-end: DB migration (`apply_admin_rbac.py` adds `role` + `is_active` to `dashboard_users`); 4 roles (`administrator`, `reviewer`, `operator`, `viewer`) with CHECK constraint.
+- Session layer: `SessionData(username, role)` dataclass, new 3-part token (`username:role:timestamp`, HMAC-signed), `require_role(*roles)` dep factory, `_lookup_active` DB check on every request, `_lookup_role` at login. Old 2-part tokens auto-rejected → users re-login on deploy.
+- Role guards wired: operator/admin on ingest/requeue/reclassify + pipeline run/cancel/pause/resume; reviewer/admin on eval write endpoints; admin-only on all `/admin/*`.
+- `UserRepository` (raw async SQL) + `admin_api.py` (6 endpoints, guard rails: self-lock, last-admin-on-demote/deactivate/delete, input validation, full response shape, audit logging all 5 mutations, mounted at `/api`). Tests at `tests/cloud/dashboard/test_admin_api.py` (13 pass).
+- Frontend: `UserRole`/`MeResponse`/`AdminUser`/`AdminUsersResponse` types; `useRole()` hook; 6 React Query hooks (`useAdminUsers`); `UsersTable` (inline role dropdown, active chip, deactivate/delete/reset-password actions, self-row disabled); `CreateUserDialog`; `ResetPasswordDialog`; admin `page.tsx` (access-denied gate for non-admin, Invite user button); `AppShell` filters Admin nav item to admin role only.
+- Verified: backend 514 unit pass (4 pre-existing failures unchanged); web 121+ pass (pre-existing `action-bar` tinypool crash unrelated); admin-page tests 3/3.
+- Live-DB runbook: `python -m scripts.apply_admin_rbac` → `python -m scripts.seed_demo_users` → `python -m scripts.add_dashboard_user <admin> --role administrator`.
+
+
+## 2026-06-16 — Brainstorming & Architecture Reimagining (AWS Cloud Migration, Phase 0)
+
+- Triggered by user request: "Brainstorm this beyond my imagination. you have complete freedom to rethink the whole app. Current features are too dull and outdated. UI/UX is also outdated."
+- **Phase 1 — Wild brainstorm** (REIMAGINING.md): AI-native workspace with spatial canvas, 3D document visualization, real-time multi-cursor collaboration, gamification (XP points, rarity scoring), Aether omniscient chat interface, per-user AI voice, self-healing document pipeline, game theory cost routing, multi-stage VLM (identity, field, consistency scoring), adversarial replay testing, agent-by-agent collaboration (no humans), world government AI ID portal, full regulatory landscape, financial auditing, mobile-native AR scanning, accessibility-first design (WCAG 2.1 AAA, ARIA, multi-language, screen readers).
+- **User rejection**: spatial canvas, 3D visualization, gamification, real-time collaboration, mobile app, citizen portals, fraud detection, regulatory analytics, voice/stylus/gesture, metaverse, AR/VR — all rejected as "too much" / "dull" / not useful.
+- **User acceptance**: Aether chat interface (with autocomplete suggestions, not just answering), Engine Room (engineer control panel), self-healing pipeline (cost-neutral), dynamic cost routing (game theory), identity consistency scoring (not fraud detection), document autopsy mode (text-only, no heatmap), accessibility-first design (without specific mention), AI-generated summaries, learning from human corrections (feedback loop).
+- **User directive**: "Do not compromise on UI/UX." Design philosophy: "Warm Editorial Minimalism" inspired by Linear, Notion, Perplexity, Apple. "I will do most of the work so no need to worry that I am a beginner."
+- **User directive**: "Check if docker can be removed and we directly place services in AWS cloud." — Confirmed: all production services can be AWS managed (RDS, S3, SQS, ElastiCache, Lambda, ECS Fargate, CloudWatch, Secrets Manager). Docker only for local dev (optional). This is superior to self-managed containers.
+- **Phase 2 — Grounded revision** (REIMAGINING_GROUNDED.md, REIMAGINING_COMPARISON.md, REIMAGINING_ADDENDUM.md): Practical, cost-conscious architecture. Base cost: ~$89/month + ~$6 per 200-document batch. Phased roadmap: Phase 0 (infrastructure), Phase 1 (TDD pipeline), Phase 2 (API + frontend), Phase 3 (Aether + Engine Room), Phase 4 (advanced features).
+- **Phase 3 — Infrastructure implementation** (Phase 0, all files committed to `local-dev` branch):
+  - `cloud/infrastructure/sam/template.yaml` — 47KB SAM/CloudFormation template. Resources: S3 bucket with event notification, 5 SQS FIFO queues (ocr, vlm, structure, match, persist) + DLQs, RDS PostgreSQL 16 (t3.micro), ElastiCache Redis (cache.t4g.micro), 6 Lambda functions (stubs: OCR, VLM, Structure, Match, Persist, Index), ECS Fargate API cluster (task: 1 CPU/2GB, weighted FARGATE:FARGATE_SPOT 3:1), ALB, CloudWatch dashboard + 4 alarms, Secrets Manager + KMS, IAM roles, VPC security groups.
+  - `cloud/infrastructure/scripts/deploy.py` — One-command interactive deploy. Validates prereqs (SAM CLI, AWS CLI, Docker), prompts for VPC/subnets, external service credentials (LLM, VLM, Tesseract), runs `sam deploy`, outputs all endpoints, saves to `docintel-{env}-outputs.json`.
+  - `cloud/infrastructure/scripts/destroy.py` — One-command teardown. Destroys all non-retained resources (S3 objects first, then CloudFormation stack). Full stack deletion ~20 min. S3 bucket retained for safety (empty + manual delete).
+  - `shared/aws_clients.py` — Boto3 client factories with `@lru_cache(maxsize=1)` singleton pattern. S3, SQS, Secrets Manager, CloudWatch, ECS, RDS, ElastiCache. Handles both local dev (env vars) and production (IAM role). Config: max_pool_connections=50, retries max_attempts=3 adaptive mode.
+  - `shared/config.py` — Extended with AWS infrastructure fields: `aws_region`, `s3_bucket`, `s3_endpoint_url`, `sqs_queue_url`, `rds_host`, `rds_port`, `rds_database`, `rds_username`, `rds_password`, `redis_host`, `redis_port`, `secrets_manager_arn`, `cloudwatch_namespace`. `database_url` property auto-falls-back from RDS to local.
+  - `nas/upload_agent.py` — Zero-Docker Python-only upload agent. Renders PDFs via PyMuPDF (300 DPI), preprocesses with OpenCV (grayscale, denoise, deskew, adaptive threshold), classifies with Tesseract (keyword-based), uploads to S3, uploads `manifest.json` LAST (triggers S3 event → SQS ocr-queue.fifo). Batch upload: asyncio.Semaphore(workers). Category: "practitioner" (default) or other.
+  - 6 Lambda stubs (`cloud/lambda/{ocr,vlm,structure,match,persist,index}/handler.py`): Identical pattern — `lambda_handler(event, context)` → parse SQS records → log → return `{"batchItemFailures": []}`. Phase 1 replaces with actual imports from `cloud/{ocr,structure,match,persist,index}`.
+  - `Makefile` updated with 15+ AWS targets: `aws-deploy`, `aws-destroy`, `aws-deploy-non-interactive`, `aws-logs-{ocr,vlm,structure,match,persist,index}`, `aws-sqs-status`, `ecr-login`, `build-api`, `push-api`, `upload-aws`, `upload-aws-batch`, `aws-cost-estimate`.
+  - `REIMAGINING.md`, `REIMAGINING_GROUNDED.md`, `REIMAGINING_COMPARISON.md`, `REIMAGINING_ADDENDUM.md` — Full documentation of brainstorm, revision, comparison, and architecture addendum.
+- **Design decisions**:
+  - Region: `ap-south-1` (Mumbai) — lowest latency for India.
+  - Zero Docker in production — all AWS managed services.
+  - SAM CLI for CloudFormation deployment (Terraform kept for branch comparison).
+  - Lambda for pipeline stages (serverless, pay-per-invocation), ECS Fargate for API (always-on, WebSocket-capable).
+  - SQS FIFO queues for ordered pipeline processing, S3 event notifications for trigger.
+  - Secrets Manager for all credentials, KMS-encrypted, auto-rotation.
+  - RDS PostgreSQL 16 + pgvector for embedding storage, ElastiCache Redis for session cache + rate limiting.
+- **User TDD mandate**: "Test Driven Development from phase 1." — All Phase 1 implementation must be test-driven. No code without tests first.
+- **Next**: Git branch operations — `checkout main`, create `Terraform-prod`, merge `local-dev` to `main`. Then Phase 1 begins: TDD pipeline (replace Lambda stubs with actual imports), build API Docker image, deploy to Vercel, WebSocket real-time, Aether chat, Engine Room v1.
+
+## 2026-06-16 — Git branch reorganization (post-Phase 0)
+
+- Git operations: `git checkout main` → create `Terraform-prod` branch from main → `git checkout local-dev` → merge `local-dev` into `main`.
+- Purpose: `Terraform-prod` preserves the original Terraform-based infrastructure as a reference/comparison branch. `main` becomes the production-ready branch with SAM + AWS managed services. `local-dev` continues as the active development branch (fast-forwarded to `main`).
+- All Phase 0 commits (SAM template, deploy/destroy scripts, Lambda stubs, NAS upload agent, config updates, Makefile targets) now on `main`.
+- Active issue: `local-dev` branch is 10 commits ahead of `main` — need to merge.
+- Next: Phase 1 TDD implementation begins from `main` / `local-dev`.

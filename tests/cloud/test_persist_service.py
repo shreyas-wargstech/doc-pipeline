@@ -1,8 +1,4 @@
-"""Unit tests for cloud/persist/service.py — repos + stores mocked.
-
-Vectors are written to pgvector via the caller's session, so the session is an
-AsyncMock and we assert against ``session.execute`` row payloads.
-"""
+"""Unit tests for cloud/persist/service.py — repos + stores mocked."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -46,12 +42,6 @@ def _wire(monkeypatch, doc, pages):
     return doc_repo, page_repo
 
 
-def _upsert_rows(session):
-    """Extract the row dicts passed to the pgvector upsert (session.execute)."""
-    assert session.execute.await_count >= 1
-    return session.execute.call_args[0][1]
-
-
 @pytest.mark.asyncio
 async def test_missing_document_raises(monkeypatch):
     doc_repo = MagicMock()
@@ -59,7 +49,7 @@ async def test_missing_document_raises(monkeypatch):
     monkeypatch.setattr("cloud.persist.service.DocumentRepository", lambda s: doc_repo)
     monkeypatch.setattr("cloud.persist.service.PageRepository", lambda s: MagicMock())
     with pytest.raises(PersistError, match="document not found"):
-        await persist_document("d", session=AsyncMock(),
+        await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
                                neo4j_session=AsyncMock(), embedder=AsyncMock())
 
 
@@ -67,7 +57,7 @@ async def test_missing_document_raises(monkeypatch):
 async def test_status_promoted_to_processed(monkeypatch):
     doc_repo, _ = _wire(monkeypatch, _doc(status="processing"), [_page(1)])
     embedder = AsyncMock(return_value=[[0.0] * 384])
-    await persist_document("d", session=AsyncMock(),
+    await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
                            neo4j_session=AsyncMock(), embedder=embedder)
     doc_repo.update_fields.assert_awaited_once_with("d", status="processed")
 
@@ -76,7 +66,7 @@ async def test_status_promoted_to_processed(monkeypatch):
 async def test_failed_status_not_downgraded(monkeypatch):
     doc_repo, _ = _wire(monkeypatch, _doc(status="failed"), [_page(1)])
     embedder = AsyncMock(return_value=[[0.0] * 384])
-    await persist_document("d", session=AsyncMock(),
+    await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
                            neo4j_session=AsyncMock(), embedder=embedder)
     doc_repo.update_fields.assert_not_awaited()
 
@@ -87,29 +77,28 @@ async def test_only_text_pages_embedded(monkeypatch):
     pages = [_page(1, raw="hello", ptype="application_form"), _page(2, ocr="skipped", raw=None)]
     _wire(monkeypatch, _doc(), pages)
     embedder = AsyncMock(return_value=[[0.0] * 384])
-    await persist_document("d", session=AsyncMock(),
+    await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
                            neo4j_session=AsyncMock(), embedder=embedder)
     args, _ = embedder.call_args
     assert len(args[0]) == 1  # only the identity text page summarized
 
 
 @pytest.mark.asyncio
-async def test_pgvector_row_shape(monkeypatch):
+async def test_qdrant_payload_shape(monkeypatch):
     page = _page(1, entities=[{"type": "qualification", "value": "BHMS"}],
                  ptype="application_form")
     _wire(monkeypatch, _doc(reg="34903"), [page])
-    session = AsyncMock()
-    await persist_document("d", session=session,
+    qdrant = AsyncMock()
+    await persist_document("d", session=MagicMock(), qdrant=qdrant,
                            neo4j_session=AsyncMock(),
                            embedder=AsyncMock(return_value=[[0.1] * 384]))
-    rows = _upsert_rows(session)
-    row = rows[0]
-    assert row["document_id"] == "d"
-    assert row["page_num"] == 1
-    assert row["s3_key_image"] == "k1"
-    assert row["registration_no"] == "34903"
-    assert row["entity_types"] == ["qualification"]
-    assert row["embedding"].startswith("[")
+    _, kw = qdrant.upsert.call_args
+    payload = kw["points"][0].payload
+    assert payload["document_id"] == "d"
+    assert payload["page_num"] == 1
+    assert payload["s3_key_image"] == "k1"
+    assert payload["registration_no"] == "34903"
+    assert payload["entity_types"] == ["qualification"]
 
 
 @pytest.mark.asyncio
@@ -127,14 +116,14 @@ async def test_only_identity_pages_embedded(monkeypatch):
         captured.append(list(texts))
         return [[0.0] * 384] * len(texts)
 
-    session = AsyncMock()
-    await persist_document("d", session=session,
+    qdrant = AsyncMock()
+    await persist_document("d", session=MagicMock(), qdrant=qdrant,
                            neo4j_session=AsyncMock(), embedder=_embedder)
     assert len(captured) == 1, "embedder should have been called exactly once"
     assert len(captured[0]) == 1, "exactly one summary (application_form) should be embedded"
-    rows = _upsert_rows(session)
-    assert len(rows) == 1
-    assert rows[0]["page_id"] == "d:2"
+    _, kw = qdrant.upsert.call_args
+    assert len(kw["points"]) == 1
+    assert kw["points"][0].payload["page_id"] == "d:2"
 
 
 @pytest.mark.asyncio
@@ -142,7 +131,7 @@ async def test_manual_review_status_preserved(monkeypatch):
     """manual_review status must NOT be promoted to processed."""
     doc_repo, _ = _wire(monkeypatch, _doc(status="manual_review"), [_page(1)])
     embedder = AsyncMock(return_value=[])
-    await persist_document("d", session=AsyncMock(),
+    await persist_document("d", session=MagicMock(), qdrant=AsyncMock(),
                            neo4j_session=AsyncMock(), embedder=embedder)
     doc_repo.update_fields.assert_not_awaited()
 

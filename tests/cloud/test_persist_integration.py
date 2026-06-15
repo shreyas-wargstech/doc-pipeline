@@ -1,4 +1,4 @@
-"""Gated integration test for the Persist stage (real pgvector + Neo4j + PG).
+"""Gated integration test for the Persist stage (real Qdrant + Neo4j + PG).
 
 Run: make up && make init
      uv run pytest -m integration tests/cloud/test_persist_integration.py
@@ -6,13 +6,15 @@ Run: make up && make init
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import text
 
 from cloud.ingest.storage_db import DocumentRepository, PageRepository
+from cloud.persist.qdrant_writer import point_id_for
 from cloud.persist.service import persist_document
+from shared.config import get_settings
 from shared.db import session_scope
 from shared.neo4j_client import ensure_constraints
 from shared.neo4j_client import session_scope as neo4j_session
+from shared.qdrant_client import get_qdrant
 
 pytestmark = pytest.mark.integration
 
@@ -96,7 +98,7 @@ async def _cleanup_graph() -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_writes_pgvector_and_neo4j_idempotently():
+async def test_persist_writes_qdrant_and_neo4j_idempotently():
     await ensure_constraints()
     await _cleanup_graph()
     await _cleanup_pg()
@@ -108,19 +110,20 @@ async def test_persist_writes_pgvector_and_neo4j_idempotently():
     async with session_scope() as session:
         await persist_document(_DOC_ID, session=session)
 
-    # pgvector: exactly one document_pages row for the identity page (idempotent).
-    async with session_scope() as session:
-        res = await session.execute(
-            text(
-                "SELECT document_id, s3_key_image FROM document_pages "
-                "WHERE page_id = :pid"
-            ),
-            {"pid": _PAGE_ID},
+    # Qdrant: the page point exists.
+    collection = get_settings().qdrant_collection
+    client = get_qdrant()
+    try:
+        recs = await client.retrieve(
+            collection_name=collection,
+            ids=[point_id_for(_PAGE_ID)],
+            with_payload=True,
         )
-        rows = res.all()
-    assert len(rows) == 1
-    assert rows[0].document_id == _DOC_ID
-    assert rows[0].s3_key_image.endswith("page_001.png")
+        assert len(recs) == 1
+        assert recs[0].payload["document_id"] == _DOC_ID
+        assert recs[0].payload["s3_key_image"].endswith("page_001.png")
+    finally:
+        await client.close()
 
     # Neo4j: exactly one Document, one Page, one Person (registration_no set).
     async with neo4j_session() as sess:

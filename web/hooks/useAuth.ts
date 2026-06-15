@@ -1,16 +1,26 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api";
+import type { MeResponse, UserRole } from "@/lib/types";
 
 export function useMe() {
-  return useQuery({ queryKey: ["me"], queryFn: () => apiGet<{ user: string }>("/api/me"), retry: false });
+  return useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiGet<MeResponse>("/api/me"),
+    retry: false,
+  });
+}
+
+export function useRole(): UserRole | null {
+  const { data } = useMe();
+  return data?.role ?? null;
 }
 
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (creds: { username: string; password: string }) =>
-      apiPost<{ user: string }>("/api/login", creds),
+      apiPost<MeResponse>("/api/login", creds),
     onSuccess: (data) => qc.setQueryData(["me"], data),
   });
 }

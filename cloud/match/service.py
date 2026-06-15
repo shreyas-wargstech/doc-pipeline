@@ -40,15 +40,20 @@ def _build_backfill(
 
     Reference data is ground truth (locked decision, 2026-06-12): on any
     matched/manual_review result with a reference_data_id, identity columns
-    are overwritten with the registry values. Original OCR values are
+    are overwritten with the registry values. applicant_name_raw prefers the
+    *_name_change columns (current/legal name, e.g. post-marriage) when any
+    are set, else falls back to f_name/m_name/l_name. Original OCR values are
     preserved in metadata.match.ocr_extracted for audit — guarded so a
     re-run never clobbers the true first-OCR values.
     """
+    name_parts = (
+        (row.f_name_change, row.m_name_change, row.l_name_change)
+        if any((row.f_name_change, row.m_name_change, row.l_name_change))
+        else (row.f_name, row.m_name, row.l_name)
+    )
     overwrite: dict[str, Any] = {
         "registration_no": str(row.registration_no),
-        "applicant_name_raw": " ".join(
-            p for p in (row.f_name, row.m_name, row.l_name) if p
-        ).strip(),
+        "applicant_name_raw": " ".join(p for p in name_parts if p).strip(),
         "gender": row.gender or None,
     }
     if row.date_of_birth:

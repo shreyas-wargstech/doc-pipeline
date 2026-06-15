@@ -161,7 +161,7 @@ export interface CorrectionResult {
 }
 
 export type RunItemStatus = "pending" | "running" | "done" | "skipped" | "failed";
-export type RunStatus = "running" | "completed" | "cancelled" | "failed";
+export type RunStatus = "running" | "paused" | "completed" | "cancelled" | "failed";
 
 export interface RunItem {
   filename: string;
@@ -185,10 +185,11 @@ export interface RunState {
   items: RunItem[];
 }
 
-// SSE frames: {type:"item",...partial item}, {type:"summary",...RunState},
-// {type:"done",...RunState}
+// SSE frames: {type:"item",...partial item}, {type:"summary"|"update",...RunState},
+// {type:"done",...RunState}. The store-backed API emits summary/update/done
+// (full RunState); "item" remains for the reducer's partial-item branch.
 export interface RunEvent {
-  type: "item" | "summary" | "done";
+  type: "item" | "summary" | "update" | "done";
   filename?: string;
   status?: RunItemStatus;
   stage?: string | null;
@@ -219,3 +220,21 @@ export interface SearchPageHit {
   index_status: string;
 }
 export interface SearchPagesResponse { document_id: string; count: number; hits: SearchPageHit[]; }
+
+export type UserRole = "administrator" | "reviewer" | "operator" | "viewer";
+
+export interface MeResponse {
+  user: string;
+  role: UserRole;
+}
+
+export interface AdminUser {
+  username: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+}
