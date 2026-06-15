@@ -87,7 +87,7 @@ async def test_create_user_conflict(client: AsyncClient):
         MockRepo.return_value.get = AsyncMock(return_value=_USERS[0])
         async with client as c:
             resp = await c.post("/api/admin/users", json={
-                "username": "admin", "password": "x", "role": "viewer"
+                "username": "admin", "password": "secret123", "role": "viewer"
             })
     assert resp.status_code == 409
 
@@ -123,11 +123,23 @@ async def test_cannot_change_own_role(client: AsyncClient):
 async def test_cannot_demote_last_admin(client: AsyncClient):
     with patch("cloud.dashboard.admin_api.UserRepository") as MockRepo:
         MockRepo.return_value.get = AsyncMock(
-            return_value={"username": "admin", "role": "administrator", "is_active": True}
+            return_value={"username": "other_admin", "role": "administrator", "is_active": True}
         )
         MockRepo.return_value.count_active_admins = AsyncMock(return_value=1)
         async with client as c:
-            resp = await c.patch("/api/admin/users/admin/role", json={"role": "viewer"})
+            resp = await c.patch("/api/admin/users/other_admin/role", json={"role": "viewer"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_cannot_delete_last_admin(client: AsyncClient):
+    with patch("cloud.dashboard.admin_api.UserRepository") as MockRepo:
+        MockRepo.return_value.get = AsyncMock(
+            return_value={"username": "other_admin", "role": "administrator", "is_active": True}
+        )
+        MockRepo.return_value.count_active_admins = AsyncMock(return_value=1)
+        async with client as c:
+            resp = await c.delete("/api/admin/users/other_admin")
     assert resp.status_code == 400
 
 

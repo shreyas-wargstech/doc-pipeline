@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from passlib.hash import bcrypt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cloud.dashboard import audit
 from cloud.dashboard.session import SessionData, require_role
@@ -23,8 +23,8 @@ VALID_ROLES = frozenset({"administrator", "reviewer", "operator", "viewer"})
 
 
 class CreateUserBody(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.\-]+$")
+    password: str = Field(min_length=8)
     role: str = "viewer"
 
 
@@ -33,7 +33,7 @@ class RoleBody(BaseModel):
 
 
 class PasswordBody(BaseModel):
-    password: str
+    password: str = Field(min_length=8)
 
 
 class ActiveBody(BaseModel):
@@ -192,8 +192,16 @@ async def delete_user(
         raise HTTPException(status_code=400, detail="cannot delete yourself")
     async with session_scope() as db:
         repo = UserRepository(db)
-        if await repo.get(username) is None:
+        user = await repo.get(username)
+        if user is None:
             raise HTTPException(status_code=404, detail="user not found")
+        if user["role"] == "administrator":
+            count = await repo.count_active_admins()
+            if count <= 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="cannot delete the last active administrator",
+                )
         await repo.delete(username)
     await _audit_admin(
         username=session.username,
