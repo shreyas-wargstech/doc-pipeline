@@ -873,3 +873,19 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - No behaviour change — output is still a single label string; model classifies accurately from 768px.
 - Verified: `tests/cloud/test_ocr_page_type.py` 3/3 pass. Worker + serve restarted; no new classify calls yet to measure (needs a fresh pipeline run).
 - File: `cloud/ocr/page_type.py`.
+
+## 2026-06-15 — Admin page + RBAC (all 13 tasks, fully merged)
+
+- Built full Admin/RBAC feature end-to-end: DB migration (`apply_admin_rbac.py` adds `role` + `is_active` to `dashboard_users`); 4 roles (`administrator`, `reviewer`, `operator`, `viewer`) with CHECK constraint.
+- Session layer: `SessionData(username, role)` dataclass, new 3-part token (`username:role:timestamp`, HMAC-signed), `require_role(*roles)` dep factory, `_lookup_active` DB check on every request, `_lookup_role` at login. Old 2-part tokens auto-rejected → users re-login on deploy.
+- Role guards wired: operator/admin on ingest/requeue/reclassify + pipeline run/cancel/pause/resume; reviewer/admin on eval write endpoints; admin-only on all `/admin/*`.
+- `UserRepository` (raw async SQL) + `admin_api.py` (6 endpoints, guard rails: self-lock, last-admin-on-demote/deactivate/delete, input validation, full response shape, audit logging all 5 mutations, mounted at `/api`). Tests at `tests/cloud/dashboard/test_admin_api.py` (13 pass).
+- Frontend: `UserRole`/`MeResponse`/`AdminUser`/`AdminUsersResponse` types; `useRole()` hook; 6 React Query hooks (`useAdminUsers`); `UsersTable` (inline role dropdown, active chip, deactivate/delete/reset-password actions, self-row disabled); `CreateUserDialog`; `ResetPasswordDialog`; admin `page.tsx` (access-denied gate for non-admin, Invite user button); `AppShell` filters Admin nav item to admin role only.
+- Verified: backend 514 unit pass (4 pre-existing failures unchanged); web 121+ pass (pre-existing `action-bar` tinypool crash unrelated); admin-page tests 3/3.
+- Live-DB runbook: `python -m scripts.apply_admin_rbac` → `python -m scripts.seed_demo_users` → `python -m scripts.add_dashboard_user <admin> --role administrator`.
+
+## 2026-06-15 — FIX-048 measured: real ~45% cost cut confirmed live
+
+- Queried live `cost_events` for `stage='ocr_classify'`: pre-resize avg prompt tokens/call = 3452 (avg cost $0.001042, 100 calls), post-resize (768px) = 1904 (avg cost $0.000578, 53 calls) — **~45% cheaper per call**, below the 4-10x estimate (real scan content still has structure at 768px; resize ratio from source res wasn't as extreme as assumed).
+- Quality check: joined `cost_events` → `pages.page_type` for both groups — label distribution unchanged (`marks_statement`, `internship_cert`, `letter_body`, `ssc`, `application_form`, etc. all present in similar proportions, no spike in `other`/blank-misclassification). No accuracy regression from the resize.
+- Active thread "OCR cost optimization" → measurement done, can be closed; FIX-048 confirmed working as a real (smaller-than-estimated) win.
