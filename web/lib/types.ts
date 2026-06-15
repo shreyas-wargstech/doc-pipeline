@@ -220,3 +220,21 @@ export interface SearchPageHit {
   index_status: string;
 }
 export interface SearchPagesResponse { document_id: string; count: number; hits: SearchPageHit[]; }
+
+export type UserRole = "administrator" | "reviewer" | "operator" | "viewer";
+
+export interface MeResponse {
+  user: string;
+  role: UserRole;
+}
+
+export interface AdminUser {
+  username: string;
+  role: UserRole;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+}
