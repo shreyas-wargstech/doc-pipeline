@@ -18,11 +18,8 @@ dependencies = [
     "aioboto3>=12.3",
     # Logging
     "structlog>=24.1",
-    # Vector + graph
-    "qdrant-client>=1.8",
+    # Graph
     "neo4j>=5.18",
-    # Embeddings (heavy — installs torch; pin minor if image size matters)
-    "sentence-transformers>=2.5",
     # OCR + image
     "pytesseract>=0.3.10",
     "pymupdf>=1.23",
@@ -46,6 +43,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ml = [
+    # Embeddings — pulls torch (~2 GB). Only needed in persist + index stages.
+    "sentence-transformers>=2.5",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

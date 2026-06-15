@@ -5,15 +5,14 @@
 # Build context = repo root: docker build -f infra/docker/Dockerfile.persist-index .
 FROM public.ecr.aws/lambda/python:3.12
 
-RUN dnf install -y --setopt=install_weak_deps=False \
-        glib2 \
+RUN dnf install -y glib2 \
     && dnf clean all
 
 RUN pip install --no-cache-dir uv
 
 WORKDIR /var/task
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra ml
 
 COPY shared/ shared/
 COPY nas/ nas/
