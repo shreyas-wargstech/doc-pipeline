@@ -21,7 +21,7 @@ resource "aws_db_instance" "postgres" {
   identifier = "docintel-${var.environment}"
 
   engine         = "postgres"
-  engine_version = "16.2"
+  engine_version = "16.9"
   instance_class = "db.t3.micro"
 
   allocated_storage     = 20

@@ -9,7 +9,7 @@ terraform {
 
   backend "s3" {
     # Replace with your actual state bucket (see docs/AWS_SETUP.md §2.1)
-    bucket         = "terraform-state-docintel"
+    bucket         = "terraform-state-docintel-082688269612"
     key            = "doc-pipeline/terraform.tfstate"
     region         = "ap-south-1"
     dynamodb_table = "terraform-state-lock"

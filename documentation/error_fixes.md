@@ -898,3 +898,23 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 **Files:** `shared/page_type.py`, `cloud/eval/page_type.py`, `scripts/eval_page_type.py`, `tests/shared/test_page_type.py`, `tests/cloud/test_eval_page_type.py`.
 
 **Rule:** Keyword anchors are hypotheses until scored against real OCR text. Build the eval harness BEFORE trusting hand-written rules — especially for non-Latin scripts (Tesseract Devanagari garbles tokens; `विषय`→`वेषय`) and for generic words that collide across doc types ("subject" = letter-subject AND marksheet-subject). Ground truth from the `pages` table is noisy/partly circular — read escalation_rate + confident_wrong, not raw accuracy.
+
+---
+
+## 2026-06-15 — Dockerfile.ocr build/runtime (Lambda base lacks ldconfig)
+
+### FIX-051 · Dockerfile.ocr — three cascading failures harvesting Tesseract onto the Lambda base
+
+Building `infra/docker/Dockerfile.ocr` (Tesseract/zbar harvested from a builder stage onto `public.ecr.aws/lambda/python:3.12`) failed in three successive ways, each exposing the next:
+
+**(1) `ldconfig: command not found` (exit 127).** `RUN ldconfig /usr/local/lib`. The minimal Lambda base (AL2023) ships no `ldconfig` on PATH. Also `/usr/local/lib` is not on Lambda's default runtime `LD_LIBRARY_PATH` — even a successful `ldconfig` wouldn't have helped at runtime. → Dropped `ldconfig`; copy libs to `/var/task/lib` (always on Lambda's default `LD_LIBRARY_PATH`); kept `ENV LD_LIBRARY_PATH=/var/task/lib:${LD_LIBRARY_PATH}` belt-and-suspenders.
+
+**(2) `undefined symbol: __tunable_is_initialized, version GLIBC_PRIVATE`.** The blind `ldd` harvest had copied Fedora's **core glibc** (`libc.so.6`, `ld-linux`) into `/var/task/lib`; first on `LD_LIBRARY_PATH`, it shadowed the base's glibc. `__tunable_is_initialized` is a private contract between `ld.so` and `libc.so.6` of the *same* glibc build → mismatch. → Filter the `ldd` output to skip the glibc/loader family (`grep -vE '/(ld-linux-x86-64|libc|libm|libdl|libpthread|librt|libresolv|libnsl|libanl|libutil|libBrokenLocale)\.so'`) so the base supplies glibc.
+
+**(3) `/lib64/libc.so.6: version 'GLIBC_ABI_DT_RELR' not found (required by /var/task/lib/libz.so.1)`** — the real root cause. **Fedora 40 = glibc 2.39; Lambda base (AL2023) = glibc 2.34.** Fedora libs are built with `DT_RELR` relocations requiring glibc ≥ 2.36, so *every* Fedora-harvested lib is ABI-incompatible with the base loader. Not fixable by filtering — wrong builder distro. → Switch builder `fedora:40` → `almalinux:9` (RHEL 9 derivative, **glibc 2.34 = matches AL2023**) + `epel-release` for Tesseract; `zbar-libs` → `zbar` (EPEL 9 pkg name providing `libzbar.so.0`).
+
+**Verify:** `docker run --rm --entrypoint /usr/local/bin/tesseract <image> --list-langs` → `eng mar hin osd`.
+
+**Files:** `infra/docker/Dockerfile.ocr`
+
+**Rule:** When harvesting native libs across images, the **builder's glibc must match (or be older than) the target's** — `DT_RELR` (glibc ≥ 2.36) is the silent tripwire (`GLIBC_ABI_DT_RELR not found`). Map distros by glibc: AL2023 ≈ RHEL 9 / AlmaLinux 9 / Rocky 9 = glibc 2.34; Fedora 40 = 2.39. Pick a glibc-matched builder (EPEL gives RHEL 9 the same packages). Corollaries: never harvest the glibc/loader core (it's bound to the target's `ld.so`); don't rely on `ldconfig` on minimal bases; place bundled libs in a dir already on the runtime loader path (`/var/task/lib`, `/opt/lib`).

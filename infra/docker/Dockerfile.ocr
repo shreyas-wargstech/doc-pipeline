@@ -1,22 +1,66 @@
 # Lambda image for the OCR stage.
-# Heavy: Tesseract + tessdata (eng+mar+hin) + OpenCV + pyzbar + openai SDK.
+# Multi-stage: a RHEL 9 derivative (AlmaLinux 9) + EPEL supplies Tesseract
+# (not in AL2023 repos). MUST be glibc-matched to the Lambda base: AL2023 and
+# RHEL 9 / AlmaLinux 9 are both glibc 2.34, so harvested libs are ABI-compatible.
+# Do NOT use Fedora here — its glibc 2.39 emits DT_RELR relocations that the
+# AL2023 loader rejects (`GLIBC_ABI_DT_RELR not found`).
+# ldd auto-discovers all required shared libs; LD_LIBRARY_PATH wires them up.
 # Build context = repo root: docker build -f infra/docker/Dockerfile.ocr .
-FROM public.ecr.aws/lambda/python:3.12
 
-RUN dnf install -y --setopt=install_weak_deps=False \
+# ── Stage 1: Tesseract + lib harvest (glibc-matched to the Lambda base) ───────
+FROM almalinux:9 AS tess-builder
+
+RUN dnf install -y epel-release \
+    && dnf install -y --nodocs \
         tesseract \
         tesseract-langpack-eng \
-        mesa-libGL \
-        glib2 \
         zbar \
-        libzbar \
     && dnf clean all
 
-# Marathi + Hindi tessdata not in dnf repo for Lambda AL2023 — download manually
-RUN curl -L -o /usr/share/tesseract/tessdata/mar.traineddata \
-        https://github.com/tesseract-ocr/tessdata/raw/main/mar.traineddata && \
-    curl -L -o /usr/share/tesseract/tessdata/hin.traineddata \
+# Collect binary, tessdata, and all transitive shared libs.
+# CRITICAL: never harvest the glibc/loader family — those are tied to the base
+# image's own ld.so. Shipping Fedora's newer libc.so.6 breaks the AL2023 loader
+# (`undefined symbol: __tunable_is_initialized, GLIBC_PRIVATE`). Keep only the
+# Tesseract/leptonica/zbar + image-format libs; the base supplies glibc.
+RUN mkdir -p /tess-dist/bin /tess-dist/lib /tess-dist/share \
+    && cp /usr/bin/tesseract /tess-dist/bin/ \
+    && cp -rL /usr/share/tesseract /tess-dist/share/ \
+    # Direct Tesseract deps (minus glibc/loader core)
+    && ldd /usr/bin/tesseract \
+        | grep "=> /" | awk '{print $3}' \
+        | grep -vE '/(ld-linux-x86-64|libc|libm|libdl|libpthread|librt|libresolv|libnsl|libanl|libutil|libBrokenLocale)\.so' \
+        | xargs -I{} cp -L {} /tess-dist/lib/ \
+    # zbar shared lib + its deps (minus glibc/loader core)
+    && cp -L /usr/lib64/libzbar.so.0 /tess-dist/lib/ \
+    && ldd /usr/lib64/libzbar.so.0 \
+        | grep "=> /" | awk '{print $3}' \
+        | grep -vE '/(ld-linux-x86-64|libc|libm|libdl|libpthread|librt|libresolv|libnsl|libanl|libutil|libBrokenLocale)\.so' \
+        | xargs -I{} cp -L {} /tess-dist/lib/ 2>/dev/null || true
+
+# ── Stage 2: Lambda OCR image ─────────────────────────────────────────────────
+FROM public.ecr.aws/lambda/python:3.12
+
+# OpenCV headless runtime deps (available in AL2023 base)
+RUN dnf install -y mesa-libGL glib2 && dnf clean all
+
+# Copy Tesseract binary, tessdata, and harvested libs
+# /var/task/lib is always on Lambda's default LD_LIBRARY_PATH, so the harvested
+# Tesseract/zbar libs are found at runtime without ldconfig (absent on this base).
+COPY --from=tess-builder /tess-dist/bin/tesseract  /usr/local/bin/tesseract
+COPY --from=tess-builder /tess-dist/lib/           /var/task/lib/
+COPY --from=tess-builder /tess-dist/share/         /usr/share/
+
+# Marathi + Hindi tessdata not in Fedora repos — download manually
+RUN curl -fsSL -o /usr/share/tesseract/tessdata/mar.traineddata \
+        https://github.com/tesseract-ocr/tessdata/raw/main/mar.traineddata \
+    && curl -fsSL -o /usr/share/tesseract/tessdata/hin.traineddata \
         https://github.com/tesseract-ocr/tessdata/raw/main/hin.traineddata
+
+# Belt-and-suspenders: also expose the libs for any build-time invocation
+# (Lambda already includes /var/task/lib in its runtime LD_LIBRARY_PATH).
+ENV LD_LIBRARY_PATH=/var/task/lib:${LD_LIBRARY_PATH}
+
+ENV TESSDATA_PREFIX=/usr/share/tesseract/tessdata
 
 RUN pip install --no-cache-dir uv
 

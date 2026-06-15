@@ -102,7 +102,7 @@ resource "aws_security_group" "lambda" {
 # Security group: RDS — only reachable from Lambda SG on 5432
 resource "aws_security_group" "rds" {
   name        = "docintel-${var.environment}-rds"
-  description = "RDS PostgreSQL — only reachable from Lambda SG"
+  description = "RDS PostgreSQL - only reachable from Lambda SG"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -126,7 +126,7 @@ resource "aws_security_group" "rds" {
 # Security group: Neptune — only reachable from Lambda SG on 8182 (Bolt + openCypher)
 resource "aws_security_group" "neptune" {
   name        = "docintel-${var.environment}-neptune"
-  description = "Neptune — only reachable from Lambda SG on Bolt/openCypher port"
+  description = "Neptune - only reachable from Lambda SG on Bolt/openCypher port"
   vpc_id      = aws_vpc.main.id
 
   ingress {

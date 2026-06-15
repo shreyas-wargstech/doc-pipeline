@@ -2,10 +2,8 @@
 # Build context = repo root: docker build -f infra/docker/Dockerfile.ingest .
 FROM public.ecr.aws/lambda/python:3.12
 
-RUN dnf install -y --setopt=install_weak_deps=False \
-        mesa-libGL \
+RUN dnf install -y mesa-libGL \
         glib2 \
-        libzbar \
     && dnf clean all
 
 RUN pip install --no-cache-dir uv

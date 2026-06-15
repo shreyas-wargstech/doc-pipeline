@@ -3,8 +3,7 @@
 # Build context = repo root: docker build -f infra/docker/Dockerfile.light .
 FROM public.ecr.aws/lambda/python:3.12
 
-RUN dnf install -y --setopt=install_weak_deps=False \
-        glib2 \
+RUN dnf install -y glib2 \
     && dnf clean all
 
 RUN pip install --no-cache-dir uv

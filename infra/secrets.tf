@@ -56,7 +56,6 @@ locals {
     S3_BUCKET             = var.s3_bucket_name
     S3_REGION             = var.aws_region
     # S3_ENDPOINT_URL omitted → blank = real AWS S3
-    AWS_REGION            = var.aws_region
     # SQS_ENDPOINT_URL omitted → blank = real AWS SQS
     SESSION_SECRET        = var.session_secret
     LOG_FORMAT            = "json"
