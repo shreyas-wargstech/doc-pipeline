@@ -42,14 +42,14 @@ resource "aws_route_table_association" "public" {
 }
 
 resource "aws_eip" "nat" {
-  count  = 2
+  count  = 1
   domain = "vpc"
   tags   = { Name = "docintel-${var.environment}-nat-eip-${count.index + 1}" }
 }
 
-# One NAT gateway per AZ so Lambda in each private subnet can reach the internet
+# Single NAT gateway (dev) — both private subnets route through it
 resource "aws_nat_gateway" "main" {
-  count         = 2
+  count         = 1
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
 
@@ -71,7 +71,7 @@ resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
   route {
     cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main[count.index].id
+    nat_gateway_id = aws_nat_gateway.main[0].id
   }
   tags = { Name = "docintel-${var.environment}-private-rt-${count.index + 1}" }
 }
