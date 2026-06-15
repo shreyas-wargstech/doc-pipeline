@@ -32,7 +32,7 @@ async def _run() -> None:
     engine = create_async_engine(get_settings().database_url)
     async with engine.begin() as conn:
         for sql in _MIGRATIONS:
-            print(f"  → {sql[:60]}...")
+            print(f"  > {sql[:60]}...")
             await conn.execute(text(sql))
     await engine.dispose()
     print("Migration complete.")

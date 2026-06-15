@@ -28,7 +28,7 @@ init:  ## Initialize all services (idempotent: bucket, collection, constraints)
 	python -m scripts.init_all
 
 serve:  ## Run the cloud pipeline API (local dev)
-	uvicorn cloud.app:app --reload --host 0.0.0.0 --port 8000
+	uvicorn cloud.app:app --reload --reload-dir cloud --reload-dir shared --host 0.0.0.0 --port 8000
 
 web-dev:  ## Run the Next.js dashboard dev server (proxies /api to :8000)
 	cd web && npm run dev
