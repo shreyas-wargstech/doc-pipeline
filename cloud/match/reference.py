@@ -32,6 +32,9 @@ class ReferenceRepository:
                 "       COALESCE(f_name, '')                      AS f_name, "
                 "       COALESCE(m_name, '')                      AS m_name, "
                 "       COALESCE(l_name, '')                      AS l_name, "
+                "       COALESCE(f_name_change, '')               AS f_name_change, "
+                "       COALESCE(m_name_change, '')               AS m_name_change, "
+                "       COALESCE(l_name_change, '')               AS l_name_change, "
                 "       COALESCE(gender, '')                      AS gender "
                 "FROM reference_data WHERE registration_no = :rn"
             ),
@@ -50,6 +53,9 @@ class ReferenceRepository:
             f_name=row.f_name,
             m_name=row.m_name,
             l_name=row.l_name,
+            f_name_change=row.f_name_change,
+            m_name_change=row.m_name_change,
+            l_name_change=row.l_name_change,
             gender=row.gender,
         )
 
@@ -67,6 +73,9 @@ class ReferenceRepository:
                 "       COALESCE(f_name, '')                      AS f_name, "
                 "       COALESCE(m_name, '')                      AS m_name, "
                 "       COALESCE(l_name, '')                      AS l_name, "
+                "       COALESCE(f_name_change, '')               AS f_name_change, "
+                "       COALESCE(m_name_change, '')               AS m_name_change, "
+                "       COALESCE(l_name_change, '')               AS l_name_change, "
                 "       COALESCE(gender, '')                      AS gender "
                 "FROM reference_data WHERE id = :id"
             ),
@@ -85,6 +94,9 @@ class ReferenceRepository:
             f_name=row.f_name,
             m_name=row.m_name,
             l_name=row.l_name,
+            f_name_change=row.f_name_change,
+            m_name_change=row.m_name_change,
+            l_name_change=row.l_name_change,
             gender=row.gender,
         )
 

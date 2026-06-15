@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 
 import anyio
+import cv2
+import numpy as np
 from openai import OpenAI, OpenAIError
 
 from cloud.ocr.tiers.base import TierNotImplemented
@@ -25,6 +27,25 @@ log = get_logger(__name__)
 _DEFAULT_MODEL = "google/gemini-2.5-flash"  # mirrors openrouter_model default
 
 __all__ = ["classify_page_type", "PAGE_TYPE_CONF_NET", "VlmPageTyper"]
+
+
+# Max width (px) for the classify image. Label-only tasks don't need full
+# resolution; this reduces image tokens 4-8x versus a full-res scan PNG.
+_CLASSIFY_MAX_WIDTH = 768
+
+
+def _resize_for_classify(image: bytes) -> bytes:
+    """Downscale PNG bytes to _CLASSIFY_MAX_WIDTH wide (aspect-preserving).
+    Returns original bytes unchanged if already narrower."""
+    arr = np.frombuffer(image, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None or img.shape[1] <= _CLASSIFY_MAX_WIDTH:
+        return image
+    scale = _CLASSIFY_MAX_WIDTH / img.shape[1]
+    resized = cv2.resize(img, (0, 0), fx=scale, fy=scale,
+                         interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".png", resized)
+    return buf.tobytes() if ok else image
 
 
 _CLASSIFY_PROMPT = (
@@ -61,6 +82,7 @@ class VlmPageTyper:
         return label if label in PAGE_TYPES else "other"
 
     def _classify_sync(self, image: bytes) -> str:
+        image = _resize_for_classify(image)
         data_url = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
         prompt = _CLASSIFY_PROMPT.format(labels=", ".join(sorted(PAGE_TYPES)))
         try:

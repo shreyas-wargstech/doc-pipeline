@@ -911,6 +911,8 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 
 **Estimated impact:** Typical scans 1700–2500px → 768px = 4–10× fewer image tokens per classify call. Expected cost drop from ~$0.069 to ~$0.007–0.017 (assuming token count is the linear cost driver).
 
+**Measured (2026-06-15, live `cost_events`):** avg prompt tokens/call 3452 → 1904, avg cost/call $0.001042 → $0.000578 — **~45% reduction**, smaller than the 4-10x estimate (real scans don't compress as much as assumed at 768px). `page_type` label distribution unchanged across both groups — no accuracy regression. **Rule:** image-token cost estimates from raw resize ratios overstate savings; measure against live `cost_events` before relying on them.
+
 **Files:** `cloud/ocr/page_type.py`.
 
 **Verified:** `tests/cloud/test_ocr_page_type.py` 3/3 pass. No behaviour change — output is still a single label string. Model classifies page type accurately from 768px.

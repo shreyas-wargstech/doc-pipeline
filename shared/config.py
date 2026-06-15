@@ -1,4 +1,7 @@
 """Shared configuration loaded from environment variables."""
+from __future__ import annotations
+
+import os
 from functools import lru_cache
 
 from pydantic import Field
@@ -83,6 +86,60 @@ class Settings(BaseSettings):
     session_secret: str = Field(
         "dev-insecure-change-me", alias="SESSION_SECRET"
     )
+
+    # ── AWS Infrastructure Settings (Phase 0) ────────────────────────────
+    # RDS (Managed PostgreSQL) — takes precedence over DATABASE_URL when set
+    rds_host: str = Field("", alias="RDS_HOST")
+    rds_port: int = Field(5432, alias="RDS_PORT")
+    rds_database: str = Field("doc_pipeline", alias="RDS_DATABASE")
+    rds_username: str = Field("pipeline", alias="RDS_USERNAME")
+    rds_password: str = Field("", alias="RDS_PASSWORD")
+    secrets_manager_arn: str = Field("", alias="SECRETS_MANAGER_ARN")
+
+    # ElastiCache (Redis) — for real-time events + search suggestions
+    redis_host: str = Field("", alias="REDIS_HOST")
+    redis_port: int = Field(6379, alias="REDIS_PORT")
+
+    # OpenRouter (VLM tier)
+    openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")
+    openrouter_base_url: str = Field(
+        "https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
+    )
+    openrouter_model: str = Field(
+        "google/gemini-2.5-flash", alias="OPENROUTER_MODEL"
+    )
+    openrouter_text_model: str = Field(
+        "openrouter/free", alias="OPENROUTER_TEXT_MODEL"
+    )
+
+    # Environment
+    environment: str = Field("development", alias="ENVIRONMENT")
+
+    # ── Derived property: DATABASE_URL ─────────────────────────────────────
+    @property
+    def database_url(self) -> str:
+        # If RDS_HOST is set, use RDS. Otherwise, fall back to local DATABASE_URL.
+        if self.rds_host:
+            password = self.rds_password
+            if not password and self.secrets_manager_arn:
+                password = self._load_secret_value("RDS_PASSWORD")
+            return (
+                f"postgresql+asyncpg://{self.rds_username}:{password}"
+                f"@{self.rds_host}:{self.rds_port}/{self.rds_database}"
+            )
+        return os.environ.get("DATABASE_URL", "postgresql+asyncpg://pipeline:pipeline@localhost:5432/doc_pipeline")
+
+    def _load_secret_value(self, key: str) -> str:
+        """Fetch a key from AWS Secrets Manager (used in Lambda/ECS)."""
+        import json as _json
+        import boto3
+        try:
+            client = boto3.client("secretsmanager", region_name=self.aws_region)
+            response = client.get_secret_value(SecretId=self.secrets_manager_arn)
+            secrets = _json.loads(response["SecretString"])
+            return secrets.get(key, "")
+        except Exception:
+            return ""
 
 
 @lru_cache
