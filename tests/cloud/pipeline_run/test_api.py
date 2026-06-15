@@ -31,6 +31,14 @@ def client(fake_store):
     return TestClient(app)
 
 
+@pytest.fixture
+def as_viewer(fake_store):
+    app = FastAPI()
+    app.include_router(api.router, prefix="/api")
+    app.dependency_overrides[require_session] = lambda: SessionData(username="viewer_user", role="viewer")
+    return TestClient(app)
+
+
 # ── POST /api/pipelines/run ──────────────────────────────────────────────────
 
 def test_run_invalid_folder_returns_400(client, monkeypatch):
@@ -157,3 +165,10 @@ def test_resume_paused_run_returns_run_id(client, fake_store, monkeypatch):
     body = r.json()
     assert body["run_id"] == run_id
     assert body["total"] == 2
+
+
+# ── role guard (403) tests ───────────────────────────────────────────────────
+
+def test_run_pipeline_requires_operator_role(as_viewer):
+    r = as_viewer.post("/api/pipelines/run", json={"folder": "/tmp", "category": "practitioner"})
+    assert r.status_code == 403

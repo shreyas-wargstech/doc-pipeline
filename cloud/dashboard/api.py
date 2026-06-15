@@ -27,6 +27,7 @@ from cloud.dashboard.session import (
     SessionData,
     _lookup_role,
     issue_session,
+    require_role,
     require_session,
     verify_credentials,
 )
@@ -255,7 +256,7 @@ class RequeueBody(BaseModel):
 
 
 @router.post("/documents/{document_id}/ingest")
-async def action_ingest(document_id: str, session: SessionData = Depends(require_session)) -> dict[str, Any]:
+async def action_ingest(document_id: str, session: SessionData = Depends(require_role("operator", "administrator"))) -> dict[str, Any]:
     try:
         await actions.reingest(document_id)
         await _audit(username=session.username, action="ingest", document_id=document_id,
@@ -270,7 +271,7 @@ async def action_ingest(document_id: str, session: SessionData = Depends(require
 
 @router.post("/documents/{document_id}/requeue-ocr")
 async def action_requeue(
-    document_id: str, body: RequeueBody | None = None, session: SessionData = Depends(require_session)
+    document_id: str, body: RequeueBody | None = None, session: SessionData = Depends(require_role("operator", "administrator"))
 ) -> dict[str, Any]:
     page_nums = body.page_nums if body else None
     try:
@@ -298,7 +299,7 @@ async def stream(_session: SessionData = Depends(require_session)) -> StreamingR
 
 @router.post("/documents/{document_id}/reclassify")
 async def action_reclassify(
-    document_id: str, session: SessionData = Depends(require_session)
+    document_id: str, session: SessionData = Depends(require_role("operator", "administrator"))
 ) -> dict[str, Any]:
     try:
         res = await actions.reclassify(document_id)
@@ -342,7 +343,7 @@ class EvalCorrectionBody(BaseModel):
 
 @router.patch("/eval/queue/{document_id}")
 async def eval_correct(
-    document_id: str, body: EvalCorrectionBody, session: SessionData = Depends(require_session)
+    document_id: str, body: EvalCorrectionBody, session: SessionData = Depends(require_role("reviewer", "administrator"))
 ) -> dict[str, Any]:
     patch = body.model_dump(exclude_unset=True)
     try:
@@ -383,7 +384,7 @@ class LabelBody(BaseModel):
 
 
 @router.post("/eval/enrol")
-async def eval_enrol(body: EnrolBody, session: SessionData = Depends(require_session)) -> dict[str, Any]:
+async def eval_enrol(body: EnrolBody, session: SessionData = Depends(require_role("reviewer", "administrator"))) -> dict[str, Any]:
     try:
         bucket = get_settings().s3_bucket
         async with session_scope() as db, get_s3_client() as s3:
@@ -414,7 +415,7 @@ async def eval_pages(
 
 @router.post("/eval/pages/{page_id:path}/label")
 async def eval_label(
-    page_id: str, body: LabelBody, session: SessionData = Depends(require_session)
+    page_id: str, body: LabelBody, session: SessionData = Depends(require_role("reviewer", "administrator"))
 ) -> dict[str, Any]:
     try:
         async with session_scope() as db:

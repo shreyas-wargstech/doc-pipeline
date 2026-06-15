@@ -449,3 +449,34 @@ async def test_remove_bookmark_returns_false(client: AsyncClient, as_user):
     assert resp.status_code == 200
     assert resp.json() == {"bookmarked": False}
     m_bm.return_value.remove.assert_awaited_once_with("tester", "doc-1")
+
+
+# --- role guard (403) tests ------------------------------------------------
+
+@pytest.fixture
+def as_viewer():
+    """Authenticated as a viewer (read-only)."""
+    app.dependency_overrides[require_session] = lambda: SessionData(username="viewer", role="viewer")
+    yield
+    app.dependency_overrides.pop(require_session, None)
+
+
+@pytest.mark.asyncio
+async def test_ingest_requires_operator_role(client: AsyncClient, as_viewer):
+    async with client as c:
+        resp = await c.post("/api/documents/abc/ingest")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_requeue_requires_operator_role(client: AsyncClient, as_viewer):
+    async with client as c:
+        resp = await c.post("/api/documents/abc/requeue-ocr")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_eval_correct_requires_reviewer_role(client: AsyncClient, as_viewer):
+    async with client as c:
+        resp = await c.patch("/api/eval/queue/abc", json={})
+    assert resp.status_code == 403
