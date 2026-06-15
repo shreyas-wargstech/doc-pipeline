@@ -277,10 +277,15 @@ CREATE TRIGGER set_eval_content_type_updated_at
 -- -----------------------------------------------------------------------------
 -- dashboard_users: credentials for the operations dashboard (HTTP Basic).
 -- Seeded via scripts/add_dashboard_user.py. password_hash = bcrypt.
+-- role = administrator | reviewer | operator | viewer (default: viewer).
+-- is_active = soft-delete flag for access control.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS dashboard_users (
     username      TEXT        PRIMARY KEY,
     password_hash TEXT        NOT NULL,
+    role          TEXT        NOT NULL DEFAULT 'viewer'
+                              CHECK (role IN ('administrator','reviewer','operator','viewer')),
+    is_active     BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
