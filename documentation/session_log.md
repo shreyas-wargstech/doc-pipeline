@@ -865,3 +865,11 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - Closed the "RunTable scale" active thread: `web/components/pipelines/RunTable.tsx` now switches to a `@tanstack/react-virtual`-backed list when `items.length > VIRTUALIZE_THRESHOLD (30)`; small runs (e.g. 13-page bundle) keep the original `<Table>` path unchanged. Virtualized rows are `React.memo`'d (`VirtualRow`) so an SSE update touching a few items doesn't re-render the whole list.
 - New `web/components/pipelines/__tests__/RunTable.test.tsx` (empty state, small-list, 200-item virtualized, failed-row tooltip). Added `@tanstack/react-virtual` dependency.
 - Verified: vitest 122/124 passed (40/41 test files; 1 pre-existing `action-bar` tinypool/heap-OOM crash, unrelated), `next build` clean (exit 0).
+
+## 2026-06-15 — FIX-048: ocr_classify image resize (cost reduction)
+
+- Context: live `cost_events` showed `ocr_classify` (66 calls, $0.069, 227k prompt tokens) dominating over `ocr_vlm` ($0.021). Baseline avg prompt tokens/classify call = ~3,452 — full-res PNG sent for a single-label task.
+- Fix: added `_resize_for_classify(image: bytes) → bytes` in `cloud/ocr/page_type.py`. Uses OpenCV (`cv2.imdecode` → `cv2.resize` w/ `INTER_AREA` → `cv2.imencode`). Caps image at `_CLASSIFY_MAX_WIDTH=768px` wide (aspect-preserving). Called at top of `VlmPageTyper._classify_sync` before base64-encoding. Pass-through if already narrower or decode fails. Typical scan pages (1700–2500px wide) → 4–10× fewer image tokens per classify call → estimated cost $0.007–0.017 vs $0.069.
+- No behaviour change — output is still a single label string; model classifies accurately from 768px.
+- Verified: `tests/cloud/test_ocr_page_type.py` 3/3 pass. Worker + serve restarted; no new classify calls yet to measure (needs a fresh pipeline run).
+- File: `cloud/ocr/page_type.py`.

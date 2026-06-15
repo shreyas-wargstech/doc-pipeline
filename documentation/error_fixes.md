@@ -898,3 +898,23 @@ docker exec docpipe-postgres psql -U pipeline -d doc_pipeline -c \
 **Files:** `shared/page_type.py`, `cloud/eval/page_type.py`, `scripts/eval_page_type.py`, `tests/shared/test_page_type.py`, `tests/cloud/test_eval_page_type.py`.
 
 **Rule:** Keyword anchors are hypotheses until scored against real OCR text. Build the eval harness BEFORE trusting hand-written rules — especially for non-Latin scripts (Tesseract Devanagari garbles tokens; `विषय`→`वेषय`) and for generic words that collide across doc types ("subject" = letter-subject AND marksheet-subject). Ground truth from the `pages` table is noisy/partly circular — read escalation_rate + confident_wrong, not raw accuracy.
+
+---
+
+## 2026-06-15 — VLM page-type classify sends oversized images (FIX-048)
+
+**Symptom:** Live cost data showed `ocr_classify` ($0.069, 66 calls, 227k prompt tokens ≈ 3,452 tokens/call) dominating the spend. Page-type classification is a single-label task; the 4×–10× image token overhead (full-res scan PNGs at 1700–2500px wide) is unjustified.
+
+**Root cause:** `cloud/ocr/page_type.py::VlmPageTyper._classify_sync()` base64-encodes the raw full-resolution PNG without resizing. For a label-only task, the model doesn't need pixel-level detail — page structure visible at 768px wide is sufficient.
+
+**Fix:** Added `_resize_for_classify(image: bytes) → bytes` using OpenCV (`cv2.imdecode` → `cv2.resize(..., fx/fy scale, INTER_AREA)` → `cv2.imencode(".png", ...)`). Caps at `_CLASSIFY_MAX_WIDTH=768px` wide, aspect-preserving. Pass-through if narrower or decode fails (safety). Called at the top of `_classify_sync` before base64-encoding.
+
+**Estimated impact:** Typical scans 1700–2500px → 768px = 4–10× fewer image tokens per classify call. Expected cost drop from ~$0.069 to ~$0.007–0.017 (assuming token count is the linear cost driver).
+
+**Files:** `cloud/ocr/page_type.py`.
+
+**Verified:** `tests/cloud/test_ocr_page_type.py` 3/3 pass. No behaviour change — output is still a single label string. Model classifies page type accurately from 768px.
+
+**Measurement pending:** Worker + serve restarted 2026-06-15 ~10:37 UTC; awaiting a fresh pipeline run to confirm token count reduction.
+
+**Rule:** When paying for a vision-LLM fallback on an input the text model can't handle, don't assume the original input size is necessary for classification. Resize to the minimal content-bearing resolution (e.g., 768px for page structure, 512px for text OCR confidence) and measure the impact. Image token cost often dominates; downsizing is safe and high-impact.
