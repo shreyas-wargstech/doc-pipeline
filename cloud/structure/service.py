@@ -23,6 +23,7 @@ from cloud.structure.document_type import (
 from cloud.structure.llm import IdentityHints, llm_extract
 from cloud.structure.models import IDENTITY_PAGE_TYPES, Entity, normalize_value
 from cloud.structure.regex_extract import regex_extract
+from cloud.identity.intelligence import generate_consistency_report
 from cloud.ocr.page_type import classify_page_type
 from cloud.self_healing.identity_search import find_hidden_identity_page
 from cloud.smart.audit import record_smart_action
@@ -309,6 +310,12 @@ async def structure_document(
                 best_document_type_score = dt_score
 
         new_json = {**sj, "entities": [e.model_dump() for e in merged]}
+        page_identity = {
+            "extracted_name": _pick([(refined_type, merged)], "person_name", prefer_source="llm"),
+            "extracted_dob": _pick([(refined_type, merged)], "date_of_birth", prefer_source="regex"),
+            "registration_no": _pick([(refined_type, merged)], "registration_no", prefer_source="regex"),
+        }
+        new_json = {**new_json, **{k: v for k, v in page_identity.items() if v}}
         await page_repo.update_structured(
             document_id,
             page.page_num,
@@ -350,6 +357,17 @@ async def structure_document(
             k in fields for k in ("registration_no", "applicant_name_raw", "dob")
         )
         fields["status"] = "processing" if has_identity else "manual_review"
+
+        # Phase 4: compute cross-page identity consistency and store
+        fresh_pages = await page_repo.list_for_document(document_id)
+        report = await generate_consistency_report(document_id, fresh_pages)
+        fields["consistency_score"] = report["overall_score"]
+        try:
+            await doc_repo.update_metadata(document_id, patch={"identity": report})
+        except Exception as exc:
+            log.warning("update_metadata_failed", document_id=document_id, error=str(exc))
+        log.info("identity_consistency", document_id=document_id,
+                 overall=report["overall_score"])
     else:
         fields["status"] = "processing"
     await doc_repo.update_fields(document_id, **fields)

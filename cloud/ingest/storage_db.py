@@ -123,6 +123,7 @@ class Document(Base):
 
     document_summary: Mapped[str | None] = mapped_column(Text)
     index_status: Mapped[str | None] = mapped_column(Text)
+    consistency_score: Mapped[float | None] = mapped_column(Float)
 
     # Category-specific flexible payload.
     # NOTE: column name is `metadata` in SQL, but `metadata` is reserved by

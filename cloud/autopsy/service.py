@@ -180,6 +180,8 @@ async def generate_autopsy(document_id: str) -> AutopsyReport:
         struct_detail = f"{len(structured_pages)} page(s) structured"
         if name_in_text:
             struct_detail += f". {name_in_text}"
+        if doc.consistency_score is not None:
+            struct_detail += f". Identity consistency: {doc.consistency_score:.0f}/100"
         stages.append(AutopsyStage(
             name="structure",
             status="success",
