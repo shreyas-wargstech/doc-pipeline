@@ -233,20 +233,15 @@ def build_sam_template(config: dict) -> None:
     """Build SAM template and Lambda packages."""
     print("\n🔨 Building SAM template...")
     
-    # Build Lambda packages (using SAM build)
-    # For Phase 0, the Lambda handlers are stubs. In Phase 1, they'll
-    # include the actual pipeline code and dependencies.
-    
     build_cmd = [
         "sam", "build",
         "--template", str(TEMPLATE_PATH),
         "--build-dir", str(SAM_DIR / ".aws-sam" / "build"),
     ]
     
-    # For now, stub handlers don't need complex builds
-    # In Phase 1, we'll add --use-container for building Tesseract + OpenCV layers
-    print("   (Stub handlers — no complex build needed for Phase 0)")
-    print(f"   Template: {TEMPLATE_PATH}")
+    print("   Running sam build...")
+    run(build_cmd, capture=False)
+    print("   ✅ SAM build complete")
 
 
 def deploy_stack(config: dict) -> dict:
@@ -278,7 +273,8 @@ def deploy_stack(config: dict) -> dict:
     
     deploy_cmd = [
         "sam", "deploy",
-        "--template", str(TEMPLATE_PATH),
+        # NO --template flag — SAM auto-discovers the built template
+        # from .aws-sam/build/template.yaml
         "--stack-name", stack_name,
         "--s3-bucket", s3_bucket,
         "--region", config["Region"],
@@ -300,6 +296,17 @@ def deploy_stack(config: dict) -> dict:
         "aws", "cloudformation", "describe-stacks",
         "--stack-name", stack_name,
         "--region", config["Region"],
+        "--query", "Stacks[0].Outputs",
+        "--output", "json"
+    ])
+    outputs = json.loads(outputs_json)
+    
+    result = {}
+    for o in outputs:
+        result[o["OutputKey"]] = o["OutputValue"]
+    
+    return result
+
         "--query", "Stacks[0].Outputs",
         "--output", "json"
     ])
