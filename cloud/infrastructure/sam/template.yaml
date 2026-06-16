@@ -888,9 +888,11 @@ Resources:
               Value: !Ref DocIntelSecrets
           Secrets:
             - Name: OPENROUTER_API_KEY
-              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:OPENROUTER_API_KEY::
+              ValueFrom:
+                Fn::Sub: "${DocIntelSecrets}:SecretString:OPENROUTER_API_KEY::"
             - Name: DASHBOARD_SESSION_SECRET
-              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:DASHBOARD_SESSION_SECRET::
+              ValueFrom:
+                Fn::Sub: "${DocIntelSecrets}:SecretString:DASHBOARD_SESSION_SECRET::"
           LogConfiguration:
             LogDriver: awslogs
             Options:
