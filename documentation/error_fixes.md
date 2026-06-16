@@ -975,3 +975,95 @@ async def _run_record(
 **Files:** `cloud/lambda/utils.py`
 
 **Rule:** When a function is called via `anyio.run(func, *args)`, ALL parameters must be positional-compatible. Never use `*` keyword-only separators on functions passed to `anyio.run()`. Same rule applies to `asyncio.run()` and `loop.run_in_executor()`.
+
+---
+
+## 2026-06-17 — SAM/CloudFormation production deploy failures
+
+### FIX-053 · Lambda `AWS_REGION` is a reserved env key — cannot be set in the template
+
+**Symptom:** `sam deploy` of `docintel-production` — all 6 Lambda functions `CREATE_FAILED`, whole stack rolled back:
+```
+Lambda was unable to configure your environment variables because the environment
+variables you have provided contains reserved keys that are currently not supported
+for modification. Reserved keys used in this request: AWS_REGION
+```
+
+**Root cause:** `Globals.Function.Environment.Variables` set `AWS_REGION: !Ref Region`. The Lambda runtime auto-injects `AWS_REGION` (set to the function's own region) and rejects any attempt to set it explicitly. Applied to all functions via `Globals`, so every Lambda failed at create.
+
+**Fix:** Removed `AWS_REGION: !Ref Region` from `Globals.Function.Environment`. `shared/config.py` reads `AWS_REGION` (alias, default `ap-south-1`) straight from the runtime env, so the runtime-injected value is used — strictly more correct than a hardcoded `!Ref Region`. ECS task def is unaffected (Globals don't apply; ECS doesn't auto-inject `AWS_REGION`, and the config default matched the deploy region).
+
+**Files:** `cloud/infrastructure/sam/template.yaml`.
+
+**Rule:** Never set Lambda-reserved env keys in SAM/CFN templates. Reserved: `AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN`, `AWS_LAMBDA_*`, `_HANDLER`, `LAMBDA_TASK_ROOT`, `TZ`, etc. The runtime injects them; let app code read them from the runtime env.
+
+### FIX-054 · RDS deletion protection traps a rollback in DELETE_FAILED
+
+**Symptom:** After the FIX-053 failure triggered rollback, the stack got stuck — RDS instance wouldn't delete:
+```
+Cannot delete protected DB Instance, please disable deletion protection and try again.
+```
+Stack ended in `DELETE_FAILED` with an orphaned RDS instance; the deploy script's auto-recovery only handled `ROLLBACK_COMPLETE`, so the next `make aws-deploy` would `sam deploy` onto a `DELETE_FAILED` stack and fail.
+
+**Root cause:** (1) `Database.DeletionProtection: !If [IsProduction, true, false]` → `true` in production, which blocks teardown during a failed-deploy iteration loop. (2) `deploy.py` only auto-deleted stacks in `ROLLBACK_COMPLETE`, not the `*_FAILED` terminal-ish states.
+
+**Fix:** (1) `DeletionProtection: false` on the RDS instance (turn back on later via a dedicated change once stable, not during the deploy-debug loop). (2) Widened the deploy-script pre-delete check to `{ROLLBACK_COMPLETE, ROLLBACK_FAILED, UPDATE_ROLLBACK_FAILED, DELETE_FAILED}` — re-issuing `delete-stack` retries cleanly once the blocking resource is gone. Manual recovery this time: disabled protection + deleted the DB in the console, then re-delete the stack.
+
+**Files:** `cloud/infrastructure/sam/template.yaml`, `cloud/infrastructure/scripts/deploy.py`.
+
+**Rule:** Don't enable RDS/resource deletion protection while still iterating on first-time deploys — it converts any rollback into a manual-cleanup `DELETE_FAILED`. Turn it on only after the stack deploys cleanly. Deploy automation that recovers stale stacks must handle all undeployable terminal states (`ROLLBACK_COMPLETE` + `*_FAILED`), not just `ROLLBACK_COMPLETE`.
+
+### FIX-055 · Lambda `ReservedConcurrentExecutions` sum exceeds account concurrency pool
+
+**Symptom:** Second production deploy (after FIX-053) — `VlmFunction` `CREATE_FAILED`, stack rolled back:
+```
+Specified ReservedConcurrentExecutions for function decreases account's
+UnreservedConcurrentExecution below its minimum value of [40].
+```
+
+**Root cause:** Template reserved concurrency per stage: OCR 100, VLM 50, Structure/Match/Persist/Index 50 each = **350 total**. Account concurrency limit (`aws lambda get-account-settings → AccountLimit.ConcurrentExecutions`) was **400**; AWS forbids reserving so much that unreserved drops below the floor (ceiling = limit − 100 = 300). 350 > 300 → create fails partway. Values were also over-provisioned: reserved concurrency here acts as a *cap* (protect paid OpenRouter spend + bound RDS connections from the DB-writer stages), not a throughput guarantee.
+
+**Fix:** Scaled to fit the pool with headroom and protect downstream: OCR 40, VLM 15, Structure/Match/Persist/Index 20 each = **135 reserved**, 265 unreserved.
+
+**Files:** `cloud/infrastructure/sam/template.yaml`.
+
+**Rule:** Sum of all `ReservedConcurrentExecutions` must stay ≤ `account_limit − 100`. Check the live limit with `aws lambda get-account-settings` before setting reservations — new accounts are often capped well below the default 1000. Treat per-stage reserved concurrency as a downstream-protection cap (RDS connections, paid API rate), not a throughput target; size it to what downstream can absorb, not to the account ceiling.
+
+---
+
+## 2026-06-17 — RULE: Phase 4 smart/self-healing deferred measurement obligation
+
+### RULE (Phase 4): smart/self-healing features ship behind default-off flags and are proven by wire-up+TDD; their real-world impact MUST be measured post-deploy via audit_log smart.* rows + cost_events before claiming a %-gain.
+
+**Rationale:**
+Phase 4 "Make It Smart" wires intelligence (self-healing, identity consistency, learning loop, cost routing) into the live pipeline. Every autonomous action writes a `smart.*` row to `audit_log`. The `scripts/smart_impact_report.py` skeleton is built and tested; it will produce real numbers once the first AWS batch runs. Until then, we prove correctness by:
+- wire-up (each feature is called from the right stage)
+- TDD (all new tests pass, existing tests stay green)
+- default-off flags (no behavior change unless explicitly enabled)
+
+**Measurement plan (post-deploy):**
+1. Enable `self_healing_enabled` + `cost_router_v2_enabled` on a subset of docs
+2. Run `python -m scripts.smart_impact_report` to count `smart.*` actions by type
+3. Query `cost_events` for VLM cost delta vs baseline
+4. Compare `manual_review` rate before/after from `documents` table
+5. If %-gain ≥ 5% and cost increase ≤ 4-5%, recommend enabling globally
+
+**Files:** `scripts/smart_impact_report.py`, `cloud/smart/audit.py`, `documentation/TASKS.md`
+
+**Rule:** Never claim a %-gain from a smart feature without running `smart_impact_report.py` against live data. Skeleton + TDD = shipped; numbers = post-deploy obligation.
+
+---
+
+## FIX-056 — Module-API rewrite left orphaned tests + over-claimed completion (Phase 4 verification, 2026-06-17)
+
+**Symptom:** Full unit suite = 12 failed / 763 passed after Phase 4 "Make It Smart". 6 failures in `tests/cloud/test_self_healing.py` (`AttributeError: ... has no attribute 'vlm_classify_page'` / `'process_page'`; "Awaited 0 times"). New Phase-4 tests all passed; the *old* test file still patched the pre-rewrite stub API.
+
+**Root cause:** `retry.py` and `identity_search.py` were rewritten with new signatures (bytes + injected `reprocess`/`classify`), and *new* parallel test files were added (`test_retry_real.py`, `test_identity_search_real.py`, `test_monitor_real.py`) — but the original `test_self_healing.py` was never updated/removed, so it kept asserting against removed functions. Separately, `monitor.auto_resume_document` correctly changed the branch key `"structure"` → `"structuring"` (real `documents.status` value), which broke the old test that passed `"structure"`.
+
+**Fix:** Trimmed `test_self_healing.py` to the still-valid name-variation/transliteration + `find_stuck`/`auto_resume` tests; updated the structure test to `current_stage="structuring"`; deleted the stale retry/identity_search tests (now covered by the `*_real.py` files).
+
+**Also corrected (over-claims in `TASKS.md`):** "cost-router-v2 wired into OCR consumer" (it is NOT — flag `cost_router_v2_enabled` is dead), "exponential backoff" (none), "EventBridge scheduled" (runner is a local loop), script name `run_stuck_doc_monitor.py` (actual: `run_monitor.py`), "via VLM re-classify" (actual: text-keyword classify). Logged two production no-ops: heal rotate/sharpen branches unreachable (tier name passed as error_message), and WI-3 recovery never matches (keyword typer never emits `form`/`application_form`).
+
+**Files:** `tests/cloud/test_self_healing.py`, `documentation/TASKS.md`, `cloud/self_healing/monitor.py` (prior).
+
+**Rule:** When you rewrite a module's public API, in the SAME change update or delete every existing test of that API — don't just add new parallel test files. Run the FULL suite (`-m "not integration"`), not only the new files, and read pytest's real exit code (a `grep`/`tail` pipeline masks it — check `PIPESTATUS`/`-o pipefail`). Mark a task done only against behavior that exists in code; a dead feature flag is not "wired".
