@@ -23,6 +23,10 @@ from cloud.structure.document_type import (
 from cloud.structure.llm import IdentityHints, llm_extract
 from cloud.structure.models import IDENTITY_PAGE_TYPES, Entity, normalize_value
 from cloud.structure.regex_extract import regex_extract
+from cloud.ocr.page_type import classify_page_type
+from cloud.self_healing.identity_search import find_hidden_identity_page
+from cloud.smart.audit import record_smart_action
+from shared.config import get_settings
 from shared.exceptions import StructureError
 
 log = structlog.get_logger()
@@ -252,6 +256,29 @@ async def structure_document(
     best_document_type_score: float = -1.0
 
     pages = await page_repo.list_for_document(document_id)
+
+    has_identity = any((p.page_type or "") in _STRUCTURE_IDENTITY_TYPES for p in pages)
+    if not has_identity and get_settings().self_healing_enabled:
+        async def _classify(page):
+            sj = page.structured_json or {}
+            raw = sj.get("raw_text", "") or ""
+            ptype, _conf = classify_page_type(raw)
+            return ptype
+
+        found = await find_hidden_identity_page(pages, classify=_classify)
+        if found is not None:
+            await page_repo.update_structured(
+                document_id, found.page_num,
+                page_type=found.page_type,
+                structured_json=found.structured_json or {},
+            )
+            await record_smart_action(
+                session, action="identity_reclassify", document_id=document_id,
+                page_num=found.page_num,
+                reason=f"recovered hidden identity page (other → {found.page_type})",
+                before={"page_type": "other"}, after={"page_type": found.page_type},
+            )
+
     for page in pages:
         if page.ocr_status != "done":
             continue
