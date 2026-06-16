@@ -242,15 +242,37 @@ class OcrRouter:
                             reason=str(exc))
         return ptype
 
+    async def _run_single_tier(
+        self, msg: OcrPageMessage, image: bytes, tier_name: str
+    ) -> OcrResult | None:
+        tier = self._tiers.get(tier_name)
+        if tier is None:
+            return None
+        try:
+            result = await tier.run(
+                image, document_id=msg.document_id, page_num=msg.page_num,
+                language_hint=msg.language_hint,
+            )
+        except TierNotImplemented:
+            return None
+        result.low_conf_count = sum(1 for w in result.words if w.conf < self._threshold)
+        return result
+
     async def process_page(
         self,
         msg: OcrPageMessage,
         image: bytes,
         page_repo: PageRepository,
+        *,
+        force_tier: str | None = None,
     ) -> OcrResult | None:
-        """Route + page-type + persist. Idempotent: writes are keyed on page_id."""
+        """Route + page-type + persist. Idempotent: writes are keyed on page_id.
+        `force_tier` (used by self-healing) pins the tier, bypassing the ladder."""
         page_id = f"{msg.document_id}:{msg.page_num}"
-        result = await self.route(msg, image)
+        if force_tier is not None:
+            result = await self._run_single_tier(msg, image, force_tier)
+        else:
+            result = await self.route(msg, image)
         page_type = await self._resolve_page_type(msg, image, result)
 
         if result is None or result.is_empty:

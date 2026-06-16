@@ -21,6 +21,8 @@ import anyio
 from cloud.ingest.models import OcrPageMessage
 from cloud.ingest.storage_db import PageRepository
 from cloud.ocr.router import OcrRouter
+from cloud.self_healing.retry import attempt_healing_retry
+from cloud.smart.audit import record_smart_action
 from shared.config import get_settings
 from shared.db import session_scope
 from shared.llm_usage import collecting, persist_cost_events
@@ -38,6 +40,45 @@ async def _fetch_image(s3_key: str) -> bytes:
             return await stream.read()
 
 
+async def heal_if_needed(
+    msg: OcrPageMessage,
+    image: bytes,
+    result,
+    *,
+    router: OcrRouter,
+    repo: PageRepository,
+    session,
+):
+    """If a page produced no usable OCR result and self-healing is enabled,
+    run the 3-strategy retry. Returns the (possibly healed) result. Writes a
+    spine row on a successful heal. No-op when disabled or already usable."""
+    usable = result is not None and not result.is_empty
+    if usable or not get_settings().self_healing_enabled:
+        return result
+
+    async def reprocess(img: bytes, *, force_tier):
+        return await router.process_page(msg, img, repo, force_tier=force_tier)
+
+    healed = await attempt_healing_retry(
+        image,
+        error_message=(result.tier if result is not None else None),
+        current_tier="tesseract",
+        reprocess=reprocess,
+    )
+    if healed is not None and not healed.is_empty:
+        await record_smart_action(
+            session,
+            action="ocr_heal",
+            document_id=msg.document_id,
+            page_num=msg.page_num,
+            reason=f"page OCR empty; recovered via {healed.tier}",
+            before={"tier": result.tier if result else None, "empty": True},
+            after={"tier": healed.tier, "mean_conf": round(healed.mean_conf, 1)},
+        )
+        return healed
+    return result
+
+
 async def process_record(body: str, *, router: OcrRouter | None = None) -> None:
     """Process one raw SQS message body. Raises on failure (so the caller can
     mark the record for redelivery)."""
@@ -47,7 +88,8 @@ async def process_record(body: str, *, router: OcrRouter | None = None) -> None:
     async with session_scope() as session:
         repo = PageRepository(session)
         with collecting(document_id=msg.document_id, page_num=msg.page_num) as costs:
-            await router.process_page(msg, image, repo)
+            result = await router.process_page(msg, image, repo)
+            await heal_if_needed(msg, image, result, router=router, repo=repo, session=session)
         await persist_cost_events(session, costs)
 
 
