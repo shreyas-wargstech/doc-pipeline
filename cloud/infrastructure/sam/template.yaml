@@ -200,14 +200,6 @@ Resources:
               AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
             Action: 'kms:*'
             Resource: '*'
-          - Sid: Allow Lambda and ECS to decrypt
-            Effect: Allow
-            Principal:
-              AWS: !GetAtt LambdaExecutionRole.Arn
-            Action:
-              - kms:Decrypt
-              - kms:DescribeKey
-            Resource: '*'
 
   SecretsKmsKeyAlias:
     Type: AWS::KMS::Alias
