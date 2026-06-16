@@ -282,7 +282,7 @@ def deploy_stack(config: dict) -> dict:
         "--stack-name", stack_name,
         "--s3-bucket", s3_bucket,
         "--region", config["Region"],
-        "--capabilities", "CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND",
+        "--capabilities", "CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND",
         "--parameter-overrides", param_overrides,
         "--no-confirm-changeset",
         "--no-fail-on-empty-changeset",
