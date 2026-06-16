@@ -1,93 +1,104 @@
 """OCR retry strategies for self-healing.
 
-When a page fails OCR, attempt up to 3 recovery strategies before
-giving up and marking for human review.
+When a page produces no usable OCR result, attempt up to 3 recovery
+strategies before giving up and marking for human review:
+  1. rotation error  → auto-rotate (OpenCV) and re-OCR
+  2. blur error      → auto-sharpen (unsharp mask) and re-OCR
+  3. tesseract tier  → escalate to VLM
+
+These functions are pure transforms on PNG bytes; `attempt_healing_retry`
+takes a `reprocess` callable (injected by the consumer) so this module has no
+hard dependency on the router and is trivially testable.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+import cv2
+import numpy as np
 
 from shared.logging import get_logger
 
 log = get_logger(__name__)
 
-
-async def auto_rotate_page(s3_key: str) -> bytes:
-    """Download and auto-rotate an image. Returns the rotated image bytes."""
-    log.info("auto_rotate_page", s3_key=s3_key)
-    # TODO: integrate with actual rotation correction using OpenCV
-    return b""
+# reprocess(image_bytes, *, force_tier) -> OcrResult | None
+ReprocessFn = Callable[..., Awaitable[Any]]
 
 
-async def auto_sharpen_page(s3_key: str) -> bytes:
-    """Download and sharpen an image. Returns the sharpened image bytes."""
-    log.info("auto_sharpen_page", s3_key=s3_key)
-    # TODO: integrate with actual sharpening using OpenCV
-    return b""
+def _decode(image: bytes) -> np.ndarray | None:
+    return cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
 
 
-async def process_page(
-    document_id: str,
-    s3_key: str,
-    image: bytes | None = None,
-    force_tier: str | None = None,
-) -> Any:
-    """Process a page through OCR. Placeholder for actual OCR logic."""
-    # TODO: integrate with actual OCR pipeline
-    log.info("process_page.placeholder", document_id=document_id, s3_key=s3_key)
-    return MagicMock(status="done")  # type: ignore[name-defined]
+def _encode(arr: np.ndarray) -> bytes:
+    ok, buf = cv2.imencode(".png", arr)
+    return buf.tobytes() if ok else b""
+
+
+def auto_rotate_page(image: bytes) -> bytes:
+    """Deskew/auto-rotate using the dominant text-line angle. Returns PNG bytes
+    (unchanged input on decode failure)."""
+    arr = _decode(image)
+    if arr is None:
+        return image
+    gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    coords = cv2.findNonZero(thresh)
+    if coords is None:
+        return image
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = 90 + angle
+    (h, w) = arr.shape[:2]
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    rotated = cv2.warpAffine(arr, m, (w, h), flags=cv2.INTER_CUBIC,
+                             borderMode=cv2.BORDER_REPLICATE)
+    return _encode(rotated)
+
+
+def auto_sharpen_page(image: bytes) -> bytes:
+    """Unsharp-mask sharpen. Returns PNG bytes (unchanged input on decode failure)."""
+    arr = _decode(image)
+    if arr is None:
+        return image
+    blur = cv2.GaussianBlur(arr, (0, 0), sigmaX=3)
+    sharp = cv2.addWeighted(arr, 1.5, blur, -0.5, 0)
+    return _encode(sharp)
 
 
 async def attempt_healing_retry(
-    document_id: str,
-    s3_key: str,
-    error_message: str | None = None,
+    image: bytes,
     *,
-    current_tier: str = "tesseract",
+    error_message: str | None,
+    current_tier: str,
+    reprocess: ReprocessFn,
 ) -> Any:
-    """Attempt up to 3 self-healing strategies on a failed page.
+    """Try up to 3 self-healing strategies. Returns the first non-empty OcrResult,
+    or None if all attempts are exhausted. A result is "usable" when it is not
+    None and not `result.is_empty`."""
 
-    1. If rotation error → auto-rotate and retry
-    2. If blur error → auto-sharpen and retry
-    3. If Tesseract failed → try VLM
+    def _usable(r: Any) -> bool:
+        return r is not None and not getattr(r, "is_empty", True)
 
-    Returns the final result (done or failed).
-    """
-    result = MagicMock(status="failed")  # type: ignore[name-defined]
+    msg = (error_message or "").lower()
 
-    # Attempt 1: rotation
-    if error_message and "rotation" in error_message.lower():
-        rotated = await auto_rotate_page(s3_key)
-        if rotated:
-            result = await process_page(document_id, s3_key, image=rotated)
-            if result.status == "done":
-                log.info("self_healing.rotation_fixed", document_id=document_id, s3_key=s3_key)
-                return result
+    if "rotation" in msg or "rotate" in msg or "skew" in msg:
+        r = await reprocess(auto_rotate_page(image), force_tier=None)
+        if _usable(r):
+            log.info("self_healing.rotation_fixed")
+            return r
 
-    # Attempt 2: blur
-    if error_message and "blur" in error_message.lower():
-        sharpened = await auto_sharpen_page(s3_key)
-        if sharpened:
-            result = await process_page(document_id, s3_key, image=sharpened)
-            if result.status == "done":
-                log.info("self_healing.sharpen_fixed", document_id=document_id, s3_key=s3_key)
-                return result
+    if "blur" in msg or "sharp" in msg:
+        r = await reprocess(auto_sharpen_page(image), force_tier=None)
+        if _usable(r):
+            log.info("self_healing.sharpen_fixed")
+            return r
 
-    # Attempt 3: VLM fallback
     if current_tier == "tesseract":
-        result = await process_page(document_id, s3_key, force_tier="vlm")
-        if result.status == "done":
-            log.info("self_healing.vlm_fixed", document_id=document_id, s3_key=s3_key)
-            return result
+        r = await reprocess(image, force_tier="vlm")
+        if _usable(r):
+            log.info("self_healing.vlm_fixed")
+            return r
 
-    log.warning(
-        "self_healing.exhausted",
-        document_id=document_id,
-        s3_key=s3_key,
-        error=error_message,
-    )
-    return result
-
-
-# Forward import for type checking — avoid circular imports at runtime
-from unittest.mock import MagicMock  # noqa: E402
+    log.warning("self_healing.exhausted", error=error_message)
+    return None
