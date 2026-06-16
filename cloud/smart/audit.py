@@ -36,23 +36,26 @@ async def record_smart_action(
     before: dict[str, Any] | None = None,
     after: dict[str, Any] | None = None,
 ) -> None:
-    """Write one `smart.*` audit_log row. Never raises on logging failure path
-    beyond what the session.execute raises (caller's transaction owns rollback)."""
+    """Write one `smart.*` audit_log row. Never raises on logging failure path."""
     payload = {
         "reason": reason,
         "page_num": page_num,
         "before": before,
         "after": after,
     }
-    await session.execute(
-        _INSERT,
-        {
-            "username": "system",
-            "action": f"smart.{action}",
-            "document_id": document_id,
-            "params": json.dumps(payload),
-            "result": "ok",
-            "detail": reason,
-        },
-    )
+    try:
+        await session.execute(
+            _INSERT,
+            {
+                "username": "system",
+                "action": f"smart.{action}",
+                "document_id": document_id,
+                "params": json.dumps(payload),
+                "result": "ok",
+                "detail": reason,
+            },
+        )
+    except Exception as exc:
+        log.warning("smart_action_failed", action=action, document_id=document_id, error=str(exc))
+        return
     log.info("smart_action", action=action, document_id=document_id, reason=reason)

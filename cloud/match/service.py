@@ -26,6 +26,8 @@ from cloud.match.models import (
     parse_registration_no,
 )
 from cloud.match.reference import ReferenceRepository
+from cloud.self_healing.patterns import is_known_name_variation, is_transliteration_variation
+from cloud.smart.audit import record_smart_action
 from shared.exceptions import MatchError
 
 log = structlog.get_logger()
@@ -185,11 +187,21 @@ async def match_document(
                 dob_present and doc.dob.isoformat() == row.date_of_birth
             )
             dob_conflicts = bool(dob_present and not dob_agrees)
-            name_conflicts = bool(name_present and nscore < NAME_CONFLICT_FLOOR)
+            is_variation = bool(
+                name_present and (
+                    is_known_name_variation(doc.applicant_name_raw or "", row.full_name)
+                    or is_transliteration_variation(doc.applicant_name_raw or "", row.full_name)
+                )
+            )
+            name_conflicts = bool(
+                name_present and nscore < NAME_CONFLICT_FLOOR and not is_variation
+            )
 
             if not dob_conflicts and not name_conflicts:
                 if nscore >= NAME_CONFIRM:
                     matched_on = "registration_no+name"
+                elif is_variation and nscore < NAME_CONFLICT_FLOOR:
+                    matched_on = "registration_no+name_variation"
                 elif dob_agrees:
                     matched_on = "registration_no+dob"
                 else:
@@ -205,6 +217,15 @@ async def match_document(
                 await _persist_with_backfill(
                     doc_repo, ref_repo, document_id, doc, result, row=row
                 )
+                if matched_on == "registration_no+name_variation":
+                    await record_smart_action(
+                        session,
+                        action="match_auto_resolve",
+                        document_id=document_id,
+                        reason=f"name variation accepted: '{doc.applicant_name_raw}' ~ '{row.full_name}'",
+                        before={"name_score": round(nscore, 1), "would_be": "manual_review"},
+                        after={"match_status": "matched", "matched_on": matched_on},
+                    )
                 log.info("match_exact_verified", document_id=document_id,
                          reference_data_id=row.id, name_score=round(nscore, 1),
                          matched_on=matched_on)
