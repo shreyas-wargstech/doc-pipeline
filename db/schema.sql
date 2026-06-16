@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS documents (
     -- Retrieval index columns (populated by cloud/index/ stage)
     document_summary     TEXT,
     index_status         VARCHAR,
+    consistency_score    REAL,                             -- Phase 4: identity cross-page consistency (0-100)
 
     created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
