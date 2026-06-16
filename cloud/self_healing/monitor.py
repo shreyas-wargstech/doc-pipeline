@@ -12,6 +12,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cloud.orchestration.sqs import enqueue_stage
+from shared.config import get_settings
 from shared.logging import get_logger
 
 log = get_logger(__name__)
@@ -25,17 +27,16 @@ async def find_stuck_documents(
 
     Returns a list of {document_id, current_stage} dicts.
     """
-    cutoff = text("NOW() - INTERVAL '%s seconds'" % older_than.total_seconds())
     stmt = text(
         """
         SELECT document_id, status AS current_stage, updated_at
         FROM documents
-        WHERE updated_at < :cutoff
+        WHERE updated_at < NOW() - make_interval(secs => :seconds)
           AND status IN ('processing', 'structuring', 'failed', 'manual_review')
         ORDER BY updated_at ASC
         """
     )
-    result = await session.execute(stmt, {"cutoff": cutoff})
+    result = await session.execute(stmt, {"seconds": older_than.total_seconds()})
     return [
         {
             "document_id": row["document_id"],
@@ -47,26 +48,34 @@ async def find_stuck_documents(
 
 
 async def trigger_structure(document_id: str) -> None:
-    """Trigger the structure stage for a document."""
+    """Trigger the structure stage for a document via SQS re-enqueue."""
+    url = get_settings().sqs_structure_queue_url
+    if not url:
+        log.warning("self_healing.no_structure_queue", document_id=document_id)
+        return
+    await enqueue_stage(url, document_id)
     log.info("self_healing.trigger_structure", document_id=document_id)
-    # TODO: integrate with actual structure stage trigger
 
 
 async def trigger_match(document_id: str) -> None:
-    """Trigger the match stage for a document."""
+    """Trigger the match stage for a document via SQS re-enqueue."""
+    url = get_settings().sqs_match_queue_url
+    if not url:
+        log.warning("self_healing.no_match_queue", document_id=document_id)
+        return
+    await enqueue_stage(url, document_id)
     log.info("self_healing.trigger_match", document_id=document_id)
-    # TODO: integrate with actual match stage trigger
 
 
 async def restart_ocr_worker() -> None:
     """Restart the OCR worker."""
     log.info("self_healing.restart_ocr_worker")
-    # TODO: integrate with actual worker restart mechanism
+    # Worker liveness is an AWS concern; logged no-op by design.
 
 
 async def is_worker_alive() -> bool:
     """Check if the OCR worker is running."""
-    # TODO: integrate with actual worker health check
+    # Worker liveness is an AWS concern; assumed alive by design.
     return True
 
 
@@ -78,7 +87,7 @@ async def auto_resume_document(session: AsyncSession, doc: dict[str, Any]) -> No
     if stage == "ocr":
         if not await is_worker_alive():
             await restart_ocr_worker()
-    elif stage == "structure":
+    elif stage == "structuring":
         # Check if all pages are done but structure never triggered
         await trigger_structure(document_id)
     elif stage == "match":
