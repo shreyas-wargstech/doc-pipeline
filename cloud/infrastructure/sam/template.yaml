@@ -86,29 +86,6 @@ Parameters:
       S3 bucket name for document storage. Leave blank for auto-generated name.
       Must be globally unique. If blank, generates docintel-documents-{account}-{env}.
 
-  QdrantUrl:
-    Type: String
-    Description: Qdrant Cloud URL (e.g., https://xyz.cloud.qdrant.io:6333).
-
-  QdrantApiKey:
-    Type: String
-    Description: Qdrant Cloud API key.
-    NoEcho: true
-
-  Neo4jUri:
-    Type: String
-    Description: Neo4j Aura URI (e.g., bolt+s://xyz.databases.neo4j.io).
-
-  Neo4jUser:
-    Type: String
-    Default: neo4j
-    Description: Neo4j Aura username.
-
-  Neo4jPassword:
-    Type: String
-    Description: Neo4j Aura password.
-    NoEcho: true
-
   OpenRouterApiKey:
     Type: String
     Description: OpenRouter API key for VLM tier.
@@ -163,9 +140,6 @@ Globals:
         RDS_USERNAME: 'pipeline'
         REDIS_HOST: !GetAtt RedisCluster.RedisEndpoint
         REDIS_PORT: '6379'
-        QDRANT_URL: !Ref QdrantUrl
-        NEO4J_URI: !Ref Neo4jUri
-        NEO4J_USER: !Ref Neo4jUser
         OPENROUTER_BASE_URL: !Ref OpenRouterBaseUrl
         OPENROUTER_MODEL: !Ref OpenRouterModel
     VpcConfig:
@@ -205,8 +179,6 @@ Resources:
           {
             "RDS_PASSWORD": "",
             "OPENROUTER_API_KEY": "${OpenRouterApiKey}",
-            "NEO4J_PASSWORD": "${Neo4jPassword}",
-            "QDRANT_API_KEY": "${QdrantApiKey}",
             "DASHBOARD_SESSION_SECRET": "${DashboardSessionSecret}"
           }
         GenerateStringKey: RDS_PASSWORD
@@ -908,12 +880,6 @@ Resources:
               Value: !Ref IndexQueue
             - Name: REDIS_HOST
               Value: !GetAtt RedisCluster.RedisEndpoint
-            - Name: QDRANT_URL
-              Value: !Ref QdrantUrl
-            - Name: NEO4J_URI
-              Value: !Ref Neo4jUri
-            - Name: NEO4J_USER
-              Value: !Ref Neo4jUser
             - Name: OPENROUTER_BASE_URL
               Value: !Ref OpenRouterBaseUrl
             - Name: OPENROUTER_MODEL
@@ -923,10 +889,6 @@ Resources:
           Secrets:
             - Name: OPENROUTER_API_KEY
               ValueFrom: !Sub ${DocIntelSecrets}:SecretString:OPENROUTER_API_KEY::
-            - Name: NEO4J_PASSWORD
-              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:NEO4J_PASSWORD::
-            - Name: QDRANT_API_KEY
-              ValueFrom: !Sub ${DocIntelSecrets}:SecretString:QDRANT_API_KEY::
             - Name: DASHBOARD_SESSION_SECRET
               ValueFrom: !Sub ${DocIntelSecrets}:SecretString:DASHBOARD_SESSION_SECRET::
           LogConfiguration:

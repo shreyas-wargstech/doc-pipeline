@@ -164,18 +164,6 @@ def get_external_service_params() -> dict:
     
     params = {}
     
-    # Qdrant Cloud
-    print("\n   Qdrant Cloud (https://cloud.qdrant.io/)")
-    print("   Free tier: 1M vectors. Perfect for identity-page embeddings.")
-    params["QdrantUrl"] = input("   Qdrant URL (e.g., https://xyz.cloud.qdrant.io:6333): ").strip()
-    params["QdrantApiKey"] = input("   Qdrant API Key: ").strip()
-    
-    # Neo4j Aura
-    print("\n   Neo4j Aura (https://neo4j.com/cloud/aura/)")
-    print("   Free tier: 200K nodes / 400K relationships. Sufficient for 92K practitioners.")
-    params["Neo4jUri"] = input("   Neo4j URI (e.g., bolt+s://xyz.databases.neo4j.io): ").strip()
-    params["Neo4jPassword"] = input("   Neo4j Password: ").strip()
-    
     # OpenRouter
     print("\n   OpenRouter (https://openrouter.ai/)")
     print("   For VLM tier (Gemini 2.5 Flash).")
@@ -204,11 +192,9 @@ def get_sam_config(env: str, region: str, vpc: dict, externals: dict) -> dict:
         "PublicSubnet2": vpc["PublicSubnet2"],
         "PrivateSubnet1": vpc["PrivateSubnet1"],
         "PrivateSubnet2": vpc["PrivateSubnet2"],
-        "QdrantUrl": externals["QdrantUrl"],
-        "QdrantApiKey": externals["QdrantApiKey"],
-        "Neo4jUri": externals["Neo4jUri"],
-        "Neo4jPassword": externals["Neo4jPassword"],
         "OpenRouterApiKey": externals["OpenRouterApiKey"],
+        "OpenRouterBaseUrl": externals.get("OpenRouterBaseUrl", "https://openrouter.ai/api/v1"),
+        "OpenRouterModel": externals.get("OpenRouterModel", "google/gemini-2.5-flash"),
         "DashboardSessionSecret": externals["DashboardSessionSecret"],
     }
     
@@ -396,8 +382,6 @@ def print_summary(outputs: dict, config: dict) -> None:
     print("   ElastiCache (t3.micro):    ~$12")
     print("   ECS Fargate (1 task):      ~$15")
     print("   S3 (100 GB):               ~$2")
-    print("   Qdrant Cloud (free):       $0")
-    print("   Neo4j Aura (free):         $0")
     print("   ───────────────────────────────")
     print("   Base Total:                ~$74/month")
     print("   + $6 per 200-document batch")
@@ -407,8 +391,6 @@ def print_summary(outputs: dict, config: dict) -> None:
     print(f"   S3_BUCKET={outputs.get('S3Bucket', '')}")
     print(f"   SQS_OCR_QUEUE_URL={outputs.get('OcrQueueUrl', '')}")
     print(f"   REDIS_HOST={outputs.get('RedisEndpoint', '')}")
-    print(f"   QDRANT_URL={config.get('QdrantUrl', '')}")
-    print(f"   NEO4J_URI={config.get('Neo4jUri', '')}")
     
     print("\n" + "=" * 70)
     
@@ -456,11 +438,9 @@ def main() -> int:
             "PrivateSubnet2": os.environ.get("DOCINTEL_PRIVATE_SUBNET_2", ""),
         }
         externals = {
-            "QdrantUrl": os.environ.get("QDRANT_URL", ""),
-            "QdrantApiKey": os.environ.get("QDRANT_API_KEY", ""),
-            "Neo4jUri": os.environ.get("NEO4J_URI", ""),
-            "Neo4jPassword": os.environ.get("NEO4J_PASSWORD", ""),
             "OpenRouterApiKey": os.environ.get("OPENROUTER_API_KEY", ""),
+            "OpenRouterBaseUrl": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            "OpenRouterModel": os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash"),
             "DashboardSessionSecret": os.environ.get("DASHBOARD_SESSION_SECRET", ""),
         }
         config = get_sam_config(args.env, args.region, vpc, externals)
