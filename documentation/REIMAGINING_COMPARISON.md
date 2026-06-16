@@ -155,7 +155,7 @@
 
 | Original Proposal | Grounded Reality | Status |
 |---|---|---|
-| Kubernetes (EKS) + Serverless (Lambda) + Edge | **Step 1: Single EC2 with Docker Compose** (beginner-friendly, $250/month, immediate 10x speed) | ✅ ACCEPTED — phased, starts simple |
+| Kubernetes (EKS) + Serverless (Lambda) + Edge | **SAM/CloudFormation + Terraform serverless** (Lambda container images, RDS pgvector + Neptune, ECS Fargate API, zero Docker) | ✅ ACCEPTED — serverless only, no EC2 Docker |
 | WebRTC for real-time collaboration | WebSocket / Server-Sent Events for real-time updates (single user) | ⚠️ REPLACED — no collaboration, just live updates |
 | WebAssembly for client-side OCR | Not implemented — server-side only | ❌ REJECTED — too complex for current phase |
 | Temporal/Cadence workflow engine | AWS SQS + Lambda (standard, managed, no new infrastructure to learn) | ✅ ACCEPTED — simpler, standard AWS |
@@ -317,7 +317,7 @@
 
 | Cost Driver | Grounded | Why It's Affordable |
 |---|---|---|
-| EC2 instance (c6i.2xlarge) | $250/month (or $75/month Spot) | One instance, Docker Compose, no K8s |
+| EC2 instance (c6i.2xlarge) | $0 (not used) | Serverless only — no EC2 instances |
 | RDS (Postgres) | $13/month (db.t3.micro) | Managed, backups, small instance |
 | ElastiCache (Redis) | $15/month (t3.micro) | Added in Phase 3, not immediate |
 | S3 storage | $0.05/month | 200 PDFs = 1GB |
@@ -411,7 +411,7 @@
 | **User:** A tech-savvy, sci-fi-loving engineer | **User:** A government clerk who has been doing this for 20 years and doesn't want to learn new technology |
 | **Metric:** Number of futuristic features | **Metric:** Number of documents processed per hour, accuracy of matches, cost per document |
 | **Success:** The system is featured in a tech blog | **Success:** The council processes 200 documents in a day without anyone opening a terminal |
-| **Architecture:** Kubernetes, WebAssembly, WebRTC, custom ML models, blockchain | **Architecture:** EC2, Docker Compose, SQS, Lambda, Postgres, Redis — standard AWS |
+| **Architecture:** SAM/CloudFormation + Terraform, Lambda, SQS, RDS pgvector + Neptune, ElastiCache, ECS Fargate — standard AWS serverless | **Architecture:** EC2, Docker Compose, SQS, Lambda, Postgres, Redis — standard AWS |
 | **Timeline:** 12+ months, 7 phases, high risk | **Timeline:** 16 weeks, 4 phases, low risk |
 | **Cost:** $2,000+/month | **Cost:** $278-350/month (or $100-150 with Spot) |
 | **Team:** 5 engineers + designer + ML specialist + mobile developer | **Team:** 1-2 engineers + your existing codebase |

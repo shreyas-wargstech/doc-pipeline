@@ -343,4 +343,51 @@ CREATE TABLE IF NOT EXISTS cost_events (
 
 CREATE INDEX IF NOT EXISTS idx_cost_events_ts       ON cost_events (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_cost_events_stage    ON cost_events (stage);
+
+-- ---------------------------------------------------------------------------
+-- human_corrections: one row per operator correction during review.
+-- Powers the learning loop: nightly analysis extracts patterns and updates
+-- keyword rules, OCR substitution maps, and match thresholds.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS human_corrections (
+    id              BIGSERIAL PRIMARY KEY,
+    ts              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    username        TEXT NOT NULL,
+    document_id     TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+    page_num        INTEGER,
+    correction_type TEXT NOT NULL
+        CHECK (correction_type IN
+            ('page_type', 'name', 'dob', 'registration_no', 'match_status',
+             'ocr_tier', 'gender', 'application_no', 'document_reference_no', 'entity')),
+    original_value    TEXT,
+    corrected_value TEXT,
+    ai_confidence     REAL,
+    review_queue_id   INTEGER,
+    ocr_tier          TEXT,
+    stage             TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_human_corrections_type
+    ON human_corrections (correction_type, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_human_corrections_doc
+    ON human_corrections (document_id);
+CREATE INDEX IF NOT EXISTS idx_human_corrections_username
+    ON human_corrections (username, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_cost_events_document ON cost_events (document_id);
+
+-- ---------------------------------------------------------------------------
+-- tuning_parameters: pipeline parameter values with change history.
+-- Powers the Engine Room v2 parameter tuner and A/B test runner.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tuning_parameters (
+    id            BIGSERIAL PRIMARY KEY,
+    name          TEXT NOT NULL UNIQUE,
+    value         TEXT NOT NULL,
+    previous_value TEXT,
+    changed_by    TEXT NOT NULL,
+    changed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    reason        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tuning_parameters_name ON tuning_parameters (name);

@@ -1,60 +1,28 @@
-"""Lambda stub handler: Structure (entity extraction).
+"""Lambda handler: Structure (entity extraction).
 
-Phase 0 stub. In Phase 1, this will run regex + LLM entity extraction on
-OCR'd text, extracting name, DOB, registration_no, etc.
+Runs regex + LLM entity extraction on OCR'd text, extracting name, DOB,
+registration_no, etc. On success, enqueues the document to the Match queue.
 """
 from __future__ import annotations
 
-import json
+import importlib
 import logging
+
+from cloud.structure.service import structure_document
+from shared.config import get_settings
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# cloud.lambda is a keyword path — use importlib to avoid SyntaxError
+_lambda_utils = importlib.import_module("cloud.lambda.utils")
+run_stage_lambda = _lambda_utils.run_stage_lambda
+
 
 def lambda_handler(event, context):
     """SQS FIFO trigger handler for Structure stage.
-    
-    event['Records'] contains 1-5 SQS messages (document-level).
-    Each message body is a JSON object with document_id.
-    
-    Phase 0: Logs and returns success.
-    Phase 1: Will import and call actual structure logic (cloud/structure/service.py).
+
+    Each message body contains document_id. On success, sends to Match queue.
     """
-    batch_item_failures = []
-    
-    for record in event.get("Records", []):
-        try:
-            body = json.loads(record["body"])
-            message_id = record.get("messageId", "unknown")
-            document_id = body.get("document_id")
-            
-            logger.info("structure_stub.processing", extra={
-                "message_id": message_id,
-                "document_id": document_id,
-            })
-            
-            # Phase 0: Log and succeed
-            # Phase 1:
-            #   1. Read all pages from RDS for this document_id
-            #   2. Run regex extraction (cloud/structure/regex_extract.py)
-            #   3. Run LLM extraction (cloud/structure/llm.py) for identity pages
-            #   4. Roll up entities across pages (best name, reg_no, DOB)
-            #   5. Write structured entities to documents table in RDS
-            #   6. Send to SQS match-queue
-            
-            logger.info("structure_stub.done", extra={
-                "message_id": message_id,
-                "document_id": document_id,
-            })
-            
-        except Exception as exc:
-            logger.error("structure_stub.failed", extra={
-                "message_id": record.get("messageId", "unknown"),
-                "error": str(exc),
-            })
-            batch_item_failures.append({"itemIdentifier": record["messageId"]})
-    
-    return {
-        "batchItemFailures": batch_item_failures,
-    }
+    next_queue = get_settings().sqs_match_queue_url
+    return run_stage_lambda(event, structure_document, next_queue)

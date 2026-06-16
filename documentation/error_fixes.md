@@ -946,3 +946,32 @@ Building `infra/docker/Dockerfile.ocr` (Tesseract/zbar harvested from a builder 
 - **Resolution**: Grounded revision (REIMAGINING_GROUNDED.md) — practical, cost-conscious, user-directed. Kept only features that solve real problems without adding complexity. Rejected: spatial canvas, 3D viz, gamification, collaboration, mobile app, fraud detection, regulatory analytics, AR/VR, voice/gesture, metaverse. Accepted: Aether chat (with autocomplete), Engine Room (engineer control panel), self-healing pipeline (cost-neutral), dynamic cost routing (game theory), identity consistency scoring (not fraud), document autopsy (text-only), accessibility-first, AI summaries, learning from corrections.
 - **Lesson**: When user says "complete freedom," still validate against stated design philosophy. Document all rejected ideas to prevent accidental re-introduction. Maintain "Reimagining Comparison" document (REIMAGINING_COMPARISON.md) as permanent reference for what was rejected vs accepted.
 - **Files**: REIMAGINING.md, REIMAGINING_GROUNDED.md, REIMAGINING_COMPARISON.md, REIMAGINING_ADDENDUM.md.
+
+
+---
+
+## 2026-06-16 — Lambda stage helper `anyio.run()` keyword-only crash
+
+### FIX-052 · `anyio.run()` passes positional args, keyword-only `*` breaks `_run_record`
+
+**Symptom:**
+```
+TypeError: _run_record() takes 3 positional arguments but 4 were given
+```
+`run_stage_lambda()` called `anyio.run(_run_record, record, stage_fn, next_queue_url, extra_kwargs)` where `_run_record` had signature `*, extra_kwargs: dict[str, Any] | None = None`.
+
+**Root cause:** `anyio.run(func, *args)` passes `args` positionally to `func`. A keyword-only parameter (introduced by `*` separator) cannot receive a positional argument. The `*` is correct for normal Python calls but incompatible with `anyio.run()`'s positional dispatch.
+
+**Fix:** Removed the `*` keyword-only separator from `_run_record` signature:
+```python
+async def _run_record(
+    record: dict,
+    stage_fn: Any,
+    next_queue_url: str | None,
+    extra_kwargs: dict[str, Any] | None = None,
+) -> None:
+```
+
+**Files:** `cloud/lambda/utils.py`
+
+**Rule:** When a function is called via `anyio.run(func, *args)`, ALL parameters must be positional-compatible. Never use `*` keyword-only separators on functions passed to `anyio.run()`. Same rule applies to `asyncio.run()` and `loop.run_in_executor()`.

@@ -100,6 +100,12 @@ class Settings(BaseSettings):
     redis_host: str = Field("", alias="REDIS_HOST")
     redis_port: int = Field(6379, alias="REDIS_PORT")
 
+    @property
+    def redis_url(self) -> str | None:
+        if self.redis_host:
+            return f"redis://{self.redis_host}:{self.redis_port}"
+        return None
+
     # OpenRouter (VLM tier)
     openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(

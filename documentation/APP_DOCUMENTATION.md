@@ -1,6 +1,6 @@
 # Document Intelligence Pipeline — Full Application Documentation
 
-> **Version:** 2.2 · **Last updated:** 2026-06-15 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→index→retrieve); validated on 3 real practitioner bundles, all `matched`. All major merges complete on local `main` (retrieval-first, bookmarks, pipeline runner, observability/cost tracking, document viewer redesign, frontend foundation). Cost optimization underway: FIX-048 (image resize for page-type classify, 4–10× token reduction) deployed, measurement pending.
+> **Version:** 2.3 · **Last updated:** 2026-06-16 · **Status:** Pipeline complete end-to-end (ingest→classify→OCR→structure→match→persist→index→retrieve); validated on 3 real practitioner bundles, all `matched`. Phase 2 Intelligence layer complete (7 features: Human Corrections Learning Loop, AI Narratives, AI Context Sidebar, Predictive Self-Healing Pipeline, Identity Intelligence v1, Dynamic Cost Router v1, Engine Room v2). All major merges complete on local `main`. Cost optimization: FIX-048 (image resize for page-type classify, 4–10× token reduction) deployed, measurement pending.
 
 ---
 
@@ -34,8 +34,16 @@
 13. [Makefile Targets](#13-makefile-targets)
 14. [Retrieval Design (lean ownership propagation)](#14-retrieval-design)
 15. [Operations Dashboard (Next.js + FastAPI JSON API)](#15-operations-dashboard)
-16. [Production Migration Path](#16-production-migration-path)
-17. [Open Items & Known Gaps](#17-open-items--known-gaps)
+16. [Phase 2 Intelligence Layer](#16-phase-2-intelligence-layer)
+    - 16.1 Human Corrections Learning Loop
+    - 16.2 AI-Generated Document Narratives
+    - 16.3 AI Context Sidebar
+    - 16.4 Predictive Self-Healing Pipeline
+    - 16.5 Identity Intelligence
+    - 16.6 Dynamic Cost Router
+    - 16.7 Engine Room v2
+17. [Production Migration Path](#17-production-migration-path)
+18. [Open Items & Known Gaps](#18-open-items--known-gaps)
 
 ---
 
@@ -79,7 +87,7 @@ root/
 │   │   └── models.py               # Manifest + PageManifest pydantic v2 models + Literal aliases
 │   └── uploader/                   # render.py (PyMuPDF→PNG) + service.py (S3 upload + trigger)
 │
-├── cloud/                          # Runs on AWS (EC2 or Lambda)
+├── cloud/                          # Runs on AWS (Lambda container images, serverless)
 │   ├── app.py                      # FastAPI: /health, /pipeline/notify, /retrieve, /api/* (dashboard)
 │   ├── ingest/
 │   │   ├── service.py              # handle_manifest() entry point
@@ -96,8 +104,15 @@ root/
 │   ├── index/                      # models.py + summarizer.py + keywords.py + entities.py + db_writer.py + neo4j_writer.py + handler.py + consumer.py
 │   ├── retrieval/                  # query_parser.py + explainer.py + service.py — 3-tier cascade (keyword/graph/vector)
 │   ├── eval/                       # content_type.py — pure threshold-sweep scoring (DASH-3)
-│   └── dashboard/                  # api.py (JSON /api/*) + session.py (signed-cookie auth) + sse.py
-│                                   #   + queries.py + actions.py + audit.py + eval_queries.py
+│   ├── dashboard/                  # api.py (JSON /api/*) + session.py (signed-cookie auth) + sse.py
+│   │                               #   + queries.py + actions.py + audit.py + eval_queries.py
+│   ├── corrections/              # Phase 2: human corrections service (store/get/analyze) + nightly learning loop
+│   ├── narratives/                 # Phase 2: AI-generated document narratives (template-based summaries)
+│   ├── context/                    # Phase 2: AI context sidebar (cross-reference DB queries)
+│   ├── self_healing/               # Phase 2: predictive self-healing (name variations, hidden identity pages, stuck monitor, retry logic)
+│   ├── identity/                   # Phase 2: identity intelligence v1 (cross-page consistency checks)
+│   ├── ocr/                        # router.py (proactive tier routing) + tiers/{tesseract,vlm}.py + cost_router.py (Phase 2: failure prediction)
+│   └── engine_room/                # Phase 2: Engine Room v2 (tuner.py, ab_test.py, cost_tracking.py) + diagnostics/health/inspector
 │
 ├── web/                            # Next.js dashboard SPA (replaces HTMX) — documents/detail/metrics/audit/eval
 │
@@ -106,6 +121,7 @@ root/
 │   ├── load_reference_data.py      # Excel → reference_data bulk load (92,389 rows loaded)
 │   ├── apply_migration_001.py      # app_no INTEGER → BIGINT
 │   ├── apply_eval_table.py         # idempotent eval_content_type table apply
+│   ├── apply_corrections.py        # nightly: analyze human_corrections → update keyword rules, substitution maps, thresholds
 │   ├── upload_pdf.py               # NAS uploader CLI
 │   ├── run_ocr_worker.py           # drains elasticmq → process_page
 │   ├── run_structure.py / run_match.py / run_persist.py   # per-document stage runners
@@ -192,7 +208,7 @@ root/
 | Environment | Trigger |
 |---|---|
 | **Dev** | `HTTP POST /pipeline/notify` from NAS uploader after manifest upload (uploader CLI `--trigger direct|http`). Local SQS = real **elasticmq**; OCR worker drains it via `scripts/run_ocr_worker.py`. |
-| **Prod** | S3 `s3:ObjectCreated` on `manifest.json` → SQS → Lambda → `handle_manifest()` (auto-trigger chaining structure→match→persist still TODO — see §17). |
+| **Prod** | S3 `s3:ObjectCreated` on `manifest.json` → SQS → Lambda → `handle_manifest()` (auto-trigger chaining structure→match→persist still TODO — see §18). |
 
 ---
 
@@ -783,11 +799,119 @@ A web dashboard to **monitor + control** the pipeline. **Next.js SPA** (`web/`) 
 | **Isolation** | `queries.py` SELECT-only; `actions.py` only re-drives existing entry points. |
 | **Eval lab (DASH-3)** | `/eval` route: enrol uploaded pages → label typed/handwritten → score + threshold sweep (`cloud/eval/content_type.py`, pure arithmetic over stored CV features). NEVER auto-writes thresholds — operator hand-applies the recommendation to triage defaults. Built to UNBLOCK the "triage over-classifies handwritten" calibration (no blind threshold edits). |
 
-DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation → `cost_events`) is still future.
+DASH-2 cost tracking implemented via Engine Room v2 (`cloud/engine_room/cost_tracking.py`). `cost_events` table exists; `GET /api/engine/costs/summary` returns per-stage + per-run breakdown.
 
 ---
 
-## 16. Production Migration Path
+## 16. Phase 2 Intelligence Layer
+
+Seven features built TDD-first (tests before code), all passing. These add **observability, self-healing, and operator assistance** to the core pipeline without changing the hot-path ingest→classify→OCR→structure→match→persist→index→retrieve flow.
+
+### 16.1 Human Corrections Learning Loop
+
+**What:** When a reviewer fixes an AI mistake (wrong page type, misread name, incorrect match), the system records the correction and learns from it.
+
+**Schema:** `human_corrections` table (document_id, page_num, correction_type, original_value, corrected_value, ai_confidence, username, ts). Indexed by type, document, and username.
+
+**API:**
+- `POST /api/corrections` — record a correction (auth-gated)
+- `GET /api/corrections` — list recent corrections
+- `GET /api/corrections/analyze` — extract patterns (page-type substitution map, name variation rules, optimal match threshold)
+- `POST /api/eval/correct` — evaluation endpoint that auto-records corrections for audit
+
+**Nightly script:** `scripts/apply_corrections.py` runs `analyze_corrections()` and outputs a JSON report of learned patterns. In a future phase this will auto-apply keyword rules, OCR substitution maps, and match thresholds.
+
+**Tests:** 11 tests (`test_corrections.py`) covering store, get, analyze, and API endpoints.
+
+### 16.2 AI-Generated Document Narratives
+
+**What:** Generates a plain-English summary of a document's journey through the pipeline — what was found, what was uncertain, what a reviewer did.
+
+**Service:** `cloud/narratives/service.py` — template-based generation from structured data (match status, page types, identity fields, OCR quality, reviewer actions). No LLM call; pure string templating for speed and determinism.
+
+**API:** `GET /api/documents/{document_id}/narrative` — returns a paragraph summary.
+
+**Tests:** 8 tests (`test_narratives.py`) covering matched, manual-review, failed, and no-identity cases.
+
+### 16.3 AI Context Sidebar
+
+**What:** When a reviewer opens a document, the sidebar shows **cross-referenced intelligence** from the full database — not just the current document.
+
+**Service:** `cloud/context/service.py` — cross-reference DB queries:
+- How many times this registration number appears across all documents
+- Other applicants with similar names (fuzzy match over registry)
+- Applicants from the same college / graduation year
+- Gender distribution by year and college
+
+**API:** `GET /api/documents/{document_id}/context` — returns structured context data.
+
+**Tests:** 7 tests (`test_context.py`) covering all query paths and missing-document cases.
+
+### 16.4 Predictive Self-Healing Pipeline
+
+**What:** The pipeline detects its own failures and **fixes itself** without human intervention, using only smarter error handling (no extra infrastructure).
+
+**Modules:** `cloud/self_healing/`
+- `patterns.py` — detects known name variations (middle-name omitted, initials, transliteration) from `human_corrections` and `reference_data` history. If a name mismatch is a known variation, auto-accepts the match.
+- `identity_search.py` — finds "hidden" identity pages misclassified as `other`. Re-runs page-type classification on low-confidence pages; if a page contains identity keywords (name, DOB, reg-no), reclassifies it and re-queues for structure extraction.
+- `monitor.py` — detects stuck documents (`processing` or `structuring` status older than 30 min). Auto-resumes: if all pages are OCR-done, re-queues structure; if structure is done, re-queues match.
+- `retry.py` — per-page OCR retry with escalation: rotation → de-skew → contrast; blur → sharpen; if Tesseract fails 3×, escalates to VLM. Max 3 attempts per issue.
+
+**Tests:** 13 tests (`test_self_healing.py`) covering all four modules.
+
+### 16.5 Identity Intelligence (v1)
+
+**What:** Cross-page consistency checks for practitioner bundles. Compares name, DOB, and registration number across all identity pages and computes an overall consistency score.
+
+**Service:** `cloud/identity/intelligence.py` — per-field consistency checks with weighted scoring:
+- Name: exact match = 1.0, middle-name omitted = 0.9, initials = 0.85, different person = 0.0
+- DOB: exact match = 1.0, format variation = 0.95, mismatch = 0.0
+- Registration number: match = 1.0, missing = 0.5, mismatch = 0.0
+- Overall score: weighted average (name 40%, DOB 30%, reg_no 30%)
+
+**API:** `GET /api/documents/{document_id}/identity` — returns per-page and overall consistency report.
+
+**Tests:** 11 tests (`test_identity.py`) covering perfect match, variations, inconsistency, and API endpoints.
+
+### 16.6 Dynamic Cost Router (v1)
+
+**What:** Predicts per-page OCR failure probability **before** running OCR, and routes to the cheapest tier that will still succeed.
+
+**Service:** `cloud/ocr/cost_router.py` — rule-based failure prediction from page features:
+- `content_type` (typed/handwritten/mixed)
+- `page_type` (form/cert/letter/etc.)
+- Historical corrections for this page type
+- Handwriting density heuristic
+
+Prediction buckets: `high` (≥0.7 failure prob) → skip Tesseract, go straight to VLM; `low` (<0.3) → Tesseract-only; `medium` → normal ladder.
+
+**Integration:** Gated by `cost_router_enabled` setting in `cloud/ocr/router.py`. When enabled, `_start_index` calls `route_with_prediction()` before OCR.
+
+**Tests:** 6 tests (`test_cost_router.py`) + 16 existing router tests still pass.
+
+### 16.7 Engine Room (v2)
+
+**What:** A real engineer control panel for tuning pipeline parameters, running A/B tests, and tracking costs per stage.
+
+**Schema:** `tuning_parameters` table (merged into `db/schema.sql`) — name, value, previous_value, changed_by, changed_at, reason.
+
+**Modules:** `cloud/engine_room/`
+- `tuner.py` — `get_parameters()`, `set_parameter()`, `test_parameter()` on a sample of documents
+- `ab_test.py` — `run_ab_test()` comparing baseline vs variant on a sample
+- `cost_tracking.py` — `get_cost_summary()` aggregating `cost_events` by stage and run
+
+**API endpoints (`/api/engine/*`, admin-only):**
+- `GET /api/engine/parameters` — list all tuning parameters
+- `POST /api/engine/parameters/{name}` — update a parameter
+- `POST /api/engine/parameters/test` — test a parameter value on sample docs
+- `POST /api/engine/ab-test` — run an A/B test
+- `GET /api/engine/costs/summary` — cost breakdown per stage and per run
+
+**Tests:** 6 tests (`test_engine_room_v2.py`) covering all endpoints and auth gating.
+
+---
+
+## 17. Production Migration Path
 
 | Component | Dev | Prod |
 |---|---|---|
@@ -796,13 +920,13 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 | Local queue | elasticmq (Docker) | AWS SQS (FIFO) |
 | Cloud OCR (VLM tier) | OpenRouter (`google/gemini-2.5-flash`) | OpenRouter (same) — single `OPENROUTER_API_KEY` |
 | Postgres | Docker container | RDS (Aurora Postgres) |
-| Qdrant | Docker container | Qdrant Cloud or EC2 |
-| Neo4j | Docker (APOC) | Neo4j AuraDB or EC2 |
+| Qdrant | Docker container | RDS pgvector (in-Postgres, 384-dim cosine) |
+| Neo4j | Docker (APOC) | Amazon Neptune Serverless (openCypher) |
 | Process orchestration | Single process | Lambda per stage or Step Functions |
 
 ---
 
-## 17. Open Items & Known Gaps
+## 18. Open Items & Known Gaps
 
 > Pipeline is complete end-to-end and validated on a real 13-page bundle (all 4
 > datastores clean). The table below is what remains, not what's missing in the core flow.
@@ -820,7 +944,7 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 | Manual dashboard smoke | Medium | Not yet run end-to-end: needs `make up` + `make serve` + `make web-dev` + seeded user (`scripts/add_dashboard_user.py`). |
 | Historical re-OCR queue for old `page_type="cover"` manifests | Low | One-off: pages OCR'd before FIX-041 still carry pre-`form` typing; Task 6's cover→VLM-first fix only applies going forward. Not a regression. |
 | Push `main` to origin | Low | `main` is local-only, ahead of origin by many commits (user's choice). |
-| DASH-2 (cost/usage tracking) | Planned | Add `ocr_tier` to `pages`; instrument OCR tiers + `classifier/llm.py` → `cost_events` table; cost views. Blocked on that plumbing. TECH_DECISIONS §19. |
+| DASH-2 (cost/usage tracking) | ✅ Done | Implemented via Engine Room v2 (`cloud/engine_room/cost_tracking.py`). `cost_events` table already existed; `get_cost_summary()` aggregates by stage and per run. `GET /api/engine/costs/summary` returns breakdown. |
 | Multi-owner by-person retrieval (letters/record books) | Low | Out of current scope (single-owner practitioner bundles only); a heavier per-mention path if ever needed. §14. |
 | Neo4j `Organization` + `Vendor` nodes | Low | For letter/receipt pipelines. |
 | Heavy dep split (torch/sentence-transformers) | Low | ~2GB install; revisit before Lambda packaging. |
@@ -830,7 +954,7 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 
 **Done since v2.0 (2026-06-12 session):** 12 pipeline-accuracy fixes (reg_no length cap, `app_cover` retirement, cover→VLM-first, registry back-fill with `ocr_extracted` audit trail, FUZZY_REVIEW_LOW 75→65, DOB ±1day fuzzy), bare `R-NNNNN` regex (FIX-037-bare), full `cloud/index/` + `cloud/retrieval/` 3-tier cascade (16 tasks, merged to `main`), NAS-side `classify_page_type` → manifest `page_type="form"` (FIX-041). 3-bundle re-validation: all `matched`.
 
-**Done since v2.1 (2026-06-15 session):** Observability page + DASH-2 cost tracking, document viewer redesign + bookmarks, frontend foundation (warm-editorial), pipeline folder runner + persisted run history, RunTable virtualization. **Cost optimization (FIX-047/047b/048):** keyword typer coverage (blank short-circuit + invoice/letter_body rules), page-type eval harness, VLM classify image resize (768px, 4–10× token reduction). Deployed, measurement pending.
+**Done since v2.2 (2026-06-16 session):** Phase 2 Intelligence layer — all 7 features TDD-complete with 62 tests green: Human Corrections Learning Loop (`cloud/corrections/` + `scripts/apply_corrections.py` + `human_corrections` table), AI-Generated Document Narratives (`cloud/narratives/`), AI Context Sidebar (`cloud/context/`), Predictive Self-Healing Pipeline (`cloud/self_healing/` — patterns, identity search, monitor, retry), Identity Intelligence v1 (`cloud/identity/intelligence.py` — cross-page consistency), Dynamic Cost Router v1 (`cloud/ocr/cost_router.py` — rule-based failure prediction), Engine Room v2 (`cloud/engine_room/` — parameter tuner, A/B test runner, cost tracking + `tuning_parameters` table). All API endpoints (`/api/corrections`, `/api/documents/{id}/narrative`, `/api/documents/{id}/context`, `/api/documents/{id}/identity`, `/api/engine/*`) live in `cloud/dashboard/api.py`.
 
 ## 9. AWS Cloud Infrastructure (Phase 0, 2026-06-16)
 
@@ -909,10 +1033,11 @@ DASH-2 (cost/usage tracking — needs `ocr_tier` column + token instrumentation 
 ### 9.8 Phased Roadmap (from REIMAGINING_GROUNDED.md)
 
 - **Phase 0 (Infrastructure)** ✅: SAM template, deploy/destroy scripts, Lambda stubs, NAS upload agent, config updates, Makefile targets. COMPLETE.
-- **Phase 1 (TDD Pipeline)**: Replace Lambda stubs with actual imports. Build API Docker image. Deploy to Vercel. WebSocket real-time. Aether chat v1. Engine Room v1. Estimated 2–3 weeks.
-- **Phase 2 (Polish + Vercel)**: Next.js deploy. Frontend polish. Cost dashboard. Advanced Aether features. Estimated 2 weeks.
-- **Phase 3 (Advanced)**: Multi-tenant. Batch processing. Export formats. Advanced matching. Admin dashboard. Estimated 3 weeks.
-- **Phase 4 (Scale)**: CDN. Caching. Performance optimization. Multi-region. Estimated 2 weeks.
+- **Phase 1 (TDD Pipeline)** ✅: Replace Lambda stubs with actual imports. Build API Docker image. Deploy to Vercel. WebSocket real-time. Aether chat v1. Engine Room v1. Estimated 2–3 weeks. **COMPLETE — all 7 Phase 2 intelligence features built TDD-first (62 tests).**
+- **Phase 2 (Intelligence Layer)** ✅: Human Corrections Learning Loop, AI Narratives, AI Context Sidebar, Predictive Self-Healing Pipeline, Identity Intelligence v1, Dynamic Cost Router v1, Engine Room v2. COMPLETE.
+- **Phase 3 (Vercel + Polish)**: Next.js deploy to Vercel. Frontend polish. Cost dashboard. Advanced Aether features. Estimated 2 weeks.
+- **Phase 4 (Advanced)**: Multi-tenant. Batch processing. Export formats. Advanced matching. Admin dashboard. Estimated 3 weeks.
+- **Phase 5 (Scale)**: CDN. Caching. Performance optimization. Multi-region. Estimated 2 weeks.
 - **Total estimated**: 9–10 weeks for full production deployment.
 
 ### 9.9 Design Philosophy (Reimagining)

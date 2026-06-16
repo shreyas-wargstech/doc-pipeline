@@ -31,6 +31,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useActionBarContent } from "@/app/action-bar";
 import { useLogout, useRole } from "@/hooks/useAuth";
 import { useCollapsible } from "@/hooks/useCollapsible";
+import { AccessibilityToolbar } from "@/components/AccessibilityToolbar";
 
 const DRAWER_WIDTH = 240;
 const COLLAPSED_WIDTH = 64;
@@ -115,6 +116,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Breadcrumbs />
           </Box>
+          <AccessibilityToolbar />
           <IconButton color="inherit" onClick={(e) => setUserMenuAnchor(e.currentTarget)} aria-label="Account menu">
             <AccountCircleIcon />
           </IconButton>

@@ -935,3 +935,32 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - All Phase 0 commits (SAM template, deploy/destroy scripts, Lambda stubs, NAS upload agent, config updates, Makefile targets) now on `main`.
 - Active issue: `local-dev` branch is 10 commits ahead of `main` — need to merge.
 - Next: Phase 1 TDD implementation begins from `main` / `local-dev`.
+
+
+## 2026-06-16 — Doc unification: zero-Docker mandate applied across all docs
+
+- User directed: "zero Docker in production" — update all docs to be uniform.
+- **REIMAGINING_GROUNDED.md** (the most divergent): replaced the entire "Beginner's Ladder (4 Steps)" EC2 Docker Compose section with the actual serverless deployment path (SAM/CloudFormation + Terraform). Updated Phase 1 roadmap to remove EC2 tasks. Updated architecture diagram to show RDS pgvector + Neptune + ECS Fargate (not Qdrant/Neo4j Aura + EC2). Updated cost estimates, "What Will Be Hard/Easy", and the final ranked impact list. Added header: "You directed: zero Docker in production."
+- **cloud/infrastructure/README.md**: updated architecture diagram to show RDS pgvector (not Qdrant Cloud) and Amazon Neptune Serverless (not Neo4j Aura). Updated persist pipeline description, cost table, deploy prompt, and Phase 1 end-to-end test target. Added "IaC: SAM/CloudFormation + Terraform" and "Zero Docker in production" labels to the architecture diagram.
+- **CLAUDE.md**: added locked decision: "REJECTED: EC2 Docker Compose in production (user mandate: zero Docker in production; serverless only via SAM/CloudFormation + Terraform)."
+- **REIMAGINING_COMPARISON.md**: updated Architecture Comparison table to show SAM/CloudFormation + Terraform serverless as ACCEPTED (was incorrectly showing EC2 Docker as ACCEPTED). Updated cost table to remove EC2 line. Updated the original-vs-grounded comparison to show serverless architecture.
+- **APP_DOCUMENTATION.md**: updated production migration path (§16) to show RDS pgvector + Neptune (was Qdrant Cloud/Neo4j Aura or EC2). Updated cloud/ folder description to "Lambda container images, serverless" (was "EC2 or Lambda").
+- **AWS_SETUP.md**: already consistent — no changes needed.
+- **REIMAGINING_ADDENDUM.md**: left intact — its "Docker Compose on EC2 vs AWS Managed Services" comparison tables correctly show zero-Docker as the winner; historical comparison is valid.
+- Files touched: `documentation/REIMAGINING_GROUNDED.md`, `cloud/infrastructure/README.md`, `CLAUDE.md`, `documentation/REIMAGINING_COMPARISON.md`, `documentation/APP_DOCUMENTATION.md`, `documentation/session_log.md` (this entry).
+
+
+## 2026-06-16 — Phase 3: Six cloud pipeline features, all TDD
+
+- **Stage:** Phase 3 (cloud pipeline features: preprocessing, cost router, cost prediction, Redis suggestions, Lambda VLM, SQS fan-out)
+- **Done:**
+  - Feature 1 — Robust Preprocessing: 4 new OpenCV steps (CLAHE contrast normalization, auto-crop to content, text-line detection, curvature dewarp) wired into `PreprocessConfig` with default-off toggles. 19 tests green.
+  - Feature 2 — Dynamic Cost Router v2: per-word routing, region clustering by vertical proximity, image cropping for VLM regions, Devanagari auto-routing, mixed-tier assembly. `OcrResult.tier` expanded to `"mixed"`. 18 tests green.
+  - Feature 3 — Engine Room v3 Cost Prediction: historical averaging + std-dev confidence intervals, per-stage breakdown, default fallback estimates when no history. 8 tests green.
+  - Feature 4 — Redis Suggestions: `ZRANGEBYLEX` prefix search on name + reg_no indexes, DB fallback when Redis unavailable, nightly index builder. `shared/config.py` gains `redis_url` property. 9 tests green.
+  - Feature 5 — Lambda VLM real handler: replaced Phase 0 stub with S3 download → `VlmTier` call → structured `OcrResult` serialization (words with text/conf/bbox/page_num). 6 tests green.
+  - Feature 6 — S3 + SQS full fan-out: all 5 Lambda stage handlers (OCR, Structure, Match, Persist, Index) replaced stubs with real imports from production services. Shared `cloud/lambda/utils.py` provides `run_stage_lambda()` generic helper with SQS parsing, DB session scoping, and next-stage enqueue. 9 tests green.
+- **Decisions locked:** none new
+- **Open questions:** none new
+- **Next step:** SAM deploy + end-to-end smoke test on AWS, or proceed to Phase 4 polish (audit trail, CloudWatch monitoring, backup/DR, multi-env support, operator docs)
+- **Files touched:** `nas/preprocess/pipeline.py`, `cloud/ocr/cost_router_v2.py`, `cloud/ocr/models.py`, `cloud/engine_room/cost_prediction.py`, `cloud/retrieval/redis_suggestions.py`, `shared/config.py`, `cloud/lambda/vlm/handler.py`, `cloud/lambda/ocr/handler.py`, `cloud/lambda/structure/handler.py`, `cloud/lambda/match/handler.py`, `cloud/lambda/persist/handler.py`, `cloud/lambda/index/handler.py`, `cloud/lambda/utils.py`, `tests/nas/test_pipeline_advanced.py`, `tests/cloud/test_cost_router_v2.py`, `tests/cloud/engine_room/test_cost_prediction.py`, `tests/cloud/retrieval/test_redis_suggestions.py`, `tests/cloud/lambda/test_vlm_handler.py`, `tests/cloud/lambda/test_stage_handlers.py`

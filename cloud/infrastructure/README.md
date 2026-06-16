@@ -101,15 +101,16 @@
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │  VECTOR DB: Qdrant Cloud (managed, free tier)                      │  │
-│  │  • 1M vectors (384-dim cosine) — more than enough for 92K docs     │  │
-│  │  • No cluster management, API-only access                          │  │
+│  │  VECTOR DB: RDS pgvector (in-Postgres, 384-dim cosine)            │  │
+│  │  • Same RDS instance as relational — no separate service            │  │
+│  │  • 384-dim cosine `<=>` via `pgvector` extension                   │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │  GRAPH DB: Neo4j Aura (managed, free tier)                        │  │
-│  │  • 200K nodes / 400K relationships — sufficient for 92K practitioners│  │
-│  │  • No cluster management, API-only access                           │  │
+│  │  GRAPH DB: Amazon Neptune Serverless (openCypher)                 │  │
+│  │  • MERGE-on-natural-key ports directly from Neo4j code            │  │
+│  │  • Auto-indexes, rejects DDL — `ensure_constraints()` is no-op     │  │
+│  │  • Serverless = low baseline cost, scales with usage               │  │
 │  └────────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 │  ┌────────────────────────────────────────────────────────────────────┐  │
@@ -178,7 +179,8 @@ python cloud/infrastructure/scripts/deploy.py --env production --region ap-south
 **What the script does:**
 1. Validates AWS credentials and SAM CLI
 2. Prompts for VPC and subnet IDs (or auto-detects default VPC)
-3. Prompts for external service credentials (Qdrant Cloud, Neo4j Aura, OpenRouter)
+3. Prompts for external service credentials (OpenRouter only)
+   - No Qdrant Cloud / Neo4j Aura credentials needed (datastores are in-account)
 4. Prompts for optional overrides (RDS instance class, storage, etc.)
 5. Runs `sam deploy` to create the CloudFormation stack
 6. Outputs all endpoints, queue URLs, and credentials locations
@@ -254,7 +256,7 @@ s3://docintel-documents-123456789012-production/
 | ocr-queue.fifo | page-level | 10 | 120s | 3 retries | Tesseract OCR + VLM fallback |
 | structure-queue.fifo | document-level | 5 | 120s | 3 retries | Entity extraction (regex + LLM) |
 | match-queue.fifo | document-level | 5 | 120s | 3 retries | Fuzzy match vs reference_data |
-| persist-queue.fifo | document-level | 5 | 120s | 3 retries | Embed to Qdrant + graph to Neo4j |
+| persist-queue.fifo | document-level | 5 | 120s | 3 retries | Embed to RDS pgvector + graph to Neptune |
 | index-queue.fifo | document-level | 5 | 120s | 3 retries | Summarize + keywords + entities |
 
 **FIFO (First-In-First-Out):** Ensures messages are processed in order. Required for per-document stage ordering.
@@ -391,8 +393,8 @@ psql -h {RDS_ENDPOINT} -U pipeline -d doc_pipeline
    For each document:
    ├── Read identity pages from RDS
    ├── Generate 384-dim embedding (paraphrase-multilingual-MiniLM-L12-v2)
-   ├── Upsert to Qdrant Cloud (document_pages collection)
-   ├── Write graph to Neo4j Aura:
+   ├── Upsert to RDS pgvector (`document_pages` table, 384-dim cosine)
+   ├── Write graph to Amazon Neptune:
    │   MERGE (Document)-[:HAS_PAGE]->(Page)
    │   MERGE (Person)-[:BELONGS_TO]->(Document)
    │   MERGE (Page)-[:MENTIONS]->(Entity)
@@ -511,8 +513,8 @@ aws cloudwatch get-metric-statistics \
 | ECS Fargate API | 0.5 vCPU, 1 GB (1 task, Spot) | ~$15 | ~₹1,245 |
 | S3 Storage | 100 GB | ~$2.30 | ~₹191 |
 | Vercel (Pro) | Next.js app | ~$15 | ~₹1,245 |
-| Qdrant Cloud | Free tier (1M vectors) | $0 | ₹0 |
-| Neo4j Aura | Free tier (200K nodes) | $0 | ₹0 |
+| RDS pgvector | In-Postgres (no extra cost) | $0 | ₹0 |
+| Amazon Neptune | Serverless (low baseline) | ~$0–15 | ~₹0–1,245 |
 | Lambda (idle) | $0 when not invoked | $0 | ₹0 |
 | SQS (idle) | $0 when no messages | $0 | ₹0 |
 | CloudWatch | Dashboard + alarms (basic) | ~$3 | ~₹249 |
@@ -701,7 +703,7 @@ Phase 1 begins:
 - [ ] Build and push FastAPI Docker image to ECR (for ECS API)
 - [ ] Deploy Next.js app to Vercel (pointing to ALB for API)
 - [ ] Add WebSocket real-time updates (ECS API → Redis → client)
-- [ ] Test end-to-end: upload PDF → S3 → OCR → Structure → Match → Persist → Index → RDS + Qdrant + Neo4j
+- [ ] Test end-to-end: upload PDF → S3 → OCR → Structure → Match → Persist → Index → RDS (relational + pgvector) + Neptune (graph)
 - [ ] Run 3 test PDFs through the full pipeline and verify all data stores
 
 **Estimated Phase 1 duration:** 2–3 weeks.

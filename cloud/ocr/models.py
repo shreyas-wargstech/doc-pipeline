@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Tier = Literal["tesseract", "vlm"]
+Tier = Literal["tesseract", "vlm", "mixed"]
 
 # bbox is (x, y, w, h) in source-image pixels.
 BBox = tuple[int, int, int, int]

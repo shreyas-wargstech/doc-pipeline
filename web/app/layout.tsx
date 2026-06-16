@@ -14,7 +14,25 @@ export const metadata: Metadata = { title: "Docintel — Document Intelligence",
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
-      <head><style dangerouslySetInnerHTML={{ __html: rootCssVars }} /></head>
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: rootCssVars }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  if (localStorage.getItem('docintel:high-contrast') === 'true') {
+                    document.documentElement.classList.add('high-contrast');
+                  }
+                  if (localStorage.getItem('docintel:large-text') === 'true') {
+                    document.documentElement.classList.add('large-text');
+                  }
+                } catch (e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
       <body className="font-sans antialiased">
         <Providers>
           {children}

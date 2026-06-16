@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
@@ -10,7 +10,7 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
-import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
+import ArrowForwardIosIcon from "@mui/icons-material/ArrowForward";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import FitScreenIcon from "@mui/icons-material/FitScreen";
 import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
@@ -26,6 +26,12 @@ import { useDocument } from "@/hooks/useDocument";
 import { usePage } from "@/hooks/usePage";
 import { useCollapsible } from "@/hooks/useCollapsible";
 import { useToast } from "@/app/providers";
+
+type ZoomRef = {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetTransform: () => void;
+};
 
 export default function PageDetail({ params }: { params: Promise<{ id: string; n: string }> }) {
   const [resolved, setResolved] = useState<{ id: string; n: string } | null>(null);
@@ -48,6 +54,7 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
   const docQuery = useDocument(id);
   const [tab, setTab] = useState<number | null>(null);
   const dataPanel = useCollapsible("page-data-panel", false);
+  const zoomRef = useRef<ZoomRef>({ zoomIn: () => {}, zoomOut: () => {}, resetTransform: () => {} });
 
   const pageCount = docQuery.data?.doc?.page_count ?? null;
   const hasPrev = pageNum > 1;
@@ -55,8 +62,24 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" && hasPrev) router.push(`/documents/${id}/pages/${pageNum - 1}`);
-      if (e.key === "ArrowRight" && hasNext) router.push(`/documents/${id}/pages/${pageNum + 1}`);
+      if (e.key === "ArrowLeft" && hasPrev) {
+        router.push(`/documents/${id}/pages/${pageNum - 1}`);
+      }
+      if (e.key === "ArrowRight" && hasNext) {
+        router.push(`/documents/${id}/pages/${pageNum + 1}`);
+      }
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoomRef.current.zoomIn();
+      }
+      if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomRef.current.zoomOut();
+      }
+      if (e.key === "0") {
+        e.preventDefault();
+        zoomRef.current.resetTransform();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -73,6 +96,13 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
     await navigator.clipboard.writeText(window.location.href);
     pushToast("ok", "Link copied to clipboard");
   };
+
+  const imgAlt = [
+    `Page ${pageNum}`,
+    page.page_type ? `— ${titleCase(page.page_type)}` : "",
+    page.ocr_status === "done" ? "OCR complete" : "OCR pending",
+    page.confidence_score != null ? `confidence ${page.confidence_score.toFixed(0)}%` : "",
+  ].filter(Boolean).join(". ");
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -159,28 +189,31 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
             doubleClick={{ disabled: false, mode: "reset" }}
             wheel={{ step: 0.15 }}
           >
-            {({ zoomIn, zoomOut, resetTransform }) => (
-              <>
-                <TransformComponent
-                  wrapperStyle={{ width: "100%" }}
-                  contentStyle={{ width: "100%" }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={imageUrl(id, pageNum)} alt={`Page ${pageNum}`} style={{ width: "100%", display: "block" }} />
-                </TransformComponent>
-                <Box sx={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 0.5, zIndex: 2 }}>
-                  <IconButton aria-label="Zoom in" size="small" onClick={() => zoomIn()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
-                    <ZoomInIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton aria-label="Zoom out" size="small" onClick={() => zoomOut()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
-                    <ZoomOutIcon fontSize="small" />
-                  </IconButton>
-                  <IconButton aria-label="Fit to width" size="small" onClick={() => resetTransform()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
-                    <FitScreenIcon fontSize="small" />
-                  </IconButton>
-                </Box>
-              </>
-            )}
+            {({ zoomIn, zoomOut, resetTransform }) => {
+              zoomRef.current = { zoomIn, zoomOut, resetTransform };
+              return (
+                <>
+                  <TransformComponent
+                    wrapperStyle={{ width: "100%" }}
+                    contentStyle={{ width: "100%" }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={imageUrl(id, pageNum)} alt={imgAlt} style={{ width: "100%", display: "block" }} />
+                  </TransformComponent>
+                  <Box sx={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 0.5, zIndex: 2 }}>
+                    <IconButton aria-label="Zoom in (plus key)" size="small" onClick={() => zoomIn()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
+                      <ZoomInIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton aria-label="Zoom out (minus key)" size="small" onClick={() => zoomOut()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
+                      <ZoomOutIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton aria-label="Fit to width (zero key)" size="small" onClick={() => resetTransform()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
+                      <FitScreenIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                </>
+              );
+            }}
           </TransformWrapper>
         </Paper>
 

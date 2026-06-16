@@ -6,6 +6,50 @@
 * { border-color: rgb(var(--color-border)); }
 body { background: rgb(var(--color-background)); color: rgb(var(--color-foreground)); }
 .tnum { font-variant-numeric: tabular-nums; }
+
+/* Accessibility: focus-visible indicators */
+:focus-visible {
+  outline: 3px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+}
+
+/* Accessibility: reduced motion */
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Accessibility: high-contrast mode */
+html.high-contrast {
+  --color-background: 0 0 0;
+  --color-foreground: 255 255 255;
+  --color-primary: 0 255 255;
+  --color-border: 255 255 255;
+  --color-surface: 0 0 0;
+  --color-surface-alt: 0 0 0;
+  --color-muted-fg: 255 255 255;
+  --color-primary-hover: 0 255 255;
+  --color-primary-tint: 0 0 0;
+  --color-on-primary: 0 0 0;
+  --color-ok: 0 255 255;
+  --color-warn: 255 255 0;
+  --color-danger: 255 0 0;
+  --color-info: 0 255 255;
+}
+
+/* Accessibility: large-text mode */
+html.large-text {
+  font-size: 20px;
+}
+
+/* Screen-reader-only text (visually hidden but accessible) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }

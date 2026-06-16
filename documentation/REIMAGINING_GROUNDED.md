@@ -80,192 +80,68 @@ A document is a live WebSocket object with:
 
 **The bottleneck is NOT upload. It's CPU parallelism and network latency.**
 
-### Cloud Architecture: A Beginner's Ladder (4 Steps)
+### Cloud Architecture: Serverless Deployment (No Docker in Production)
 
-#### Step 1: AWS EC2 (Beginner-Friendly, Immediate Speed)
-
-**What you do:** Move your Docker Compose stack to a single AWS EC2 instance.
-
-```
-┌─────────────────────────────────────────────┐
-│  AWS EC2 (c6i.2xlarge or larger)           │  ← $0.34/hour = ~$250/month
-│                                             │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│  │ Postgres │ │ MinIO    │ │ Qdrant   │   │  ← All in Docker Compose
-│  │ (docker) │ │ (docker) │ │ (docker) │   │
-│  └──────────┘ └──────────┘ └──────────┘   │
-│                                             │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│  │ Neo4j    │ │ ElasticMQ│ │ FastAPI  │   │  ← Same as local
-│  │ (docker) │ │ (docker) │ │ (docker) │   │
-│  └──────────┘ └──────────┘ └──────────┘   │
-│                                             │
-│  ┌──────────────────────────────────────┐  │
-│  │ Pipeline workers (8-16 processes)   │  │  ← The speed gain
-│  └──────────────────────────────────────┘  │
-└─────────────────────────────────────────────┘
-```
-
-**Why this is faster:**
-- 8 vCPUs instead of your laptop's 2-4
-- 16GB+ RAM instead of your laptop's 8GB
-- No contention with your browser, IDE, and OS
-- Network to OpenRouter is from AWS data center (faster than your home ISP)
-
-**How to set it up (concrete steps):**
-1. Create AWS account → EC2 Console → Launch Instance
-2. Choose `c6i.2xlarge` (8 vCPU, 16GB RAM) — $0.34/hour on-demand, or $0.10/hour with Spot
-3. Use Ubuntu 22.04 LTS AMI
-4. Security group: allow SSH (port 22), HTTP (80), HTTPS (443), and your app ports (3000, 8000, 9000, 9001, 6333, 7474, 7687, 9324)
-5. Launch → `ssh -i your-key.pem ubuntu@<ip>`
-6. Install Docker: `sudo apt update && sudo apt install docker.io docker-compose -y`
-7. Clone your repo, `cd doc-pipeline`, `docker-compose up -d`
-8. Done. Your entire stack is now in the cloud.
-
-**Cost:** ~$250/month on-demand. ~$75/month with Spot instances (good for batch processing).
-
-**Why this is beginner-friendly:** You don't need to learn Kubernetes, Lambda, or any new technology. You just moved your existing Docker Compose to a bigger machine in the cloud. Everything works exactly the same.
-
----
-
-#### Step 2: Separate Workers (Still on EC2, But Parallel)
-
-**What you do:** Instead of one `make ocr-worker` process, run 8 parallel workers on the same machine.
-
-```python
-# scripts/run_ocr_workers.py (new file)
-import asyncio
-from cloud.ocr.consumer import process_page
-
-async def worker(name: str, queue_url: str) -> None:
-    while True:
-        message = await sqs.receive_message(queue_url)
-        if message:
-            await process_page(message)
-            await sqs.delete_message(queue_url, message.receipt_handle)
-            print(f"[{name}] Processed {message.page_id}")
-        else:
-            await asyncio.sleep(1)
-
-async def main():
-    # Run 8 workers in parallel
-    await asyncio.gather(*[
-        worker(f"worker-{i}", SQS_OCR_QUEUE_URL)
-        for i in range(8)
-    ])
-```
-
-**Why this is faster:** 8 workers process 8 pages simultaneously. A 13-page bundle goes from 2-3 minutes to ~20-30 seconds (limited by VLM network latency, not CPU).
-
-**What you change:** One new script. No architecture changes. No new services.
-
----
-
-#### Step 3: AWS Lambda for VLM (Pay-Per-Use, No Idle Cost)
-
-**What you do:** Keep the heavy processing (Tesseract, preprocessing) on EC2. But move VLM calls to AWS Lambda.
-
-```
-Your EC2 machine (c6i.xlarge = $0.17/hour = ~$125/month)
-├── Tesseract OCR (fast, local, no network)
-├── Preprocessing (OpenCV, local)
-├── Structure/Match/Persist (local DB access)
-└── When VLM needed: invoke Lambda → get result → continue
-
-AWS Lambda (vlm-processor function)
-├── Python runtime with OpenAI SDK
-├── Receives: base64 image + prompt
-├── Calls: OpenRouter API
-├── Returns: transcription + confidence
-└── Cost: $0 when idle, ~$0.0002 per invocation
-```
-
-**Why this is faster:** Lambda can run 1000 concurrent invocations. Your VLM calls are no longer bottlenecked by one worker. They run in parallel.
-
-**Why this is cost-neutral:** You only pay for VLM when you actually use it. No idle EC2 cost for waiting. Current cost is the same (OpenRouter API cost). Lambda adds ~$0.0002 per call — negligible compared to the VLM API cost (~$0.005-0.017 per call after FIX-048).
-
-**How to set it up:**
-1. AWS Console → Lambda → Create function → Python 3.12
-2. Copy your VLM tier code into the Lambda function
-3. Set `OPENROUTER_API_KEY` as environment variable
-4. Add API Gateway trigger → POST endpoint
-5. In your EC2 worker, instead of calling VLM directly, POST to the Lambda URL
-6. Lambda returns JSON, your worker continues
-
-**Beginner-friendly?** Yes. One Lambda function. One API Gateway. No VPC. No IAM complexity beyond the basics.
-
----
-
-#### Step 4: AWS SQS + Lambda (Full Serverless Fan-Out)
-
-**What you do:** This is the production architecture. Every stage is independent, parallel, and auto-scaling.
+**You directed: zero Docker in production.** The deployment uses AWS SAM/CloudFormation + Terraform for serverless managed services only. No EC2 instances running Docker Compose.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    AWS S3 (document storage)            │
-│  documents/<doc_id>/original.pdf                        │
-│  documents/<doc_id>/pages/page_NNN.png                  │
-│  documents/<doc_id>/manifest.json                       │
-└─────────────────┬───────────────────────────────────────┘
-                  │  S3 ObjectCreated event
-                  ▼
-┌─────────────────────────────────────────────────────────┐
-│  AWS SQS (FIFO queues)                                  │
-│  ├── ocr-queue.fifo       (page-level, 1000 msgs)       │
-│  ├── structure-queue.fifo (document-level)              │
-│  ├── match-queue.fifo     (document-level)              │
-│  ├── persist-queue.fifo   (document-level)                │
-│  └── index-queue.fifo     (document-level)              │
-└─────────────────┬───────────────────────────────────────┘
-                  │
-        ┌─────────┴─────────┐
-        ▼                 ▼
-┌──────────────┐  ┌──────────────┐
-│ Lambda: OCR  │  │ Lambda:      │
-│ (Tesseract)  │  │ VLM Fallback │
-│              │  │ (OpenRouter) │
-│ 256 MB RAM   │  │ 512 MB RAM   │
-│ 60 sec timeout│  │ 120 sec timeout│
-└──────────────┘  └──────────────┘
-        │
-        ▼ (on success, write to next queue)
-┌─────────────────────────────────────────────────────────┐
-│  AWS RDS (Postgres) + AWS ElastiCache (Redis)           │
-│  │                                                      │
-│  ├── RDS: Metadata, match status, registry              │
-│  ├── ElastiCache: Real-time events, WebSocket pub/sub   │
-│  └── (Qdrant Cloud / Pinecone for vectors)              │
+│                    AWS CLOUD                              │
+│                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ S3 Bucket    │  │ SQS FIFO     │  │ CloudWatch   │  │
+│  │ documents/   │  │ Queues       │  │ Logs/Alarms  │  │
+│  └──────────────┘  │ (5 stages)   │  └──────────────┘  │
+│                    └──────────────┘                       │
+│                          │                              │
+│        ┌─────────────────┴─────────────────┐           │
+│        ▼                                   ▼           │
+│  ┌──────────────┐                    ┌──────────────┐   │
+│  │ Lambda: OCR  │  ┌────────────┐  │ Lambda:      │   │
+│  │ (Tesseract)  │  │ EventBridge│  │ VLM Fallback │   │
+│  │              │  │ Sweeper    │  │ (OpenRouter) │   │
+│  └──────────────┘  └────────────┘  └──────────────┘   │
+│        │                                                │
+│        ▼                                                │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ RDS PostgreSQL 16  │  ElastiCache Redis          │  │
+│  │ - Relational       │  - Real-time events         │  │
+│  │ - pgvector (384d)  │  - Search suggestions       │  │
+│  │ - Neptune graph    │  - Session store            │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ ECS Fargate (FastAPI API + WebSocket)             │  │
+│  │ - Always-on for dashboard real-time updates       │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                         │
+│  IaC: Terraform (Lambda/RDS/Neptune) + SAM (ECS/ALB)  │
+│  Region: ap-south-1                                   │
+│  Zero Docker in production — all managed services       │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Why this is the ultimate speed:**
-- 1000 pages can be OCR'd simultaneously (Lambda concurrency limit)
-- No idle EC2 cost — you pay per invocation
+**Why this is faster than local:**
+- Lambda auto-scales to 1000 concurrent OCR workers (vs your laptop's 1)
+- Network to OpenRouter from AWS data center (faster than home ISP)
+- No contention with your browser, IDE, and OS
 - Each stage is independent — if structure is slow, OCR keeps running
-- Auto-scaling — if 10,000 pages arrive at once, AWS scales up automatically
 
-**Cost estimate for 200 documents (your current batch):**
+**Cost estimate for 200 documents (13 pages each = 2600 pages):**
 | Component | Cost | Notes |
 |---|---|---|
 | S3 storage | ~$0.05/month | 200 PDFs × 5MB = 1GB |
-| SQS | ~$0.40 | 200 docs × 13 pages = 2600 messages |
-| Lambda OCR (Tesseract) | ~$0.50 | 2600 invocations × 10 sec × 256MB |
-| Lambda VLM | ~$2.00 | ~400 VLM calls × 30 sec × 512MB |
+| SQS | ~$0.40 | 2600 messages |
+| Lambda OCR (Tesseract) | ~$0.50 | 2600 invocations × 10s × 256MB |
+| Lambda VLM | ~$2.00 | ~400 VLM calls × 30s × 512MB |
 | OpenRouter API | ~$5.00 | After FIX-048 optimization |
-| RDS (db.t3.micro) | ~$13/month | Always-on, small instance |
-| **Total for 200 docs** | **~$7-10 one-time** | **~$13/month base** |
+| RDS (db.t3.micro) | ~$13/month | Always-on |
+| ElastiCache (t3.micro) | ~$12/month | Always-on |
+| **Total for 200 docs** | **~$7-10 one-time** | **~$25/month base** |
 
-**Compare to current:** Your local machine runs 24/7 anyway (electricity cost). But it takes ~23 hours for 200 docs. In the cloud: **~30-60 minutes.**
+**Compare to current:** Your local machine runs 24/7 anyway. But it takes ~23 hours for 200 docs. In the cloud: **~30-60 minutes.**
 
-**Beginner-friendly?** This is the most complex step. You need to learn:
-- IAM roles (what can Lambda access?)
-- VPC (does Lambda need to reach RDS?)
-- Lambda deployment (zip file or container image)
-- S3 event notifications
-
-**But:** AWS has a "Serverless Application Model" (SAM) that makes this almost as simple as Docker Compose. One YAML file (`template.yaml`) defines everything. One command (`sam deploy`) pushes it all.
-
-**My recommendation:** Start with Step 1 (EC2 Docker Compose). Get comfortable. Then Step 2 (parallel workers). Then Step 3 (Lambda for VLM). Step 4 is the end goal, not the starting point.
+**Beginner-friendly?** Yes. The infrastructure is defined as code (SAM + Terraform). One command deploys everything. The AWS orchestration plan lives at `docs/superpowers/plans/2026-06-15-aws-orchestration.md`. The operator runbook is at `docs/AWS_SETUP.md`.
 
 ---
 
@@ -456,7 +332,7 @@ A separate route, `/engine`, accessible only to users with `role = 'administrato
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │ SYSTEM HEALTH                                          │   │
 │  │ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐       │   │
-│  │ │ Postgres│ │ MinIO  │ │ Qdrant │ │ Neo4j  │       │   │
+│  │ │ Postgres│ │ MinIO  │ │ RDS    │ │ Neptune│       │   │
 │  │ │   🟢    │ │   🟢   │ │   🟢   │ │   🟢   │       │   │
 │  │ │ 12ms   │ │  8ms   │ │  15ms  │ │  22ms  │       │   │
 │  │ └────────┘ └────────┘ └────────┘ └────────┘       │   │
@@ -515,7 +391,7 @@ A separate route, `/engine`, accessible only to users with `role = 'administrato
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │ DIAGNOSTIC TOOLS                                      │   │
 │  │ [Run DB Integrity Check]   [Run S3 Consistency Check] │   │
-│  │ [Re-index Qdrant]         [Re-sync Neo4j]              │   │
+│  │ [Re-index pgvector]        [Re-sync Neptune]             │   │
 │  │ [Purge Failed Documents]   [Export Full Audit]        │   │
 │  │ [Test OpenRouter Connection] [Test Tesseract Languages]│   │
 │  └──────────────────────────────────────────────────────┘   │
@@ -551,13 +427,13 @@ A separate route, `/engine`, accessible only to users with `role = 'administrato
 - One-click apply or discard
 
 **E. System Health Dashboard**
-- Real-time status of all services (Postgres, MinIO, Qdrant, Neo4j, SQS, OpenRouter)
+- Real-time status of all services (RDS, S3, pgvector, Neptune, SQS, OpenRouter)
 - Response times, queue depths, disk usage, API credit balance
 - Alert if any service is unhealthy (red banner, email if critical)
 
 **F. Diagnostic Tools**
 - One-click integrity checks ("Are all S3 files referenced in DB?")
-- One-click re-indexing ("Qdrant got out of sync — fix it")
+- One-click re-indexing ("pgvector got out of sync — fix it")
 - Connection tests ("Is OpenRouter responding? Is Tesseract installed with mar+hin?")
 - Export full audit trail for compliance
 
@@ -1389,7 +1265,7 @@ For clarity, here is the complete list of features from the original brainstorm 
 
 ### Phase 1: Foundation (Weeks 1-4) — "Make It Work for Operators"
 
-**Goal:** Replace the current dashboard with something operators actually want to use. Get the cloud running. Keep costs low.
+**Goal:** Replace the current dashboard with something operators actually want to use. Deploy the serverless AWS stack. Keep costs low.
 
 **Features:**
 1. **Aether Chat Interface** (with suggestions)
@@ -1398,14 +1274,18 @@ For clarity, here is the complete list of features from the original brainstorm 
    - Results displayed as cards, not tables
    - One-click "show all pages of this person"
 
-2. **Move to AWS EC2 (Step 1)**
-   - Single EC2 instance, Docker Compose
-   - Same stack, bigger machine
-   - Document the setup in `docs/AWS_SETUP.md`
+2. **Deploy AWS Serverless Stack**
+   - SAM + Terraform IaC (`cloud/infrastructure/` + `infra/`)
+   - Lambda container images for all pipeline stages
+   - RDS PostgreSQL + pgvector + Neptune Serverless
+   - ElastiCache Redis for real-time events
+   - ECS Fargate for the FastAPI dashboard API
+   - See `docs/AWS_SETUP.md` for the operator runbook
+   - See `docs/superpowers/plans/2026-06-15-aws-orchestration.md` for the build plan
 
-3. **Parallel OCR Workers (Step 2)**
-   - 8 concurrent workers on EC2
-   - One new script: `scripts/run_ocr_workers.py`
+3. **Parallel OCR Workers**
+   - Lambda auto-scales to 1000 concurrent OCR workers
+   - No manual worker scripts needed — SQS + Lambda handle it
 
 4. **Document Autopsy Mode**
    - Template-based explanation for every failed/manual_review document
@@ -1425,7 +1305,7 @@ For clarity, here is the complete list of features from the original brainstorm 
    - System health dashboard (service status, response times)
    - Basic diagnostic tools (connection tests, integrity checks)
 
-**Deliverable:** A system that runs on AWS, processes documents 10x faster, and has a chat interface that operators actually use.
+**Deliverable:** A system that runs on AWS serverless, processes documents 10x faster, and has a chat interface that operators actually use.
 
 ---
 
@@ -1579,7 +1459,7 @@ Your Laptop
 Time for 200 docs: ~23 hours (sequential, one worker, your laptop)
 ```
 
-### Target Architecture (Cloud, Step 4)
+### Target Architecture (Cloud, Serverless)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -1608,42 +1488,49 @@ Time for 200 docs: ~23 hours (sequential, one worker, your laptop)
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │ RDS (Postgres)        │ ElastiCache (Redis)           │  │
-│  │ - Metadata, registry  │ - Real-time events,           │  │
-│  │ - Match status        │   search suggestions          │  │
-│  │ - Audit logs          │ - WebSocket pub/sub            │  │
-│  │ - Human corrections   │                                 │  │
+│  │ RDS PostgreSQL 16        │ ElastiCache (Redis)         │  │
+│  │ - Relational + pgvector  │ - Real-time events          │  │
+│  │   (384-dim vectors)      │ - Search suggestions        │  │
+│  │ - Match status           │ - WebSocket pub/sub         │  │
+│  │ - Audit logs             │ - Session store             │  │
+│  │ - Human corrections      │                               │  │
 │  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐                            │
-│  │ Qdrant Cloud │  │ Neo4j Aura   │  ← Managed services         │
-│  │ (vectors)    │  │ (graph)      │    $0-50/month each        │
-│  └──────────────┘  └──────────────┘                            │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │ EC2 (API Server + Web Server)                            │  │
-│  │ - FastAPI API (always on, small instance)                 │  │
-│  │ - Next.js web (static + SSR)                             │  │
-│  │ - WebSocket server (for real-time updates)               │  │
+│  │ Amazon Neptune Serverless                                  │  │
+│  │ - Graph: Document → Page → Person → Entity              │  │
+│  │ - openCypher, MERGE-on-natural-key                       │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ ECS Fargate (API Server + Web Server)                     │  │
+│  │ - FastAPI API (always on, 0.5 vCPU, 1 GB)                │  │
+│  │ - Next.js web (static + SSR)                             │  │
+│  │ - WebSocket / SSE server (for real-time updates)         │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  IaC: SAM/CloudFormation (broad infra) + Terraform (Lambda) │  │
+│  Region: ap-south-1                                          │  │
+│  Zero Docker in production — all managed services              │  │
 └─────────────────────────────────────────────────────────────────┘
 
 Time for 200 docs: ~30-60 minutes (parallel, 1000 concurrent Lambda, no idle time)
-Cost: ~$15/month base + ~$10 per 200-doc batch
+Cost: ~$25/month base + ~$10 per 200-doc batch
 ```
 
 ### The Beginner's Path
 
-**Week 1-2:** Move Docker Compose to EC2 (Step 1). Learn AWS basics. $250/month on-demand.
+**Beginner's Path**
 
-**Week 3-4:** Add parallel workers (Step 2). Same EC2, just more processes. No new cost.
+**Week 1-2:** Deploy the SAM/CloudFormation stack (`make aws-deploy`). Learn the AWS Console. Verify all resources created.
 
-**Week 5-6:** Move VLM to Lambda (Step 3). Learn Lambda basics. Slight cost increase for VLM, but big speed gain.
+**Week 3-4:** Deploy the Terraform Lambda stage stack (`cd infra && terraform apply`). Build and push Lambda container images. Test one document end-to-end.
 
-**Week 7-8:** Full serverless (Step 4). Learn SQS, S3 events, Lambda concurrency. Start saving money (pay-per-use).
+**Week 5-6:** Seed the database (`db/schema.sql` + `load_reference_data.py`). Run a 3-document smoke test. Verify all stores.
 
-**Week 9-12:** Optimize. Reduce costs. Tune. Switch to Spot instances where possible. Add monitoring.
+**Week 7-8:** Build Phase 1 features (Aether chat, Engine Room, Autopsy). These are frontend + backend API work, no new infrastructure.
+
+**Week 9-12:** Optimize. Add monitoring. Tune costs. Add ElastiCache for real-time events.
 
 **Each step is independent. You can stop at any step and still have a working system.**
 
@@ -1653,7 +1540,7 @@ Cost: ~$15/month base + ~$10 per 200-doc batch
 
 ### What Will Make the Biggest Impact (Ranked)
 
-1. **Cloud EC2 + parallel workers** — 10x speed improvement, same code, $250/month. **Do this first.**
+1. **AWS serverless deploy** — SAM + Terraform, 10x speed, ~$25/month base. **Do this first.**
 2. **Aether chat interface** — Operators will love it. Suggestions make it fast. **Do this second.**
 3. **Engine Room** — You will love it. No more `make` commands in 5 terminals. **Do this third.**
 4. **Self-healing pipeline** — Reduces your manual intervention by 50%. **Do this fourth.**
@@ -1662,12 +1549,12 @@ Cost: ~$15/month base + ~$10 per 200-doc batch
 7. **Human corrections learning** — System gets better over time. **Do this seventh.**
 8. **Identity intelligence** — Cross-page consistency. Nice-to-have. **Do this eighth.**
 9. **Accessibility** — Required for government. Do it throughout, not as a phase. **Do it continuously.**
-10. **Full serverless (Lambda)** — Ultimate cost optimization. **Do this last, once you're comfortable.**
+10. **Cost optimization** — Tune Lambda memory, RDS instance class, reduce VLM calls. **Do this last.**
 
 ### What Will Be Hard
 
-1. **AWS setup** — You're a beginner. It will take 2-3 weeks to get comfortable. Use the AWS free tier. Follow tutorials. Document everything.
-2. **Lambda container images** — Packaging Tesseract + OpenCV for Lambda is tricky. The alternative: keep Tesseract on EC2, only VLM on Lambda.
+1. **AWS setup** — You're a beginner. It will take 2-3 weeks to get comfortable. Use the AWS free tier. Follow tutorials. Document everything. The SAM + Terraform stacks are already written for you (`cloud/infrastructure/` + `infra/`).
+2. **Lambda container images** — Packaging Tesseract + OpenCV + torch for Lambda containers is tricky. The build scripts are in `infra/docker/build_push.sh`. Run them, don't hand-craft.
 3. **WebSocket real-time** — Next.js + FastAPI WebSocket needs careful setup. SSE is easier. Start with SSE.
 4. **Redis for suggestions** — New dependency. But ElastiCache is managed. Worth it.
 
@@ -1675,7 +1562,7 @@ Cost: ~$15/month base + ~$10 per 200-doc batch
 
 1. **Aether chat** — It's just a search bar with autocomplete. You've already built the retrieval backend.
 2. **Document Autopsy** — Template-based text generation. No AI. Pure data + string formatting.
-3. **Parallel workers** — One script. `asyncio.gather()` with 8 workers.
+3. **Parallel OCR** — Lambda auto-scales. No worker scripts. SQS handles it.
 4. **Engine Room v1** — Read existing data, display it. No new backend logic.
 5. **Accessibility** — Mostly CSS + HTML attributes. No new architecture.
 

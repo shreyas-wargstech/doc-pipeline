@@ -19,8 +19,27 @@ from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect as sa_inspect, text
 
+from cloud.identity.intelligence import generate_consistency_report
+from cloud.context.service import build_context
+from cloud.narratives.service import generate_narrative, get_document_and_pages
+from cloud.autopsy.service import generate_autopsy
+from cloud.corrections.models import CorrectionType, HumanCorrectionCreate
+from cloud.corrections.service import (
+    analyze_match_thresholds,
+    analyze_name_corrections,
+    analyze_ocr_routing_corrections,
+    analyze_page_type_corrections,
+    get_recent_corrections,
+    store_correction,
+)
 from cloud.dashboard import actions, audit, cost_queries, eval_queries, queries, sse
 from cloud.dashboard.bookmarks import BookmarkRepository
+from cloud.engine_room.ab_test import run_ab_test
+from cloud.engine_room.cost_tracking import get_cost_summary
+from cloud.engine_room.diagnostics import run_diagnostics
+from cloud.engine_room.health import check_all
+from cloud.engine_room.inspector import inspect_document
+from cloud.engine_room.tuner import get_parameters, set_parameter, test_parameter
 from cloud.dashboard.session import (
     COOKIE_NAME,
     DEFAULT_MAX_AGE,
@@ -217,6 +236,62 @@ async def remove_bookmark(
     return {"bookmarked": False}
 
 
+@router.get("/documents/{document_id}/autopsy")
+async def doc_autopsy(
+    document_id: str, _session: SessionData = Depends(require_session)
+) -> dict[str, Any]:
+    try:
+        report = await generate_autopsy(document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return report.to_dict()
+
+
+@router.get("/documents/{document_id}/narrative")
+async def doc_narrative(
+    document_id: str, _session: SessionData = Depends(require_session)
+) -> dict[str, Any]:
+    doc, pages = await get_document_and_pages(document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    narrative = await generate_narrative(doc, pages)
+    return {"document_id": document_id, "narrative": narrative}
+
+
+@router.get("/documents/{document_id}/context")
+async def doc_context(
+    document_id: str, _session: SessionData = Depends(require_session)
+) -> dict[str, Any]:
+    async with session_scope() as db:
+        doc = await DocumentRepository(db).get(document_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        # Extract fields from document metadata or direct columns
+        college = doc.metadata_.get("college") if isinstance(doc.metadata_, dict) else None
+        exam_year = doc.metadata_.get("exam_year") if isinstance(doc.metadata_, dict) else None
+        ctx = await build_context(
+            db, document_id,
+            registration_no=doc.registration_no,
+            applicant_name_raw=doc.applicant_name_raw,
+            college=college,
+            exam_year=exam_year,
+        )
+    return {"document_id": document_id, **ctx}
+
+
+@router.get("/documents/{document_id}/identity")
+async def doc_identity(
+    document_id: str, _session: SessionData = Depends(require_session)
+) -> dict[str, Any]:
+    async with session_scope() as db:
+        doc = await DocumentRepository(db).get(document_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        pages = await PageRepository(db).list_for_document(document_id)
+        report = await generate_consistency_report(document_id, pages)
+    return report
+
+
 @router.get("/documents/{document_id}/pages/{page_num}")
 async def page_detail(
     document_id: str, page_num: int, _session: SessionData = Depends(require_session)
@@ -349,10 +424,40 @@ async def eval_correct(
     try:
         async with session_scope() as db:
             repo = DocumentRepository(db)
+            # Fetch original values BEFORE update so we can record corrections.
+            original_doc = await repo.get(document_id)
+            original_values = {}
+            if original_doc is not None:
+                for k in patch:
+                    original_values[k] = getattr(original_doc, k, None)
             await repo.update_fields(document_id, **patch)
             result = await match_document(document_id, session=db)
             doc = await repo.get(document_id)
             doc_d = _to_dict(doc)
+
+            # Record human corrections for each changed field.
+            correction_type_map = {
+                "registration_no": CorrectionType.REGISTRATION_NO,
+                "applicant_name_raw": CorrectionType.NAME,
+                "dob": CorrectionType.DOB,
+                "gender": CorrectionType.GENDER,
+                "application_no": CorrectionType.APPLICATION_NO,
+                "document_reference_no": CorrectionType.DOCUMENT_REFERENCE_NO,
+            }
+            for field, new_value in patch.items():
+                old_value = original_values.get(field)
+                if old_value != new_value and field in correction_type_map:
+                    try:
+                        corr = HumanCorrectionCreate(
+                            document_id=document_id,
+                            correction_type=correction_type_map[field],
+                            original_value=str(old_value) if old_value is not None else None,
+                            corrected_value=str(new_value) if new_value is not None else None,
+                        )
+                        await store_correction(db, session.username, corr)
+                    except Exception:
+                        log.exception("eval_correct_store_correction_failed", document_id=document_id, field=field)
+
         match_result_d = {
             "match_status": result.match_status,
             "reference_data_id": result.reference_data_id,
@@ -371,6 +476,59 @@ async def eval_correct(
         return {"doc": doc_d, "match_result": match_result_d}
     except MatchError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# --- human corrections (learning loop) --------------------------------------
+
+class CorrectionBody(HumanCorrectionCreate):
+    pass
+
+
+@router.post("/corrections")
+async def create_correction(
+    body: CorrectionBody, session: SessionData = Depends(require_role("reviewer", "administrator"))
+) -> dict[str, Any]:
+    """Record a single human correction."""
+    async with session_scope() as db:
+        result = await store_correction(db, session.username, body)
+    return result.model_dump()
+
+
+@router.get("/corrections")
+async def list_corrections(
+    correction_type: str,
+    hours: int = 24,
+    limit: int = 100,
+    _session: SessionData = Depends(require_session),
+) -> dict[str, Any]:
+    """List recent corrections of a given type."""
+    from datetime import timedelta
+    async with session_scope() as db:
+        rows = await get_recent_corrections(
+            db, correction_type, timedelta(hours=hours), limit=limit
+        )
+    return {"corrections": [r.model_dump() for r in rows]}
+
+
+@router.get("/corrections/analyze")
+async def analyze_corrections(
+    since_hours: int = 24,
+    _session: SessionData = Depends(require_role("administrator")),
+) -> dict[str, Any]:
+    """Analyze recent corrections and return patterns for the learning loop."""
+    from datetime import timedelta
+    since = timedelta(hours=since_hours)
+    async with session_scope() as db:
+        page_type = await analyze_page_type_corrections(db, since)
+        name_subs = await analyze_name_corrections(db, since)
+        match_thresh = await analyze_match_thresholds(db, since)
+        ocr_routing = await analyze_ocr_routing_corrections(db, since)
+    return {
+        "page_type_patterns": page_type,
+        "name_substitutions": name_subs,
+        "match_thresholds": match_thresh,
+        "ocr_routing_patterns": ocr_routing,
+    }
 
 
 # --- eval lab (content-type calibration) -----------------------------------
@@ -464,3 +622,103 @@ async def eval_sweep(_session: SessionData = Depends(require_session)) -> dict[s
         }
 
     return {"best": _cell(res.best), "cells": [_cell(c) for c in res.cells[:25]]}
+
+
+# --- Engine Room -------------------------------------------------------------
+
+@router.get("/engine/health", summary="System health check")
+async def engine_health(_session: SessionData = Depends(require_session)) -> dict[str, Any]:
+    """Return health status for all dependencies (Postgres, S3, OpenRouter, Tesseract)."""
+    report = await check_all()
+    return report.to_dict()
+
+
+@router.get("/engine/diagnostics", summary="Run diagnostic checks")
+async def engine_diagnostics(_session: SessionData = Depends(require_session)) -> dict[str, Any]:
+    """Run integrity checks and connection tests. Admin-only in v2."""
+    results = await run_diagnostics()
+    return {"results": [r.to_dict() for r in results]}
+
+
+@router.get("/engine/inspector/{document_id}", summary="Stage inspector for a document")
+async def engine_inspector(
+    document_id: str, _session: SessionData = Depends(require_session)
+) -> dict[str, Any]:
+    """Inspect a document's pipeline stages."""
+    result = await inspect_document(document_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return result.to_dict()
+
+
+# --- Engine Room v2 (parameter tuner, A/B test, cost tracking) ---------------
+
+
+@router.get("/engine/parameters", summary="Current tuning parameters")
+async def engine_parameters(
+    _session: SessionData = Depends(require_role("administrator")),
+) -> dict[str, Any]:
+    """Return all current tuning parameters."""
+    async with session_scope() as db:
+        params = await get_parameters(db)
+    return params
+
+
+class ParameterTestBody(BaseModel):
+    name: str
+    value: str
+    sample_size: int = 5
+
+
+@router.post("/engine/parameters/test", summary="Test parameter on sample docs")
+async def engine_test_parameter(
+    body: ParameterTestBody,
+    session: SessionData = Depends(require_role("administrator")),
+) -> dict[str, Any]:
+    """Test a new parameter value on a sample of documents."""
+    async with session_scope() as db:
+        result = await test_parameter(db, body.name, body.value, body.sample_size)
+    return result
+
+
+class ParameterUpdateBody(BaseModel):
+    value: str
+    reason: str | None = None
+
+
+@router.post("/engine/parameters/{name}", summary="Update a tuning parameter")
+async def engine_update_parameter(
+    name: str,
+    body: ParameterUpdateBody,
+    session: SessionData = Depends(require_role("administrator")),
+) -> dict[str, Any]:
+    """Update a pipeline parameter and persist the change."""
+    async with session_scope() as db:
+        await set_parameter(db, name, body.value, session.username, body.reason)
+    return {"ok": True, "name": name, "value": body.value}
+
+
+class ABTestBody(BaseModel):
+    hypothesis: str
+    sample_size: int = 10
+    variant: dict[str, Any]
+
+
+@router.post("/engine/ab-test", summary="Run A/B test on sample documents")
+async def engine_ab_test(
+    body: ABTestBody,
+    _session: SessionData = Depends(require_role("administrator")),
+) -> dict[str, Any]:
+    """Run an A/B test comparing baseline vs variant configuration."""
+    result = await run_ab_test(body.hypothesis, body.sample_size, body.variant)
+    return result
+
+
+@router.get("/engine/costs/summary", summary="Per-run cost breakdown")
+async def engine_cost_summary(
+    _session: SessionData = Depends(require_role("administrator")),
+) -> dict[str, Any]:
+    """Return cost summary: total, per-stage, and per-run breakdown."""
+    async with session_scope() as db:
+        summary = await get_cost_summary(db)
+    return summary

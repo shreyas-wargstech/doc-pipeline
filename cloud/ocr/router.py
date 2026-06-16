@@ -24,6 +24,7 @@ from collections.abc import Callable
 
 from cloud.ingest.models import OcrPageMessage
 from cloud.ingest.storage_db import OCRStatus, PageRepository
+from cloud.ocr.cost_router import route_with_prediction
 from cloud.ocr.models import OcrResult, Tier
 from cloud.ocr.tiers.base import OcrTier, TierNotImplemented
 from cloud.ocr.tiers.tesseract import TesseractTier
@@ -129,8 +130,16 @@ class OcrRouter:
                 page_typer = None
         self._page_typer = page_typer
 
-    def _start_index(self, content_type: str) -> int:
-        return _START.get(content_type, 0)
+    def _start_index(self, content_type: str, page_features: dict | None = None) -> int:
+        base = _START.get(content_type, 0)
+        if page_features and getattr(get_settings(), "cost_router_enabled", False):
+            try:
+                predicted_tier = anyio.run(route_with_prediction, page_features)
+                if predicted_tier == "vlm":
+                    return _VLM_IDX
+            except Exception:
+                pass
+        return base
 
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
         """Run the tier ladder. Identity pages (_IDENTITY_PAGE_TYPES, currently
@@ -141,10 +150,14 @@ class OcrRouter:
         accepted result, or None if no tier produced one."""
         identity = is_identity_page(msg.page_type)
         vlm_first = msg.page_type in _VLM_FIRST_PAGE_TYPES
+        # Build features for cost router prediction
+        page_features = {
+            "content_type": msg.content_type,
+        } if hasattr(msg, "content_type") else None
         if vlm_first:
             start, end = _VLM_IDX, len(_LADDER)          # form: VLM directly
         elif identity:
-            start, end = self._start_index(msg.content_type), len(_LADDER)
+            start, end = self._start_index(msg.content_type, page_features), len(_LADDER)
         else:
             start, end = 0, _TESSERACT_IDX + 1           # non-identity: Tesseract only
         best: OcrResult | None = None

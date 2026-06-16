@@ -78,6 +78,11 @@ class PreprocessConfig:
     triage_strict: bool = False
     max_skew_deg: float = 5.0
     skew_step_deg: float = 0.5
+    # Phase 3: robust preprocessing toggles (default off for safety)
+    normalize_contrast: bool = False
+    crop_to_content: bool = False
+    correct_curvature: bool = False
+    detect_text_lines: bool = False
 
 
 @dataclass
@@ -89,6 +94,7 @@ class PreprocessResult:
     deskew_angle: float = 0.0
     rotation_applied: int = 0
     intermediates: dict[str, np.ndarray] = field(default_factory=dict)
+    text_lines: list[tuple[int, int]] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +203,145 @@ def threshold(gray: np.ndarray, *, method: ThresholdMethod = "otsu") -> np.ndarr
 
 
 # --------------------------------------------------------------------------- #
+# Phase 3: robust preprocessing steps
+# --------------------------------------------------------------------------- #
+
+def normalize_contrast(img: np.ndarray) -> np.ndarray:
+    """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization).
+
+    Improves Tesseract confidence on low-contrast scans (faded ink, poor lighting).
+    Operates on 8-bit grayscale only. Returns uint8.
+    """
+    try:
+        if img.ndim == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        return clahe.apply(img)
+    except cv2.error as exc:
+        raise PreprocessError(f"normalize_contrast failed: {exc}") from exc
+
+
+def crop_to_content(img: np.ndarray) -> np.ndarray:
+    """Remove blank borders by finding the bounding box of non-white pixels.
+
+    A pixel is considered content if it differs from white by more than a
+    small threshold (accounts for scanner noise). Returns the cropped image,
+    or the original if no border is detected.
+    """
+    try:
+        if img.ndim == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img
+        # Threshold: content = pixels not almost-white
+        _, binary = cv2.threshold(gray, 250, 255, cv2.THRESH_BINARY_INV)
+        coords = cv2.findNonZero(binary)
+        if coords is None:
+            return img
+        x, y, w, h = cv2.boundingRect(coords)
+        # Ensure we don't crop to nothing; require at least 10px margin
+        if w < 20 or h < 20:
+            return img
+        return img[y : y + h, x : x + w]
+    except cv2.error as exc:
+        raise PreprocessError(f"crop_to_content failed: {exc}") from exc
+
+
+def detect_text_lines(img: np.ndarray) -> list[tuple[int, int]]:
+    """Find horizontal text-line regions using horizontal projection.
+
+    Returns a list of (y1, y2) tuples where y1 < y2 and each region is a
+    contiguous band of dark pixels. Works on binarized or grayscale images.
+    """
+    try:
+        if img.ndim == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img
+        # Binarise inverted: text = white on black
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        # Horizontal projection: count dark pixels per row
+        proj = binary.sum(axis=1)
+        # Smooth to remove noise
+        proj = cv2.GaussianBlur(proj.reshape(-1, 1).astype(np.float32), (5, 1), 0).ravel()
+        # A row is part of a text line if it has >1% of the row's pixels as dark
+        threshold = max(binary.shape[1] * 0.01, 1.0)
+        mask = proj > threshold
+        # Find contiguous True segments
+        lines: list[tuple[int, int]] = []
+        in_line = False
+        start = 0
+        for i, val in enumerate(mask):
+            if val and not in_line:
+                start = i
+                in_line = True
+            elif not val and in_line:
+                if i - start >= 3:  # minimum 3 pixels tall
+                    lines.append((start, i))
+                in_line = False
+        if in_line:
+            i = len(mask)
+            if i - start >= 3:
+                lines.append((start, i))
+        return lines
+    except cv2.error as exc:
+        raise PreprocessError(f"detect_text_lines failed: {exc}") from exc
+
+
+def correct_curvature(img: np.ndarray) -> np.ndarray:
+    """Dewarp a page with curved text lines (book/crease scans).
+
+    Uses text-line detection to estimate local offsets, then applies a
+    piecewise horizontal shift to straighten each line. Returns the dewarped
+    image. If no curvature is detected, returns the original.
+    """
+    try:
+        lines = detect_text_lines(img)
+        if len(lines) < 2:
+            return img
+
+        if img.ndim == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img.copy()
+
+        h, w = gray.shape[:2]
+        out = np.full_like(gray, 255)
+
+        for y1, y2 in lines:
+            # Extract the band
+            band = gray[y1:y2, :]
+            if band.size == 0:
+                continue
+            # Binarise inverted so text is white (255) and background is black (0)
+            _, binary = cv2.threshold(band, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            # Project within this band to find the text center
+            proj = binary.sum(axis=0)
+            if proj.max() == 0:
+                continue
+            # Estimate offset: center of mass vs image center
+            xs = np.arange(w)
+            total = proj.sum()
+            if total == 0:
+                continue
+            center = float((xs * proj).sum() / total)
+            shift = int(w / 2 - center)
+            # Shift the band horizontally (clamp to image bounds)
+            shifted = np.full_like(band, 255)
+            if shift > 0:
+                shifted[:, shift:] = band[:, : w - shift]
+            elif shift < 0:
+                shifted[:, : w + shift] = band[:, -shift:]
+            else:
+                shifted = band
+            out[y1:y2, :] = shifted
+
+        return out
+    except cv2.error as exc:
+        raise PreprocessError(f"correct_curvature failed: {exc}") from exc
+
+
+# --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
 def preprocess_page(
@@ -268,6 +413,17 @@ def preprocess_page(
 
     final = threshold(gray, method=cfg.threshold_method) if cfg.threshold else gray
 
+    # Phase 3: robust preprocessing (opt-in, default off)
+    text_lines: list[tuple[int, int]] = []
+    if cfg.normalize_contrast:
+        final = normalize_contrast(final)
+    if cfg.crop_to_content:
+        final = crop_to_content(final)
+    if cfg.detect_text_lines:
+        text_lines = detect_text_lines(final)
+    if cfg.correct_curvature:
+        final = correct_curvature(final)
+
     log.debug(
         "preprocess.done",
         deskew_angle=round(deskew_angle, 3),
@@ -275,12 +431,17 @@ def preprocess_page(
         script=triage.script.value if triage else None,
         content_type=triage.content_type.value if triage else None,
         thresholded=cfg.threshold,
+        contrast=cfg.normalize_contrast,
+        cropped=cfg.crop_to_content,
+        curvature=cfg.correct_curvature,
+        text_lines=len(text_lines),
     )
     return PreprocessResult(
         image=final,
         triage=triage,
         deskew_angle=deskew_angle,
         rotation_applied=rotation_applied,
+        text_lines=text_lines,
     )
 
 
@@ -294,6 +455,10 @@ __all__ = [
     "correct_rotation",
     "threshold",
     "preprocess_page",
+    "normalize_contrast",
+    "crop_to_content",
+    "detect_text_lines",
+    "correct_curvature",
     "Script",
     "ContentType",
 ]
