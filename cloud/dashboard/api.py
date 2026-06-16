@@ -39,7 +39,7 @@ from cloud.engine_room.cost_tracking import get_cost_summary
 from cloud.engine_room.diagnostics import run_diagnostics
 from cloud.engine_room.health import check_all
 from cloud.engine_room.inspector import inspect_document
-from cloud.engine_room.tuner import get_parameters, set_parameter, test_parameter
+from cloud.engine_room.tuner import get_parameters, get_threshold_suggestions, set_parameter, test_parameter
 from cloud.dashboard.session import (
     COOKIE_NAME,
     DEFAULT_MAX_AGE,
@@ -722,3 +722,13 @@ async def engine_cost_summary(
     async with session_scope() as db:
         summary = await get_cost_summary(db)
     return summary
+
+
+@router.get("/engine/tuning/suggestions", summary="Learned threshold suggestions")
+async def tuning_suggestions(
+    _session: SessionData = Depends(require_role("reviewer", "administrator")),
+) -> dict[str, Any]:
+    """Return threshold suggestions derived from recent human corrections."""
+    async with session_scope() as db:
+        suggestions = await get_threshold_suggestions(session=db)
+    return {"suggestions": suggestions}

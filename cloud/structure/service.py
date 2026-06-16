@@ -8,7 +8,9 @@ re-writes the same fields).
 from __future__ import annotations
 
 import datetime
-from typing import Any
+import json
+from functools import lru_cache
+from pathlib import Path
 
 import openai
 import structlog
@@ -31,6 +33,26 @@ from shared.config import get_settings
 from shared.exceptions import StructureError
 
 log = structlog.get_logger()
+
+_SUBSTITUTION_MAP_PATH = Path("data/ocr_name_substitutions.json")
+
+
+@lru_cache(maxsize=1)
+def _load_substitutions() -> dict[str, str]:
+    try:
+        return json.loads(_SUBSTITUTION_MAP_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def apply_name_substitutions(name: str) -> str:
+    """Apply learned OCR token substitutions (produced by apply_corrections.py).
+    Whole-token replacement; missing/empty map → returns input unchanged.
+    """
+    subs = _load_substitutions()
+    if not subs:
+        return name
+    return " ".join(subs.get(tok, tok) for tok in name.split())
 
 # ---------------------------------------------------------------------------
 # Word-form date parser  ("NINTH MARCH NINETEEN SEVENTY-NINE" → date)
@@ -218,7 +240,7 @@ def rollup_identity(
         or _first_hint(identity_hints, "name")
     )
     if name:
-        fields["applicant_name_raw"] = name
+        fields["applicant_name_raw"] = apply_name_substitutions(name)
 
     gender = (
         _pick(entities_by_page, "gender", prefer_source="llm")

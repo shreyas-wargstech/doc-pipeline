@@ -181,7 +181,10 @@ async def generate_autopsy(document_id: str) -> AutopsyReport:
         if name_in_text:
             struct_detail += f". {name_in_text}"
         if doc.consistency_score is not None:
-            struct_detail += f". Identity consistency: {doc.consistency_score:.0f}/100"
+            try:
+                struct_detail += f". Identity consistency: {doc.consistency_score:.0f}/100"
+            except (TypeError, ValueError):
+                pass
         stages.append(AutopsyStage(
             name="structure",
             status="success",

@@ -5,11 +5,13 @@ test them on sample documents, and apply them live without restarts.
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cloud.corrections.service import analyze_match_thresholds
 from shared.logging import get_logger
 
 log = get_logger(__name__)
@@ -22,8 +24,10 @@ async def get_parameters(session: AsyncSession) -> dict[str, Any]:
         "ocr_confidence_threshold": 70,
         "triage_h_cv": 1.10,
         "triage_s_cv": 1.80,
-        "match_high": 90,
-        "match_review_low": 65,
+        "fuzzy_match_high": 90,
+        "fuzzy_review_low": 65,
+        "name_confirm": 70,
+        "name_conflict_floor": 40,
     }
 
     # Override with any persisted tuning values
@@ -102,3 +106,26 @@ async def test_parameter(
         "old_avg_time": 14.0,
         "new_avg_time": 13.0,
     }
+
+
+async def get_threshold_suggestions(
+    *, session: AsyncSession, since_days: int = 30
+) -> list[dict[str, Any]]:
+    """Surface learned threshold suggestions for the Engine Room tuner.
+    Suggest-only: returns proposals; a human applies via set_parameter.
+    """
+    analysis = await analyze_match_thresholds(session, timedelta(days=since_days))
+    if not analysis.get("count"):
+        return []
+    return [
+        {
+            "name": "fuzzy_match_high",
+            "current": None,  # UI reads current via get_parameters
+            "suggested": analysis["suggested_threshold"],
+            "sample_count": analysis["count"],
+            "rationale": (
+                f"{analysis['count']} manual_review→matched corrections; "
+                f"lowest approved confidence was {analysis['suggested_threshold']}"
+            ),
+        }
+    ]
