@@ -26,6 +26,7 @@ from cloud.match.models import (
     parse_registration_no,
 )
 from cloud.match.reference import ReferenceRepository
+from cloud.match.tuning import load_match_thresholds
 from cloud.self_healing.patterns import is_known_name_variation, is_transliteration_variation
 from cloud.smart.audit import record_smart_action
 from shared.exceptions import MatchError
@@ -154,6 +155,12 @@ async def match_document(
     if doc is None:
         raise MatchError(f"document not found: {document_id}")
 
+    th = await load_match_thresholds(session)
+    name_confirm = th["name_confirm"]
+    name_conflict_floor = th["name_conflict_floor"]
+    fuzzy_match_high = th["fuzzy_match_high"]
+    fuzzy_review_low = th["fuzzy_review_low"]
+
     # Non-practitioner → not applicable, no provenance block.
     if doc.document_category != "practitioner":
         result = MatchResult(
@@ -194,13 +201,13 @@ async def match_document(
                 )
             )
             name_conflicts = bool(
-                name_present and nscore < NAME_CONFLICT_FLOOR and not is_variation
+                name_present and nscore < name_conflict_floor and not is_variation
             )
 
             if not dob_conflicts and not name_conflicts:
-                if nscore >= NAME_CONFIRM:
+                if nscore >= name_confirm:
                     matched_on = "registration_no+name"
-                elif is_variation and nscore < NAME_CONFLICT_FLOOR:
+                elif is_variation and nscore < name_conflict_floor:
                     matched_on = "registration_no+name_variation"
                 elif dob_agrees:
                     matched_on = "registration_no+dob"
@@ -281,12 +288,12 @@ async def match_document(
     log.info("match_fuzzy_candidate", document_id=document_id, score=score,
              candidate_registration_no=str(best.registration_no) if best else None)
 
-    if score >= FUZZY_MATCH_HIGH:
+    if score >= fuzzy_match_high:
         # A relaxed DOB gate (+/-1 day) is a weaker signal than an exact match —
         # cap at manual_review even for a strong name score so a human confirms
         # the day/month transposition.
         status = "manual_review" if dob_relaxed else "matched"
-    elif score >= FUZZY_REVIEW_LOW:
+    elif score >= fuzzy_review_low:
         status = "manual_review"
     else:
         status = conflict_floor  # unmatched normally; manual_review on conflict
