@@ -478,7 +478,7 @@ Resources:
       AllocatedStorage: !Ref RdsAllocatedStorage
       MaxAllocatedStorage: 100
       StorageType: gp3
-      MultiAZ: !Ref EnableMultiAz
+      MultiAZ: !If [EnableMultiAzCondition, true, false]
       PubliclyAccessible: false
       VPCSecurityGroups:
         - !Ref RdsSecurityGroup
