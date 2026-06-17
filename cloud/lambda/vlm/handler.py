@@ -51,13 +51,16 @@ def lambda_handler(event, context):
 
     # ── Download image from S3 ──────────────────────────────────────────────
     try:
-        s3 = boto3.client(
-            "s3",
-            region_name=settings.s3_region,
-            endpoint_url=settings.s3_endpoint_url or None,
-            aws_access_key_id=settings.s3_access_key,
-            aws_secret_access_key=settings.s3_secret_key,
-        )
+        s3_kwargs = {
+            "region_name": settings.s3_region,
+        }
+        if settings.s3_endpoint_url:
+            s3_kwargs["endpoint_url"] = settings.s3_endpoint_url
+        if settings.s3_access_key:
+            s3_kwargs["aws_access_key_id"] = settings.s3_access_key
+        if settings.s3_secret_key:
+            s3_kwargs["aws_secret_access_key"] = settings.s3_secret_key
+        s3 = boto3.client("s3", **s3_kwargs)
         response = s3.get_object(Bucket=settings.s3_bucket, Key=s3_key)
         image_bytes = response["Body"].read()
     except Exception as exc:  # noqa: BLE001

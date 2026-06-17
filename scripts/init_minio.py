@@ -22,10 +22,12 @@ async def main() -> int:
 
     session = aioboto3.Session()
     kwargs: dict = {
-        "aws_access_key_id": s.s3_access_key,
-        "aws_secret_access_key": s.s3_secret_key,
         "region_name": s.s3_region,
     }
+    if s.s3_access_key:
+        kwargs["aws_access_key_id"] = s.s3_access_key
+    if s.s3_secret_key:
+        kwargs["aws_secret_access_key"] = s.s3_secret_key
     if s.s3_endpoint_url:
         kwargs["endpoint_url"] = s.s3_endpoint_url
 

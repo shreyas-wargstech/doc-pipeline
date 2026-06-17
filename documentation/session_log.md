@@ -995,3 +995,12 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
   - Files-touched list above references several paths that do not exist (`cloud/self_healing/stuck_doc_monitor.py`, `scripts/run_stuck_doc_monitor.py`, `db/migrations/20260617_add_consistency_score.sql`, `tests/cloud/test_corrections.py`, `tests/cloud/test_structure_service.py`, `tests/cloud/test_match_service.py`). Actual: migration is `scripts/apply_consistency.py`; tests are `tests/cloud/corrections/test_loop_closure.py`, `tests/cloud/identity/test_consistency_in_pipeline.py`, `tests/cloud/test_match_self_healing.py`.
 - **Active flags actually wired:** `self_healing_enabled`, `monitor_enabled`. `cost_router_v2_enabled` is defined but dead (tracked follow-up in TASKS.md).
 - **Files touched (this correction):** `tests/cloud/test_self_healing.py`, `documentation/TASKS.md`, `documentation/error_fixes.md` (FIX-056), `CLAUDE.md`, `documentation/session_log.md` (this entry).
+
+## 2026-06-17 — ECS S3 credentials crash fixed (FIX-057) + production deploy verified
+
+- **Stage:** infrastructure (AWS ECS deploy)
+- **Done:** Fixed `pydantic_core.ValidationError: S3_ACCESS_KEY → missing` / `S3_SECRET_KEY → missing` that caused ECS tasks to crash-loop during FastAPI startup. Root cause: `shared/config.py` required `S3_ACCESS_KEY` and `S3_SECRET_KEY` as mandatory fields, but the ECS Task Definition intentionally does not provide them — ECS uses the IAM Task Role for S3 access. Made credentials optional (default `""`) across `shared/config.py`, `shared/storage_s3.py`, `cloud/lambda/vlm/handler.py`, and `scripts/init_minio.py` — boto3 now falls back to the IAM role credential chain when static keys are absent. Rebuilt API Docker image and deployed via `make aws-deploy` (SAM/CloudFormation). Verified live: ECS task `RUNNING` + `HEALTHY`, logs show `pipeline_api.startup`, `/health` returns `200 OK`.
+- **Decisions locked:** none new
+- **Open questions:** Full AWS end-to-end smoke test (S3 event → Lambda → pipeline) not yet run; RDS seeding still pending
+- **Next step:** Seed RDS database with schema.sql + reference data; run full AWS end-to-end smoke test
+- **Files touched:** `shared/config.py`, `shared/storage_s3.py`, `cloud/lambda/vlm/handler.py`, `scripts/init_minio.py`

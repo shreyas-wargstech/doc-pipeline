@@ -26,10 +26,12 @@ class S3Storage:
         self._bucket = bucket or s.s3_bucket
         self._session = aioboto3.Session()
         self._client_kwargs: dict = {
-            "aws_access_key_id": s.s3_access_key,
-            "aws_secret_access_key": s.s3_secret_key,
             "region_name": s.s3_region,
         }
+        if s.s3_access_key:
+            self._client_kwargs["aws_access_key_id"] = s.s3_access_key
+        if s.s3_secret_key:
+            self._client_kwargs["aws_secret_access_key"] = s.s3_secret_key
         if s.s3_endpoint_url:
             self._client_kwargs["endpoint_url"] = s.s3_endpoint_url
 
@@ -75,10 +77,12 @@ async def get_s3_client() -> AsyncGenerator[Any, None]:
     """
     s = get_settings()
     kwargs: dict = {
-        "aws_access_key_id": s.s3_access_key,
-        "aws_secret_access_key": s.s3_secret_key,
         "region_name": s.s3_region,
     }
+    if s.s3_access_key:
+        kwargs["aws_access_key_id"] = s.s3_access_key
+    if s.s3_secret_key:
+        kwargs["aws_secret_access_key"] = s.s3_secret_key
     if s.s3_endpoint_url:
         kwargs["endpoint_url"] = s.s3_endpoint_url
 

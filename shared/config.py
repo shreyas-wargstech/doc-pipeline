@@ -20,13 +20,14 @@ class Settings(BaseSettings):
 
     # S3 / MinIO
     s3_endpoint_url: str | None = Field(None, alias="S3_ENDPOINT_URL")
-    s3_access_key: str = Field(..., alias="S3_ACCESS_KEY")
-    s3_secret_key: str = Field(..., alias="S3_SECRET_KEY")
+    s3_access_key: str = Field("", alias="S3_ACCESS_KEY")
+    s3_secret_key: str = Field("", alias="S3_SECRET_KEY")
     s3_bucket: str = Field(..., alias="S3_BUCKET")
     s3_region: str = Field("us-east-1", alias="S3_REGION")
 
     # Qdrant
     qdrant_url: str = Field(..., alias="QDRANT_URL")
+    qdrant_api_key: str = Field("", alias="QDRANT_API_KEY")
     qdrant_collection: str = Field("document_pages", alias="QDRANT_COLLECTION")
     embedding_model: str = Field(
         "paraphrase-multilingual-MiniLM-L12-v2", alias="EMBEDDING_MODEL"
@@ -35,7 +36,9 @@ class Settings(BaseSettings):
     # Neo4j
     neo4j_uri: str = Field(..., alias="NEO4J_URI")
     neo4j_user: str = Field(..., alias="NEO4J_USER")
-    neo4j_password: str = Field(..., alias="NEO4J_PASSWORD")
+    # Optional so get_settings() succeeds in Lambda (env can't reference Secrets
+    # Manager); get_driver() loads it from Secrets Manager at runtime when empty.
+    neo4j_password: str = Field("", alias="NEO4J_PASSWORD")
 
     # OCR
     ocr_confidence_threshold: int = Field(70, alias="OCR_CONFIDENCE_THRESHOLD")

@@ -1067,3 +1067,32 @@ Phase 4 "Make It Smart" wires intelligence (self-healing, identity consistency, 
 **Files:** `tests/cloud/test_self_healing.py`, `documentation/TASKS.md`, `cloud/self_healing/monitor.py` (prior).
 
 **Rule:** When you rewrite a module's public API, in the SAME change update or delete every existing test of that API — don't just add new parallel test files. Run the FULL suite (`-m "not integration"`), not only the new files, and read pytest's real exit code (a `grep`/`tail` pipeline masks it — check `PIPESTATUS`/`-o pipefail`). Mark a task done only against behavior that exists in code; a dead feature flag is not "wired".
+
+---
+
+### FIX-057 · ECS FastAPI startup crash: `S3_ACCESS_KEY` / `S3_SECRET_KEY` missing
+
+**Symptom:** ECS tasks crash-looped on startup with `pydantic_core.ValidationError: 2 validation errors for Settings — S3_ACCESS_KEY → missing, S3_SECRET_KEY → missing`. CloudWatch logs showed repeated `fastapi.routing.merged_lifespan` chains; task exited before serving any request. `describe-tasks` showed `stoppedReason: Essential container in task exited` with `exitCode: 1`.
+
+**Root cause:** `shared/config.py` declared `s3_access_key` and `s3_secret_key` as `Field(...)` (required), but the ECS Task Definition intentionally does not provide these environment variables — the ECS Task Role (`EcsTaskRole`) already has `s3:GetObject`/`s3:PutObject`/`s3:ListBucket` permissions. The code should use IAM role-based access, not static credentials. Lambda had the same issue via `Globals.Environment` (which also lacked the keys), but Lambda functions don't crash on startup because they don't call `get_settings()` during cold-start initialization.
+
+**Fix:** Changed both fields to `Field("", alias="...")` (default empty string). Updated all boto3 S3 client construction sites to only pass `aws_access_key_id`/`aws_secret_access_key` when the values are truthy, letting boto3 fall back to the default credential chain (env → `~/.aws/credentials` → IAM role).
+
+```python
+# shared/config.py
+s3_access_key: str = Field("", alias="S3_ACCESS_KEY")
+s3_secret_key: str = Field("", alias="S3_SECRET_KEY")
+
+# shared/storage_s3.py (S3Storage + get_s3_client)
+kwargs = {"region_name": s.s3_region}
+if s.s3_access_key:
+    kwargs["aws_access_key_id"] = s.s3_access_key
+if s.s3_secret_key:
+    kwargs["aws_secret_access_key"] = s.s3_secret_key
+```
+
+Same pattern applied to `cloud/lambda/vlm/handler.py` and `scripts/init_minio.py`.
+
+**Files:** `shared/config.py`, `shared/storage_s3.py`, `cloud/lambda/vlm/handler.py`, `scripts/init_minio.py`
+
+**Rule:** When deploying to ECS or Lambda, never require static AWS credentials in the Settings model. boto3's default credential chain handles IAM roles automatically. Only pass explicit credentials when running against non-AWS S3 (MinIO, local ElasticMQ) where static keys are genuinely needed.
