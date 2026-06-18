@@ -1,0 +1,8 @@
+{
+  "containerOverrides": [
+    {
+      "name": "api",
+      "command": ["uv", "run", "python", "-m", "scripts.load_reference_data"]
+    }
+  ]
+}

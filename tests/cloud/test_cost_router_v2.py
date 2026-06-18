@@ -10,6 +10,8 @@ Tests cloud/ocr/cost_router_v2.py:
 """
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import numpy as np
 import pytest
 
@@ -227,7 +229,7 @@ async def test_route_page_v2_all_confident_returns_tesseract_only():
         ("world", 88.0, (35, 0, 30, 10)),
     ])
     page = _blank_page()
-    result = await route_page_v2(tesseract_result, page, threshold=70.0)
+    result = await route_page_v2(tesseract_result, page, threshold=70.0, vlm_run=AsyncMock())
     assert result.tier == "tesseract"
     assert result.mean_conf >= 70.0
 
@@ -235,18 +237,22 @@ async def test_route_page_v2_all_confident_returns_tesseract_only():
 @pytest.mark.asyncio
 async def test_route_page_v2_with_uncertain_words_calls_vlm():
     from cloud.ocr.cost_router_v2 import route_page_v2
-    from unittest.mock import AsyncMock, patch
 
     tesseract_result = _make_tesseract_result([
         ("Ashish", 95.0, (10, 10, 50, 20)),
         ("Patil", 45.0, (70, 10, 40, 20)),
     ])
     page = _blank_page()
-    with patch("cloud.ocr.cost_router_v2.run_vlm_on_crops", new=AsyncMock()) as mock_vlm:
-        mock_vlm.return_value = [
-            OcrWord(text="Patil", conf=85.0, bbox=(70, 10, 40, 20), page_num=1),
-        ]
-        result = await route_page_v2(tesseract_result, page, threshold=70.0)
+    mock_vlm = AsyncMock()
+    mock_vlm.return_value = OcrResult(
+        document_id="doc_001",
+        page_num=1,
+        tier="vlm",
+        words=[OcrWord(text="Patil", conf=85.0, bbox=(70, 10, 40, 20), page_num=1)],
+        raw_text="Patil",
+        mean_conf=85.0,
+    )
+    result = await route_page_v2(tesseract_result, page, threshold=70.0, vlm_run=mock_vlm)
     assert result.tier == "mixed"
     assert len(result.words) == 2
     mock_vlm.assert_awaited_once()
@@ -258,7 +264,7 @@ async def test_route_page_v2_no_tesseract_words_returns_failed():
 
     tesseract_result = _make_tesseract_result([])
     page = _blank_page()
-    result = await route_page_v2(tesseract_result, page, threshold=70.0)
+    result = await route_page_v2(tesseract_result, page, threshold=70.0, vlm_run=AsyncMock())
     assert result.is_empty
 
 

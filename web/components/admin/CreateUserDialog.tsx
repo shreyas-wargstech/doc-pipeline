@@ -1,16 +1,9 @@
 "use client";
 import { useState } from "react";
-import Button from "@mui/material/Button";
-import Dialog from "@mui/material/Dialog";
-import DialogActions from "@mui/material/DialogActions";
-import DialogContent from "@mui/material/DialogContent";
-import DialogTitle from "@mui/material/DialogTitle";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
-import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/Dialog";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import { ApiError } from "@/lib/api";
 import { useCreateUser } from "@/hooks/useAdminUsers";
 import type { UserRole } from "@/lib/types";
@@ -57,52 +50,60 @@ export function CreateUserDialog({ open, onClose }: Props) {
   };
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Create user</DialogTitle>
-      <form onSubmit={handleSubmit}>
-        <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
-          <TextField
-            label="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-            autoFocus
-            size="small"
-          />
-          <TextField
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            size="small"
-          />
-          <FormControl size="small">
-            <InputLabel>Role</InputLabel>
-            <Select
-              value={role}
-              label="Role"
-              onChange={(e) => setRole(e.target.value as UserRole)}
-            >
-              <MenuItem value="administrator">administrator</MenuItem>
-              <MenuItem value="reviewer">reviewer</MenuItem>
-              <MenuItem value="operator">operator</MenuItem>
-              <MenuItem value="viewer">viewer</MenuItem>
-            </Select>
-          </FormControl>
-          {error && (
-            <Typography color="error" variant="caption">
-              {error}
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button type="submit" variant="contained" disabled={create.isPending}>
-            {create.isPending ? "Creating…" : "Create"}
-          </Button>
-        </DialogActions>
-      </form>
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+      <DialogContent>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <DialogHeader>
+            <DialogTitle>Create user</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3 pt-1">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="create-username" className="text-xs font-medium text-muted-fg">Username</label>
+              <Input
+                id="create-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="create-password" className="text-xs font-medium text-muted-fg">Password</label>
+              <Input
+                id="create-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="create-role" className="text-xs font-medium text-muted-fg">Role</label>
+              <Select
+                id="create-role"
+                value={role}
+                onChange={(e) => setRole(e.target.value as UserRole)}
+              >
+                <option value="administrator">administrator</option>
+                <option value="reviewer">reviewer</option>
+                <option value="operator">operator</option>
+                <option value="viewer">viewer</option>
+              </Select>
+            </div>
+            {error && (
+              <p className="text-xs text-danger">{error}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={handleClose} type="button">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={create.isPending}>
+              {create.isPending ? "Creating…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
     </Dialog>
   );
 }

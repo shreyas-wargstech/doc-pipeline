@@ -1,18 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
-import Box from "@mui/material/Box";
-import FormControl from "@mui/material/FormControl";
-import InputAdornment from "@mui/material/InputAdornment";
-import InputLabel from "@mui/material/InputLabel";
-import Select from "@mui/material/Select";
-import TextField from "@mui/material/TextField";
-import SearchIcon from "@mui/icons-material/Search";
+import { Search } from "lucide-react";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import type { DocFilters } from "@/hooks/useDocuments";
 import type { Category, DocStatus, MatchStatus } from "@/lib/types";
 
-const STATUSES = ["received", "processing", "processed", "failed", "manual_review"];
-const CATEGORIES = ["practitioner", "letter", "receipt", "record", "other"];
-const MATCHES = ["matched", "unmatched", "not_applicable", "manual_review"];
+const STATUSES = ["received", "processing", "processed", "failed", "manual_review"] as const;
+const CATEGORIES = ["practitioner", "letter", "receipt", "record", "other"] as const;
+const MATCHES = ["matched", "unmatched", "not_applicable", "manual_review"] as const;
 
 export function Filters({ value, onChange }: { value: DocFilters; onChange: (f: DocFilters) => void }) {
   const set = (patch: Partial<DocFilters>) => onChange({ ...value, ...patch, offset: 0 });
@@ -30,69 +26,56 @@ export function Filters({ value, onChange }: { value: DocFilters; onChange: (f: 
   }, [searchDraft]);
 
   return (
-    <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 2 }}>
-      <FormControl size="small" sx={{ minWidth: 140 }}>
-        <InputLabel id="filter-category-label" htmlFor="filter-category">Category</InputLabel>
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-category" className="text-xs font-medium text-muted-foreground">Category</label>
         <Select
-          native
           id="filter-category"
-          labelId="filter-category-label"
-          label="Category"
           value={value.category ?? ""}
           onChange={(e) => set({ category: (e.target.value || undefined) as Category | undefined })}
+          className="min-w-[140px]"
         >
           <option value="">All</option>
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </Select>
-      </FormControl>
+      </div>
 
-      <FormControl size="small" sx={{ minWidth: 140 }}>
-        <InputLabel id="filter-status-label" htmlFor="filter-status">Status</InputLabel>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-status" className="text-xs font-medium text-muted-foreground">Status</label>
         <Select
-          native
           id="filter-status"
-          labelId="filter-status-label"
-          label="Status"
           value={value.status ?? ""}
           onChange={(e) => set({ status: (e.target.value || undefined) as DocStatus | undefined })}
+          className="min-w-[140px]"
         >
           <option value="">All</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </Select>
-      </FormControl>
+      </div>
 
-      <FormControl size="small" sx={{ minWidth: 140 }}>
-        <InputLabel id="filter-match-label" htmlFor="filter-match">Match</InputLabel>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-match" className="text-xs font-medium text-muted-foreground">Match</label>
         <Select
-          native
           id="filter-match"
-          labelId="filter-match-label"
-          label="Match"
           value={value.match_status ?? ""}
           onChange={(e) => set({ match_status: (e.target.value || undefined) as NonNullable<MatchStatus> | undefined })}
+          className="min-w-[140px]"
         >
           <option value="">All</option>
           {MATCHES.map((m) => <option key={m} value={m}>{m}</option>)}
         </Select>
-      </FormControl>
+      </div>
 
-      <TextField
-        size="small"
-        label="Search"
-        placeholder="reg-no / filename"
-        value={searchDraft}
-        onChange={(e) => setSearchDraft(e.target.value)}
-        sx={{ flexGrow: 1, minWidth: 200 }}
-        slotProps={{
-          input: {
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
-              </InputAdornment>
-            ),
-          },
-        }}
-      />
-    </Box>
+      <div className="relative flex-grow min-w-[200px]">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id="filter-search"
+          placeholder="reg-no / filename"
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+    </div>
   );
 }

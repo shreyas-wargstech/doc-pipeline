@@ -9,8 +9,8 @@ describe("KpiCard", () => {
     expect(screen.getByText("42")).toBeInTheDocument();
   });
 
-  it("renders an MUI Card root", () => {
+  it("renders a card root", () => {
     render(<KpiCard label="Total" value={10} />);
-    expect(document.querySelector(".MuiCard-root")).toBeInTheDocument();
+    expect(document.querySelector("[class*='rounded-lg']")).toBeInTheDocument();
   });
 });

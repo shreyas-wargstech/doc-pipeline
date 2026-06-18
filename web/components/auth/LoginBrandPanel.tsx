@@ -1,4 +1,5 @@
 "use client";
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 const WORDS = ["understood", "searchable", "verified", "connected"];
@@ -34,23 +35,34 @@ export function LoginBrandPanel() {
             ["Read anything", "Mixed-language scans, handwriting, official record books."],
             ["Linked & verified", "Auto-matched against 92K practitioner records by registration no."],
             ["Retrieve by meaning", "Find the right bundle by owner, type, or semantic search."],
-          ].map(([title, body]) => (
-            <div key={title} className="flex gap-3">
+          ].map(([title, body], index) => (
+            <motion.div
+              key={title}
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 + index * 0.1, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="flex gap-3"
+            >
               <span aria-hidden className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[9px] border border-white/20 bg-white/10 text-xs">●</span>
               <div>
                 <div className="text-[13px] font-semibold text-white">{title}</div>
                 <div className="text-xs text-[#A9D8D0]">{body}</div>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
 
         <div className="mt-7 flex gap-7 border-t border-white/15 pt-5">
-          {[["92,431", "Registry rows"], ["6", "Pipeline stages"], ["4", "Linked datastores"]].map(([n, l]) => (
-            <div key={l}>
+          {[["92,431", "Registry rows"], ["6", "Pipeline stages"], ["4", "Linked datastores"]].map(([n, l], index) => (
+            <motion.div
+              key={l}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.6 + index * 0.08, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            >
               <div className="font-display text-xl font-semibold text-white">{n}</div>
               <div className="text-[10.5px] uppercase tracking-wide text-[#8FCEC4]">{l}</div>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>

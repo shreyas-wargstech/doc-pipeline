@@ -29,10 +29,11 @@ describe("AuditDetailDrawer", () => {
     expect(screen.getByText(/doc-abc-123/)).toBeInTheDocument();
   });
 
-  it("calls onClose when Escape is pressed", () => {
+  it("calls onClose when the close button is clicked", () => {
     const onClose = vi.fn();
     render(<AuditDetailDrawer row={sampleRow} onClose={onClose} />);
-    fireEvent.keyDown(window, { key: "Escape" });
+    const closeBtn = screen.getByRole("button", { name: /close/i });
+    closeBtn.click();
     expect(onClose).toHaveBeenCalled();
   });
 });

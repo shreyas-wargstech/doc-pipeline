@@ -1,0 +1,12 @@
+{
+  "containerOverrides": [
+    {
+      "name": "api",
+      "command": [
+        "sh",
+        "-c",
+        "echo DNS-TEST; nslookup docintel-production-postgres.cbcc084q6q9j.ap-south-1.rds.amazonaws.com || echo nslookup-failed; echo TCP-TEST; nc -zv docintel-production-postgres.cbcc084q6q9j.ap-south-1.rds.amazonaws.com 5432 || echo nc-failed; sleep 30"
+      ]
+    }
+  ]
+}

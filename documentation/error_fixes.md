@@ -1154,7 +1154,52 @@ if queue_name.endswith(".fifo"):
 
 ---
 
+## 2026-06-19 — Deferred-thread cleanup fixes
+
+### FIX-067 · `cv2` import missing in `cloud/ocr/cost_router_v2.py`
+
+**Symptom:** `test_route_page_v2_with_uncertain_words_calls_vlm` failed with `NameError: name 'cv2' is not defined` at `run_vlm_on_crops`.
+
+**Root cause:** `cost_router_v2.py` used `cv2.imencode` inside `run_vlm_on_crops` and `cv2.imdecode` in `router.py`, but never imported `cv2` at the module level. This was a latent bug that only surfaced once `run_vlm_on_crops` stopped being a placeholder and actually exercised the code path.
+
+**Fix:** Added `import cv2` at the top of `cloud/ocr/cost_router_v2.py`.
+
+**Files:** `cloud/ocr/cost_router_v2.py`
+
+**Rule:** When a module uses `cv2` / `np` / any external library in function bodies, verify the import exists at the top of the file — placeholders that skip the function body can hide missing imports for a long time.
+
+---
+
+### FIX-068 · `OcrWord` missing `page_num` in `run_vlm_on_crops`
+
+**Symptom:** `test_route_page_v2_with_uncertain_words_calls_vlm` failed with `pydantic.ValidationError: 1 validation error for OcrWord — page_num: Field required`.
+
+**Root cause:** `run_vlm_on_crops` rebuilt `OcrWord` objects from VLM crop results but omitted the required `page_num` field. The `OcrWord` model requires `page_num: int`.
+
+**Fix:** Passed `page_num=page_num` into the `OcrWord(...)` constructor inside `run_vlm_on_crops`.
+
+**Files:** `cloud/ocr/cost_router_v2.py`
+
+**Rule:** When reconstructing a pydantic model instance from another instance's fields, always pass ALL required fields — don't assume a subset constructor will work. Model fields are strict; a missing required field raises at runtime, not import time.
+
+---
+
+### FIX-069 · Engine Room tuner defaults drifted from match model constants
+
+**Symptom:** `name_confirm` and `name_conflict_floor` in `cloud/engine_room/tuner.py` defaults were 70 and 40, while `cloud/match/models.py` constants were 85 and 60. The match service used the model constants as fallback, so the UI showed different numbers than the actual pipeline behavior.
+
+**Root cause:** Hardcoded duplicate defaults in `tuner.py` that were never updated when the match constants were calibrated (2026-06-11/12).
+
+**Fix:** Changed `tuner.py` to import the constants from `cloud.match.models` and use them directly in the defaults dict. Added a unit test that asserts `get_parameters` returns the model constants when the DB table is empty.
+
+**Files:** `cloud/engine_room/tuner.py`, `tests/cloud/test_engine_room_v2.py`
+
+**Rule:** Never maintain duplicate copies of the same constant in two files. If a dashboard/API default must reflect a pipeline constant, import the constant from the pipeline module. If a DB override layer exists, the fallback defaults are the only source of truth — they must reference the real constant, not a hand-typed copy.
+
+---
+
 ## 2026-06-18 — Pre-existing test failures: retrieval auth, identity DB mock, match_reference attrs, config .env (FIX-060)
+
 
 **Symptom:**
 `make test` showed 7 failures:
@@ -1182,3 +1227,214 @@ if queue_name.endswith(".fifo"):
 - When mocking a repository endpoint that uses multiple repos inside `session_scope()`, patch **every** repo class + `session_scope` itself.
 - `SimpleNamespace` mock rows must stay in sync with the real SQL `SELECT` columns. When adding new columns to a repo query, grep all test files for `SimpleNamespace` rows and update them.
 - pydantic-settings v2 ignores field-name kwargs in `BaseSettings` constructor; use the alias (or `populate_by_name=True`) to override `.env` values in tests.
+
+---
+
+## 2026-06-18 — ECS one-off task: IndentationError in heredoc Python script (FIX-061)
+
+### FIX-061 · `all_in_one_task.json` heredoc loses Python indentation
+
+**Symptom:**
+ECS task `run-task` with `--overrides file://all_in_one_task.json` fails immediately:
+```
+File "/tmp/schema.py", line 17
+    raise RuntimeError(
+    ^^^^^
+IndentationError: expected an indented block after 'if' statement on line 16
+```
+
+**Root cause:**
+The JSON override file embeds a multi-line Python script via `cat > /tmp/schema.py << 'PYEOF'`. The JSON string value was created with collapsed indentation — `async def run():` body had 1 space, `if` block had 0 spaces for `raise`. Python requires consistent indentation; `raise` at column 0 after `if` is a syntax error.
+
+**Fix:**
+Rewrote `all_in_one_task.json` with proper 4-space indentation inside the JSON string. The `\n` newlines remain; each indented line now carries 4n spaces.
+
+**Files:** `all_in_one_task.json`
+
+**Rule:**
+When embedding a heredoc Python script inside a JSON string (ECS command override, CloudFormation `UserData`, etc.), preserve indentation exactly as spaces within the JSON string. JSON does not collapse whitespace inside quoted strings, but the authoring process (copy-paste from editor, shell variable expansion, or `jq` formatting) often strips it. Always verify the generated JSON contains the correct indentation before deploying.
+
+---
+
+## 2026-06-18 — ECS one-off task: `VAR=value cmd` rejected by container sh (FIX-062)
+
+### FIX-062 · `ADMIN_USERNAME=admin: command not found` in `sh -c` ECS override
+
+**Symptom:**
+After FIX-061 (indentation), the ECS task progressed through schema + pipeline_runs + reference_data, then failed:
+```
+ADMIN_USERNAME=admin: command not found
+```
+
+**Root cause:**
+The final command in the `sh -c` chain used POSIX inline env-var syntax:
+```
+ADMIN_USERNAME=admin ADMIN_PASSWORD=changeme ADMIN_ROLE=administrator uv run python -m scripts.seed_admin_user
+```
+The container's `sh` treated `ADMIN_USERNAME=admin` as a command name instead of a variable assignment. This suggests the shell in the production image (likely BusyBox ash or a non-POSIX shell) does not support the `VAR=value cmd` prefix syntax for a single command.
+
+**Fix:**
+Replaced inline env-var syntax with `export` + `&&`:
+```
+export ADMIN_USERNAME=admin ADMIN_PASSWORD=changeme ADMIN_ROLE=administrator && uv run python -m scripts.seed_admin_user
+```
+`export` is a POSIX built-in available in every `sh`, sets the variables for the remainder of the one-off shell session (safe because the container exits immediately after), and exits 0 so the `&&` chain continues.
+
+**Files:** `all_in_one_task.json`
+
+**Rule:**
+When embedding environment variables in a `sh -c` ECS command override (or any minimal-container shell), never rely on `VAR=value cmd` prefix syntax. Use `export VAR=value && cmd` instead. This is compatible with BusyBox ash, dash, bash, and any POSIX shell. Always test the full command string with `sh -c '...'` locally if the target image's shell is unknown.
+
+---
+
+## 2026-06-18 — ECS one-off task: `urlparse` crashes on RDS password with `]` (FIX-063)
+
+### FIX-063 · `ValueError: Invalid IPv6 URL` in `urlparse(database_url)`
+
+**Symptom:**
+`init_all.py` crashes on `apply_schema()` with:
+```
+ValueError: Invalid IPv6 URL
+  File "/usr/local/lib/python3.13/urllib/parse.py", line 449, in _check_bracketed_netloc
+```
+
+**Root cause:**
+Python 3.13 added stricter IPv6 bracket validation in `urllib.parse.urlparse`. The `DATABASE_URL` password contained `]` (a valid RDS auto-generated character). `urlparse` interpreted the unescaped `]` in the netloc as an invalid IPv6 bracket and raised.
+
+**Fix:**
+Removed `urlparse` entirely. `asyncpg.connect(dsn=database_url)` accepts the raw DSN string and parses it internally (libpq-style parser, not `urlparse`). The database name, host, port, credentials are all extracted by `asyncpg` — no manual parsing needed.
+
+**Before:**
+```python
+parsed = urlparse(database_url)
+conn = await asyncpg.connect(
+    host=parsed.hostname,
+    port=parsed.port or 5432,
+    user=parsed.username,
+    password=parsed.password,
+    database=parsed.path.lstrip("/"),
+)
+```
+
+**After:**
+```python
+conn = await asyncpg.connect(dsn=database_url)
+```
+
+**Files:** `all_in_one_task.json`
+
+**Rule:**
+Never use `urllib.parse.urlparse` on database connection strings (especially `postgresql://` DSNs) when the password contains special characters. Python 3.13+ IPv6 bracket validation is pathologically strict. Prefer passing the DSN directly to the database driver (`asyncpg.connect(dsn=...)`), which uses its own battle-tested parser. If you must parse manually, use `urllib.parse.urlparse` only on URL-encoded strings, or use a regex that isolates the password before parsing.
+
+
+---
+
+## 2026-06-18 — ECS init task: `InvalidCatalogNameError` database "doc_pipeline" does not exist (FIX-065)
+
+### FIX-065 · `asyncpg.exceptions.InvalidCatalogNameError: database "doc_pipeline" does not exist`
+
+**Symptom:**
+One-off ECS init task (all-in-one) fails immediately with:
+```
+asyncpg.exceptions.InvalidCatalogNameError: database "doc_pipeline" does not exist
+```
+(Previously masked as `TimeoutError` because the base64-encoded init script had the wrong DSN parsing logic.)
+
+**Root cause:**
+The fresh RDS instance only contains the default `postgres` database. The `DATABASE_URL` environment variable points to `/doc_pipeline`, but that database hasn't been created yet. `asyncpg.connect(dsn=...)` connects to the specified database, not the default `postgres`, so it fails immediately with `InvalidCatalogNameError`.
+
+**Fix:**
+Create the `doc_pipeline` database before running the init scripts. Use a one-off ECS task that connects to the default `postgres` database and runs `CREATE DATABASE doc_pipeline`:
+
+```python
+import asyncio, asyncpg, os, sys
+
+dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg", "postgresql")
+postgres_dsn = dsn.replace("/doc_pipeline", "/postgres")
+
+async def main():
+    try:
+        conn = await asyncpg.connect(dsn=postgres_dsn, timeout=10)
+        await conn.execute("CREATE DATABASE doc_pipeline")
+        print("CREATED")
+    except asyncpg.DuplicateDatabaseError:
+        print("ALREADY_EXISTS")
+    finally:
+        await conn.close()
+
+asyncio.run(main())
+```
+
+**Files:** ECS one-off task definition, database creation script
+
+**Rule:**
+Fresh RDS instances always start with only the `postgres` database. Before any init task that depends on a named database (`doc_pipeline`), always ensure the database exists first — either via the init script itself (connect to `postgres` first, then `CREATE DATABASE`), or via a pre-init step. If using `asyncpg`, the `DSN` must use `postgresql://` (not `postgresql+asyncpg://`) since `asyncpg` only accepts those two schemes. When the app code uses SQLAlchemy with `postgresql+asyncpg://`, strip the `+asyncpg` suffix before passing to `asyncpg.connect()`.
+
+
+### FIX-064 · `RuntimeError: Admin user 'admin' already exists` on second init run
+
+**Symptom:**
+One-off ECS init task succeeds on schema + pipeline_runs + reference_data, then crashes on `seed_admin_user`:
+```
+RuntimeError: Admin user seeding failed: Admin user 'admin' already exists
+```
+The `subprocess.run(..., check=True)` raises `CalledProcessError`, which propagates up and kills the container → ECS sends `SIGTERM` → `CancelledError` in logs.
+
+**Root cause:**
+`scripts.seed_admin_user` is not idempotent — it raises `RuntimeError` if the user already exists. The init script used `subprocess.run(..., check=True)` which treats any non-zero exit as fatal. Re-running the init task (e.g. after a partial failure or for idempotency) therefore always fails at the last step.
+
+**Fix:**
+Added `ignore_fail: bool = False` to `run_module()` in `all_in_one_task.py`. The `seed_admin_user` call passes `ignore_fail=True` — if the subprocess exits with an error, the script prints a warning and continues instead of crashing.
+
+```python
+def run_module(name: str, extra_env: dict | None = None, ignore_fail: bool = False):
+    ...
+    try:
+        subprocess.run([sys.executable, "-m", name], check=True, env=env)
+    except subprocess.CalledProcessError as e:
+        if ignore_fail:
+            print(f"Warning: {name} failed (exit {e.returncode}), continuing anyway")
+        else:
+            raise
+
+run_module("scripts.seed_admin_user", {...}, ignore_fail=True)
+```
+
+**Files:** `all_in_one_task.py`
+
+**Rule:**
+One-off init scripts that chain multiple idempotent steps must treat each step as idempotent. If a downstream script (like `seed_admin_user`) is not idempotent, wrap it in the orchestrator with an `ignore_fail` or pre-check guard. Never let a benign "already exists" error kill the entire init task.
+
+
+---
+
+## 2026-06-18 — SAM template `CodeUri` only packages thin wrapper, misses all app code (FIX-066)
+
+**Symptom:**
+Lambda functions deployed via SAM would fail at cold start with `ModuleNotFoundError` (e.g. `No module named 'cloud.ocr.consumer'`). The `.aws-sam/build/*/handler.py` was the only file in each function's package — no `shared/`, `cloud/`, or `nas/` modules were included.
+
+**Root cause:**
+The SAM template set `CodeUri: ../../lambda/ocr/` (and similar for each function). This path resolves to `cloud/lambda/ocr/` which only contains the thin `handler.py` wrapper. The wrapper imports `cloud.ocr.consumer.handler` which lives in `cloud/ocr/consumer.py` — a completely different directory, outside the package. SAM's `sam build` only copies files from the `CodeUri` directory, so the real business logic was never packaged.
+
+The project already had production-ready consumer handlers (`cloud/ocr/consumer.py:handler`, `cloud/structure/consumer.py:handler`, etc.) that handle SQS batching, DB sessions, and partial-batch failures. The thin wrappers in `cloud/lambda/*/handler.py` were redundant and broken.
+
+**Fix:**
+1. Changed `CodeUri` for all 6 Lambda functions from `../../lambda/xxx/` to `../../..` (repo root). This packages `shared/`, `nas/`, `cloud/`, and `requirements.txt` into every Lambda deployment.
+2. Changed `Handler` to reference the consumer handlers directly:
+   - `OcrFunction`: `cloud.ocr.consumer.handler`
+   - `StructureFunction`: `cloud.structure.consumer.handler`
+   - `MatchFunction`: `cloud.match.consumer.handler`
+   - `PersistFunction`: `cloud.persist.consumer.handler`
+   - `IndexFunction`: `cloud.index.consumer.handler`
+   - `VlmFunction`: `cloud.lambda.vlm.handler.lambda_handler` (kept the VLM wrapper; it has custom direct-invocation logic)
+3. Removed `Handler: handler.lambda_handler` from `Globals.Function` since every function now specifies its own handler.
+4. Added `__init__.py` to `cloud/lambda/` and all 7 subdirs (`ocr/`, `vlm/`, `structure/`, `match/`, `persist/`, `index/`) so `cloud.lambda.vlm.handler` resolves as a proper package path.
+5. Created `.aws-samignore` in the repo root to exclude `.git/`, `.venv/`, `web/`, `tests/`, `docs/`, `infra/`, and other non-runtime files from the Lambda package, keeping deployments lean.
+
+**Files:** `cloud/infrastructure/sam/template.yaml`, `cloud/lambda/{__init__.py,ocr/__init__.py,vlm/__init__.py,structure/__init__.py,match/__init__.py,persist/__init__.py,index/__init__.py}`, `.aws-samignore`
+
+**Rule:**
+- When a SAM template uses `CodeUri`, that directory MUST contain every Python module the `Handler` imports — including transitive dependencies. If the handler imports from `cloud.*` or `shared.*`, `CodeUri` must point to the repo root (or a build directory that copies all needed packages).
+- Never rely on a thin wrapper in a subdirectory to import code from outside that subdirectory — SAM's zip packager is blind to parent-directory imports.
+- Always add `__init__.py` to every directory in the import path when using `importlib.import_module` with dotted paths, even if Python 3.3+ supports namespace packages. Lambda's runtime loader may not handle namespace packages correctly in all cases.
+- Maintain `.aws-samignore` alongside the SAM template to prevent bloated packages from shipping `.git/`, `node_modules/`, tests, and docs.

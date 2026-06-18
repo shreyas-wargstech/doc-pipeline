@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import re
 
+import cv2
 import numpy as np
+
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from cloud.ocr.models import OcrResult, OcrWord
 from shared.logging import get_logger
@@ -33,6 +37,8 @@ _REGION_Y_GAP = 30
 
 # Padding around a cropped region (pixels)
 _DEFAULT_CROP_PADDING = 5
+
+VlmRunFn = Callable[[bytes], Awaitable[OcrResult]]
 
 
 def contains_devanagari(text: str) -> bool:
@@ -169,31 +175,68 @@ def assemble_result(
 
 async def run_vlm_on_crops(
     crops: list[np.ndarray],
+    regions: list[tuple[int, int, int, int]],
+    *,
     document_id: str,
     page_num: int,
+    vlm_run: VlmRunFn,
 ) -> list[OcrWord]:
     """Run VLM on each cropped region and return the combined words.
 
-    This is a placeholder for the actual VLM integration. In production, each
-    crop is base64-encoded and sent to the VLM tier (OpenRouter). The VLM
-    returns words with confidence _CONF_PRIOR (85.0).
+    The ``vlm_run`` callable receives PNG-encoded crop bytes and returns an
+    ``OcrResult``. Each crop's word bboxes are offset back to page coordinates
+    so that ``assemble_result`` can sort by reading order.
     """
-    # TODO: integrate with actual VLM tier (cloud/ocr/tiers/vlm.py)
-    log.warning("run_vlm_on_crops.placeholder", document_id=document_id, regions=len(crops))
-    return []
+    vlm_words: list[OcrWord] = []
+    for crop, region in zip(crops, regions):
+        x, y, _, _ = region
+        ok, buf = cv2.imencode(".png", crop)
+        if not ok:
+            log.warning(
+                "cost_router_v2.encode_failed",
+                document_id=document_id,
+                page_num=page_num,
+                region=region,
+            )
+            continue
+        try:
+            result = await vlm_run(buf.tobytes())
+        except Exception as exc:
+            log.warning(
+                "cost_router_v2.crop_failed",
+                document_id=document_id,
+                page_num=page_num,
+                error=str(exc),
+            )
+            continue
+        if result is None or result.is_empty:
+            continue
+        for w in result.words:
+            wx, wy, ww, wh = w.bbox
+            vlm_words.append(
+                OcrWord(
+                    text=w.text,
+                    conf=w.conf,
+                    bbox=(wx + x, wy + y, ww, wh),
+                    page_num=page_num,
+                )
+            )
+    return vlm_words
 
 
 async def route_page_v2(
     tesseract_result: OcrResult,
     page_image: np.ndarray,
+    *,
     threshold: float = _WORD_CONF_THRESHOLD,
+    vlm_run: VlmRunFn,
 ) -> OcrResult:
     """Route a page through the v2 cost router.
 
     1. Split words into confident (Tesseract) and uncertain (need VLM).
     2. Cluster uncertain words into regions.
     3. Crop the page image to those regions.
-    4. Run VLM on the cropped regions.
+    4. Run VLM on the cropped regions via ``vlm_run``.
     5. Assemble the final result.
 
     If all words are confident, returns the Tesseract result unchanged.
@@ -231,7 +274,11 @@ async def route_page_v2(
     )
 
     vlm_words = await run_vlm_on_crops(
-        crops, document_id=tesseract_result.document_id, page_num=tesseract_result.page_num
+        crops,
+        regions,
+        document_id=tesseract_result.document_id,
+        page_num=tesseract_result.page_num,
+        vlm_run=vlm_run,
     )
 
     return assemble_result(

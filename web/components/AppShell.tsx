@@ -1,49 +1,57 @@
 "use client";
+
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import AppBar from "@mui/material/AppBar";
-import Toolbar from "@mui/material/Toolbar";
-import Drawer from "@mui/material/Drawer";
-import List from "@mui/material/List";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemIcon from "@mui/material/ListItemIcon";
-import ListItemText from "@mui/material/ListItemText";
-import Box from "@mui/material/Box";
-import IconButton from "@mui/material/IconButton";
-import Menu from "@mui/material/Menu";
-import MenuItem from "@mui/material/MenuItem";
-import Typography from "@mui/material/Typography";
-import Tooltip from "@mui/material/Tooltip";
-import MenuIcon from "@mui/icons-material/Menu";
-import LogoutIcon from "@mui/icons-material/Logout";
-import AccountCircleIcon from "@mui/icons-material/AccountCircle";
-import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
-import DescriptionIcon from "@mui/icons-material/Description";
-import FactCheckIcon from "@mui/icons-material/FactCheck";
-import AccountTreeIcon from "@mui/icons-material/AccountTree";
-import TravelExploreIcon from "@mui/icons-material/TravelExplore";
-import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
-import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
-import BookmarkBorderIcon from "@mui/icons-material/BookmarkBorder";
+import { motion } from "motion/react";
+import {
+  Menu,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  UserCircle,
+  FileText,
+  CheckSquare,
+  GitBranch,
+  Search,
+  Activity,
+  Shield,
+  Bookmark,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/Button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { AccessibilityToolbar } from "@/components/AccessibilityToolbar";
 import { useActionBarContent } from "@/app/action-bar";
 import { useLogout, useRole } from "@/hooks/useAuth";
 import { useCollapsible } from "@/hooks/useCollapsible";
-import { AccessibilityToolbar } from "@/components/AccessibilityToolbar";
 
 const DRAWER_WIDTH = 240;
 const COLLAPSED_WIDTH = 64;
 
 const NAV_ITEMS = [
-  { href: "/", label: "Documents", icon: DescriptionIcon },
-  { href: "/bookmarks", label: "Bookmarks", icon: BookmarkBorderIcon },
-  { href: "/eval", label: "Evaluation", icon: FactCheckIcon },
-  { href: "/pipelines", label: "Pipelines", icon: AccountTreeIcon },
-  { href: "/retrieval", label: "Retrieval", icon: TravelExploreIcon },
-  { href: "/observability", label: "Observability", icon: MonitorHeartIcon },
-  { href: "/admin", label: "Admin", icon: AdminPanelSettingsIcon },
+  { href: "/", label: "Documents", icon: FileText },
+  { href: "/bookmarks", label: "Bookmarks", icon: Bookmark },
+  { href: "/eval", label: "Evaluation", icon: CheckSquare },
+  { href: "/pipelines", label: "Pipelines", icon: GitBranch },
+  { href: "/retrieval", label: "Retrieval", icon: Search },
+  { href: "/observability", label: "Observability", icon: Activity },
+  { href: "/admin", label: "Admin", icon: Shield },
 ] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -51,146 +59,165 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const logout = useLogout();
   const actionBarContent = useActionBarContent();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [userMenuAnchor, setUserMenuAnchor] = useState<HTMLElement | null>(null);
   const { collapsed, toggle } = useCollapsible("app-sidebar", false);
   const sidebarWidth = collapsed ? COLLAPSED_WIDTH : DRAWER_WIDTH;
   const role = useRole();
+
   const visibleNavItems = NAV_ITEMS.filter(
     ({ href }) => href !== "/admin" || role === "administrator",
   );
 
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   const navList = (
-    <List>
-      {visibleNavItems.map(({ href, label, icon: Icon }) => (
-        <Tooltip key={href} title={collapsed ? label : ""} placement="right">
-          <ListItemButton
-            component={Link}
+    <nav className="flex flex-col gap-1 px-2 py-2" aria-label="Main">
+      {visibleNavItems.map(({ href, label, icon: Icon }) => {
+        const active = isActive(href);
+        const linkContent = (
+          <Link
             href={href}
-            selected={isActive(href)}
-            aria-current={isActive(href) ? "page" : undefined}
-            sx={{ justifyContent: collapsed ? "center" : "flex-start", px: collapsed ? 1.5 : 2 }}
+            aria-current={active ? "page" : undefined}
+            className={
+              "flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 " +
+              (active
+                ? "bg-primary-tint text-primary font-medium"
+                : "text-muted-fg hover:text-foreground hover:bg-surface-hover hover:translate-x-0.5")
+            }
           >
-            <ListItemIcon sx={{ minWidth: collapsed ? 0 : undefined }}>
-              <Icon />
-            </ListItemIcon>
-            {!collapsed && <ListItemText primary={label} />}
-          </ListItemButton>
-        </Tooltip>
-      ))}
-    </List>
+            <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+            {!collapsed && (
+              <span className="text-sm truncate">{label}</span>
+            )}
+          </Link>
+        );
+
+        return collapsed ? (
+          <Tooltip key={href} delayDuration={300}>
+            <TooltipTrigger asChild>
+              {linkContent}
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              {label}
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <div key={href}>{linkContent}</div>
+        );
+      })}
+    </nav>
   );
 
   return (
-    <Box sx={{ display: "flex" }}>
-      <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }} color="default" elevation={1}>
-        <Toolbar sx={{ gap: 1 }}>
-          <IconButton
-            color="inherit"
-            edge="start"
-            sx={{ display: { sm: "none" } }}
-            onClick={() => setMobileOpen((open) => !open)}
+    <div className="flex min-h-screen">
+      {/* Desktop sidebar */}
+      <TooltipProvider>
+        <motion.aside
+          className="hidden sm:flex flex-col border-r bg-surface-alt shrink-0 h-screen sticky top-0 z-40"
+          initial={false}
+          animate={{ width: sidebarWidth }}
+          transition={{ duration: 0.3, ease: "easeInOut" }}
+          style={{ width: sidebarWidth }}
+        >
+          {/* Header spacer */}
+          <div className="h-14 shrink-0" />
+          {/* Sidebar toggle */}
+          <div className="flex justify-end px-2 py-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggle}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? (
+                <ChevronRight className="h-4 w-4" />
+              ) : (
+                <ChevronLeft className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+          {navList}
+          {!collapsed && (
+            <div className="mt-auto p-4 font-mono text-xs text-muted-fg">
+              92,431 registry rows
+            </div>
+          )}
+        </motion.aside>
+      </TooltipProvider>
+
+      {/* Mobile drawer */}
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-60 p-0">
+          <div className="h-14" />
+          {navList}
+        </SheetContent>
+      </Sheet>
+
+      {/* Main area */}
+      <div className="flex flex-col flex-1">
+        {/* Header */}
+        <header className="sticky top-0 z-50 h-14 flex items-center gap-3 border-b bg-background/80 backdrop-blur-md px-4 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="sm:hidden"
+            onClick={() => setMobileOpen(true)}
             aria-label="Toggle navigation"
           >
-            <MenuIcon />
-          </IconButton>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mr: 2 }}>
-            <Box
+            <Menu className="h-5 w-5" />
+          </Button>
+
+          <div className="flex items-center gap-2 mr-4 shrink-0">
+            <div
               aria-hidden
-              sx={{
-                width: 26,
-                height: 26,
-                borderRadius: "8px",
-                background: "linear-gradient(135deg, rgb(94 234 212), rgb(13 148 136))",
-                boxShadow: "0 3px 10px rgba(13,148,136,.45)",
-              }}
+              className="w-6 h-6 rounded-lg bg-gradient-to-br from-teal-300 to-primary shadow-md"
             />
-            <Typography
-              component="span"
-              sx={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: "1.05rem", letterSpacing: "0.2px" }}
-            >
+            <span className="font-display font-semibold text-lg tracking-wide">
               Docintel
-            </Typography>
-          </Box>
-          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            </span>
+          </div>
+
+          <div className="flex-1 min-w-0 hidden sm:block">
             <Breadcrumbs />
-          </Box>
-          <AccessibilityToolbar />
-          <IconButton color="inherit" onClick={(e) => setUserMenuAnchor(e.currentTarget)} aria-label="Account menu">
-            <AccountCircleIcon />
-          </IconButton>
-          <Menu anchorEl={userMenuAnchor} open={Boolean(userMenuAnchor)} onClose={() => setUserMenuAnchor(null)}>
-            <MenuItem
-              onClick={() => {
-                setUserMenuAnchor(null);
-                logout.mutate();
-              }}
-            >
-              <ListItemIcon>
-                <LogoutIcon fontSize="small" />
-              </ListItemIcon>
-              Sign out
-            </MenuItem>
-          </Menu>
-        </Toolbar>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <AccessibilityToolbar />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="Account menu">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback>
+                      <UserCircle className="h-5 w-5 text-muted-fg" />
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4}>
+                <DropdownMenuItem
+                  onClick={() => logout.mutate()}
+                  className="cursor-pointer"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </header>
+
+        {/* Action bar */}
         {actionBarContent && (
-          <Toolbar variant="dense" sx={{ borderTop: 1, borderColor: "divider", gap: 1 }}>
+          <div className="sticky top-14 z-40 border-b bg-surface/80 backdrop-blur-sm flex items-center gap-2 px-4 py-2">
             {actionBarContent}
-          </Toolbar>
+          </div>
         )}
-      </AppBar>
 
-      <Drawer
-        variant="temporary"
-        open={mobileOpen}
-        onClose={() => setMobileOpen(false)}
-        ModalProps={{ keepMounted: true }}
-        sx={{ display: { xs: "block", sm: "none" }, "& .MuiDrawer-paper": { width: DRAWER_WIDTH } }}
-      >
-        {navList}
-      </Drawer>
-      <Drawer
-        variant="permanent"
-        sx={{
-          display: { xs: "none", sm: "block" },
-          width: sidebarWidth,
-          flexShrink: 0,
-          whiteSpace: "nowrap",
-          "& .MuiDrawer-paper": {
-            width: sidebarWidth,
-            boxSizing: "border-box",
-            display: "flex",
-            flexDirection: "column",
-            overflowX: "hidden",
-            transition: (theme) =>
-              theme.transitions.create("width", { duration: theme.transitions.duration.shorter }),
-          },
-        }}
-      >
-        <Toolbar />
-        <Box sx={{ display: "flex", justifyContent: collapsed ? "center" : "flex-end", px: 1, py: 0.5 }}>
-          <IconButton
-            onClick={toggle}
-            size="small"
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
-          </IconButton>
-        </Box>
-        {navList}
-        {!collapsed && (
-          <Box sx={{ mt: "auto", p: 2, fontSize: 11, color: "text.secondary", fontFamily: "var(--font-mono)" }}>
-            92,431 registry rows
-          </Box>
-        )}
-      </Drawer>
-
-      <Box component="main" sx={{ flexGrow: 1, p: 2, width: { sm: `calc(100% - ${sidebarWidth}px)` } }}>
-        <Toolbar />
-        {actionBarContent && <Toolbar variant="dense" />}
-        {children}
-      </Box>
-    </Box>
+        {/* Main content */}
+        <main className="flex-1 min-h-[calc(100dvh-3.5rem)] p-6">
+          {children}
+        </main>
+      </div>
+    </div>
   );
 }

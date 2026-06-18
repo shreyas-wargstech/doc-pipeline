@@ -28,12 +28,14 @@ export function ActionButtons({ documentId }: { documentId: string }) {
 
   return (
     <div className="flex flex-wrap gap-2">
-      <Button variant="secondary" onClick={() => setPending("ingest")}><RefreshCw className="h-4 w-4" />Re-ingest</Button>
+      <Button variant="secondary" onClick={() => setPending("ingest")}>
+        <RefreshCw className="mr-2 h-4 w-4" />Re-ingest
+      </Button>
       <Button variant="secondary" onClick={() => run.mutate("requeue-ocr")} loading={run.isPending && run.variables === "requeue-ocr"}>
-        <RotateCcw className="h-4 w-4" />Requeue OCR
+        <RotateCcw className="mr-2 h-4 w-4" />Requeue OCR
       </Button>
       <Button variant="secondary" onClick={() => run.mutate("reclassify")} loading={run.isPending && run.variables === "reclassify"}>
-        <Tags className="h-4 w-4" />Re-classify
+        <Tags className="mr-2 h-4 w-4" />Re-classify
       </Button>
 
       <ConfirmDialog

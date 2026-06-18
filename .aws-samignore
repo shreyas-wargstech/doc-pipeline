@@ -1,0 +1,55 @@
+# SAM build exclusions — keep Lambda packages lean
+# Exclude everything that is not needed by the Lambda runtime
+
+# Git
+.git/
+.gitignore
+
+# Python virtualenv
+.venv/
+venv/
+
+# Node.js / Next.js (frontend only, runs on ECS/Vercel, not Lambda)
+web/
+node_modules/
+
+# Tests and docs (not needed at runtime)
+tests/
+docs/
+documentation/
+
+# Infrastructure (Terraform, SAM build artifacts, Docker)
+infra/
+cloud/infrastructure/sam/.aws-sam/
+cloud/infrastructure/sam/build.toml
+
+# Local env and secrets
+.env
+.env.*
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# Docker
+.dockerignore
+Dockerfile*
+
+# SAM build artifacts (prevent recursive packaging)
+.aws-sam/

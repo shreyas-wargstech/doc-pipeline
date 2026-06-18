@@ -1,25 +1,24 @@
-import Paper from "@mui/material/Paper";
-import Typography from "@mui/material/Typography";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import ListItemText from "@mui/material/ListItemText";
+import { Card } from "@/components/ui/Card";
+import { CardContent } from "@/components/ui/Card";
+import { List } from "lucide-react";
 
 export function ComingSoon({ title, items }: { title: string; items: string[] }) {
   return (
-    <Paper variant="outlined" sx={{ p: 3, maxWidth: 640 }}>
-      <Typography variant="h5" component="h1" gutterBottom>
-        {title}
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        This section is planned. Here is what it will include:
-      </Typography>
-      <List dense disablePadding>
-        {items.map((item) => (
-          <ListItem key={item} disableGutters>
-            <ListItemText primary={item} />
-          </ListItem>
-        ))}
-      </List>
-    </Paper>
+    <Card className="border max-w-[40rem]">
+      <CardContent className="flex flex-col gap-3 p-6">
+        <h1 className="font-display text-xl font-semibold text-foreground">{title}</h1>
+        <p className="text-sm text-muted-fg">
+          This section is planned. Here is what it will include:
+        </p>
+        <ul className="flex flex-col gap-2">
+          {items.map((item) => (
+            <li key={item} className="flex items-start gap-2 text-sm text-foreground">
+              <List className="mt-0.5 h-4 w-4 shrink-0 text-muted-fg" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }

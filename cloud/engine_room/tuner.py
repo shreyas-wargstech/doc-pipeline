@@ -19,15 +19,22 @@ log = get_logger(__name__)
 
 async def get_parameters(session: AsyncSession) -> dict[str, Any]:
     """Return current tuning parameters from the database, with defaults."""
-    # Default parameters (hardcoded for v1)
+    from cloud.match.models import (
+        FUZZY_MATCH_HIGH,
+        FUZZY_REVIEW_LOW,
+        NAME_CONFIRM,
+        NAME_CONFLICT_FLOOR,
+    )
+
+    # Default parameters locked to the match model constants so they never drift.
     defaults = {
         "ocr_confidence_threshold": 70,
         "triage_h_cv": 1.10,
         "triage_s_cv": 1.80,
-        "fuzzy_match_high": 90,
-        "fuzzy_review_low": 65,
-        "name_confirm": 70,
-        "name_conflict_floor": 40,
+        "fuzzy_match_high": FUZZY_MATCH_HIGH,
+        "fuzzy_review_low": FUZZY_REVIEW_LOW,
+        "name_confirm": NAME_CONFIRM,
+        "name_conflict_floor": NAME_CONFLICT_FLOOR,
     }
 
     # Override with any persisted tuning values

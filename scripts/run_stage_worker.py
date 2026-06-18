@@ -71,8 +71,6 @@ async def _run_forever(stage: str) -> int:
         "sqs",
         region_name=s.aws_region,
         endpoint_url=s.sqs_endpoint_url or None,
-        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "local"),
-        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "local"),
     ) as sqs:
         while True:
             await _drain_once(sqs, queue_url, proc)

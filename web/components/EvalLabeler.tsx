@@ -44,7 +44,7 @@ export function EvalLabeler({ pages }: { pages: EvalPage[] }) {
 
   if (!page) return (
     <Card>
-      <p className="text-sm text-muted-foreground">No enrolled pages. Enrol a document above.</p>
+      <p className="text-sm text-muted-fg">No enrolled pages. Enrol a document above.</p>
     </Card>
   );
 
@@ -56,7 +56,7 @@ export function EvalLabeler({ pages }: { pages: EvalPage[] }) {
       <div className="space-y-3 p-4">
         <div className="flex items-center justify-between text-sm">
           <span>{page.document_id} · page {page.page_num}</span>
-          <span className="flex items-center gap-1 text-muted-foreground">
+          <span className="flex items-center gap-1 text-muted-fg">
             predicted: <Badge tone="info">{pred}</Badge>
             {page.label ? <> · labeled: <Badge tone="ok">{page.label}</Badge></> : null}
           </span>
@@ -74,7 +74,7 @@ export function EvalLabeler({ pages }: { pages: EvalPage[] }) {
           <Button onClick={() => apply("typed")}>Typed (t)</Button>
           <Button onClick={() => apply("handwritten")}>Handwritten (h)</Button>
           <Button variant="ghost" onClick={() => dispatch({ type: "skip" })}>Skip (s)</Button>
-          <span className="ml-auto self-center text-xs text-muted-foreground">
+          <span className="ml-auto self-center text-xs text-muted-fg">
             {labeled}/{state.pages.length} labeled
           </span>
         </div>

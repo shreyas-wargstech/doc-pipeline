@@ -27,7 +27,29 @@ def as_admin():
     app.dependency_overrides.pop(require_session, None)
 
 
-# --- parameter tuner ---------------------------------------------------------
+# --- parameter tuner ------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_parameters_defaults_match_match_models():
+    from cloud.engine_room.tuner import get_parameters
+    from cloud.match.models import (
+        FUZZY_MATCH_HIGH,
+        FUZZY_REVIEW_LOW,
+        NAME_CONFIRM,
+        NAME_CONFLICT_FLOOR,
+    )
+
+    mock_session = MagicMock()
+    mock_result = MagicMock()
+    mock_result.mappings.return_value.all.return_value = []
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    params = await get_parameters(mock_session)
+    assert params["fuzzy_match_high"] == FUZZY_MATCH_HIGH
+    assert params["fuzzy_review_low"] == FUZZY_REVIEW_LOW
+    assert params["name_confirm"] == NAME_CONFIRM
+    assert params["name_conflict_floor"] == NAME_CONFLICT_FLOOR
 
 
 @pytest.mark.asyncio

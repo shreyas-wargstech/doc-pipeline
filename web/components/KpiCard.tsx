@@ -1,27 +1,27 @@
-import Card from "@mui/material/Card";
-import CardContent from "@mui/material/CardContent";
-import Typography from "@mui/material/Typography";
+import { Card } from "@/components/ui/Card";
+import { CardContent } from "@/components/ui/Card";
+import { cn } from "@/lib/utils";
 
 type Tone = "foreground" | "ok" | "warn" | "danger" | "info";
 
-const TONE_COLOR: Record<Tone, string> = {
-  foreground: "text.primary",
-  ok: "success.main",
-  warn: "warning.main",
-  danger: "error.main",
-  info: "info.main",
+const TONE_CLASS: Record<Tone, string> = {
+  foreground: "text-foreground",
+  ok: "text-ok",
+  warn: "text-warn",
+  danger: "text-danger",
+  info: "text-info",
 };
 
 export function KpiCard({ label, value, tone = "foreground" }: { label: string; value: number | string; tone?: Tone }) {
   return (
-    <Card variant="outlined">
-      <CardContent sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-        <Typography variant="caption" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} color="text.secondary">
+    <Card className="border">
+      <CardContent className="flex flex-col gap-1 p-4">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-fg">
           {label}
-        </Typography>
-        <Typography variant="h5" className="tnum" sx={{ fontWeight: 600, color: TONE_COLOR[tone] }}>
+        </span>
+        <span className={cn("tnum font-display text-2xl font-semibold", TONE_CLASS[tone])}>
           {value}
-        </Typography>
+        </span>
       </CardContent>
     </Card>
   );

@@ -1,9 +1,8 @@
 "use client";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import MuiBreadcrumbs from "@mui/material/Breadcrumbs";
-import MuiLink from "@mui/material/Link";
-import Typography from "@mui/material/Typography";
+import { ChevronRight } from "lucide-react";
 
 const SECTION_LABELS: Record<string, string> = {
   documents: "Documents",
@@ -49,18 +48,28 @@ export function Breadcrumbs() {
   const crumbs = buildCrumbs(pathname);
 
   return (
-    <MuiBreadcrumbs aria-label="breadcrumb">
-      {crumbs.map((crumb, i) =>
-        i === crumbs.length - 1 ? (
-          <Typography key={crumb.href} variant="body2" color="text.primary">
-            {crumb.label}
-          </Typography>
-        ) : (
-          <MuiLink key={crumb.href} component={Link} href={crumb.href} underline="hover" color="inherit" variant="body2">
-            {crumb.label}
-          </MuiLink>
-        ),
-      )}
-    </MuiBreadcrumbs>
+    <nav aria-label="breadcrumb">
+      <ol className="flex items-center gap-1">
+        {crumbs.map((crumb, i) => (
+          <li key={crumb.href} className="flex items-center gap-1">
+            {i > 0 && (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-fg shrink-0" aria-hidden="true" />
+            )}
+            {i === crumbs.length - 1 ? (
+              <span className="text-sm text-foreground font-medium truncate">
+                {crumb.label}
+              </span>
+            ) : (
+              <Link
+                href={crumb.href}
+                className="text-sm text-muted-fg font-medium hover:text-foreground transition-colors"
+              >
+                {crumb.label}
+              </Link>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
   );
 }

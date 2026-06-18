@@ -9,7 +9,7 @@ body { background: rgb(var(--color-background)); color: rgb(var(--color-foregrou
 
 /* Accessibility: focus-visible indicators */
 :focus-visible {
-  outline: 3px solid rgb(var(--color-primary));
+  outline: 2px solid rgb(var(--color-primary));
   outline-offset: 2px;
 }
 
@@ -25,11 +25,17 @@ html.high-contrast {
   --color-primary: 0 255 255;
   --color-border: 255 255 255;
   --color-surface: 0 0 0;
+  --color-surface-hover: 0 0 0;
   --color-surface-alt: 0 0 0;
   --color-muted-fg: 255 255 255;
+  --color-tertiary-fg: 255 255 255;
   --color-primary-hover: 0 255 255;
   --color-primary-tint: 0 0 0;
   --color-on-primary: 0 0 0;
+  --color-secondary: 255 255 0;
+  --color-secondary-hover: 255 255 0;
+  --color-secondary-tint: 0 0 0;
+  --color-on-secondary: 0 0 0;
   --color-ok: 0 255 255;
   --color-warn: 255 255 0;
   --color-danger: 255 0 0;

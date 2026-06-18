@@ -1,10 +1,8 @@
 "use client";
 import { useState } from "react";
-import Alert from "@mui/material/Alert";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import PersonAddIcon from "@mui/icons-material/PersonAddOutlined";
+import { UserPlus } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
 import { CreateUserDialog } from "@/components/admin/CreateUserDialog";
 import { UsersTable } from "@/components/admin/UsersTable";
 import { useRole } from "@/hooks/useAuth";
@@ -15,29 +13,29 @@ export default function AdminPage() {
 
   if (role !== null && role !== "administrator") {
     return (
-      <Box sx={{ mt: 4 }}>
-        <Alert severity="error">Access denied — administrator role required.</Alert>
-      </Box>
+      <div className="mt-8 rounded-panel border border-danger bg-danger-bg p-4 text-sm text-danger">
+        Access denied — administrator role required.
+      </div>
     );
   }
 
   return (
-    <Box>
+    <div className="flex flex-col gap-4 animate-fade-in">
       <PageHeader
         title="Admin"
         actions={
           <Button
-            startIcon={<PersonAddIcon />}
-            variant="outlined"
-            size="small"
+            variant="secondary"
+            size="sm"
             onClick={() => setCreateOpen(true)}
           >
+            <UserPlus className="mr-2 h-4 w-4" />
             Invite user
           </Button>
         }
       />
       <UsersTable />
       <CreateUserDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-    </Box>
+    </div>
   );
 }

@@ -32,7 +32,7 @@ function makeRun(over: Partial<RunState> = {}): RunState {
 // element's normalized textContent instead of a single text node.
 function badgeText(label: string) {
   return (_content: string, el: Element | null) =>
-    el?.tagName === "SPAN" && el.textContent?.replace(/\s+/g, " ").trim() === label;
+    el?.tagName === "DIV" && el.textContent?.replace(/\s+/g, " ").trim() === label;
 }
 
 describe("PipelinesPage", () => {

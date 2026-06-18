@@ -1,0 +1,18 @@
+﻿[
+    "Collecting pandas",
+    "  Downloading pandas-3.0.3-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)",
+    "Collecting openpyxl",
+    "  Downloading openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)",
+    "Collecting passlib[bcrypt]",
+    "  Downloading passlib-1.7.4-py2.py3-none-any.whl.metadata (1.7 kB)",
+    "Collecting bcrypt>=3.1.0 (from passlib[bcrypt])",
+    "  Downloading bcrypt-5.0.0-cp39-abi3-manylinux_2_34_x86_64.whl.metadata (10 kB)",
+    "Collecting numpy>=1.26.0 (from pandas)",
+    "  Downloading numpy-2.4.6-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)",
+    "Collecting python-dateutil>=2.8.2 (from pandas)",
+    "  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)",
+    "Collecting et-xmlfile (from openpyxl)",
+    "  Downloading et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)",
+    "Collecting six>=1.5 (from python-dateutil>=2.8.2->pandas)",
+    "  Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)",
+    "Downloading passlib-1.7.4-py2.py3-none-any.whl (525 kB)"

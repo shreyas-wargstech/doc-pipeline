@@ -1,26 +1,93 @@
-import { forwardRef } from "react";
+"use client";
 
-type Variant = "primary" | "secondary" | "ghost" | "destructive";
-const styles: Record<Variant, string> = {
-  primary: "bg-primary text-primary-fg shadow-sm hover:bg-primary-hover hover:-translate-y-px",
-  secondary: "bg-surface-alt text-foreground border border-border-strong hover:border-primary",
-  ghost: "bg-transparent text-foreground hover:bg-surface-alt",
-  destructive: "bg-destructive text-white hover:opacity-90",
+import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+import { Loader2 } from "lucide-react";
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        outline: "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 rounded-md px-3",
+        lg: "h-11 rounded-md px-8",
+        icon: "h-10 w-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+);
+
+export interface ShadcnButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+}
+
+const ShadcnButton = React.forwardRef<HTMLButtonElement, ShadcnButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+      />
+    );
+  }
+);
+ShadcnButton.displayName = "ShadcnButton";
+
+export type Variant = "primary" | "secondary" | "ghost" | "destructive";
+const variantMap: Record<Variant, string> = {
+  primary: "default",
+  secondary: "secondary",
+  ghost: "ghost",
+  destructive: "destructive",
 };
 
-export const Button = forwardRef<
-  HTMLButtonElement,
-  React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; loading?: boolean }
->(function Button({ variant = "primary", loading, disabled, className = "", children, ...props }, ref) {
-  return (
-    <button
-      ref={ref}
-      disabled={disabled || loading}
-      className={`inline-flex min-h-[44px] items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-semibold transition-[background,transform,border-color] duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 ${styles[variant]} ${className}`}
-      {...props}
-    >
-      {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />}
-      {children}
-    </button>
-  );
-});
+export interface ButtonProps extends Omit<ShadcnButtonProps, "variant"> {
+  variant?: Variant;
+  loading?: boolean;
+}
+
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button({ variant = "primary", loading, disabled, className, children, asChild, ...props }, ref) {
+    return (
+      <ShadcnButton
+        ref={ref}
+        variant={variantMap[variant] as any}
+        disabled={disabled || loading}
+        className={cn("min-h-[44px]", className)}
+        asChild={asChild}
+        {...props}
+      >
+        {asChild ? (
+          children
+        ) : (
+          <>
+            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {children}
+          </>
+        )}
+      </ShadcnButton>
+    );
+  }
+);
+Button.displayName = "Button";
+
+export { buttonVariants };

@@ -2,24 +2,23 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import Box from "@mui/material/Box";
-import Chip from "@mui/material/Chip";
-import IconButton from "@mui/material/IconButton";
-import Paper from "@mui/material/Paper";
-import Tab from "@mui/material/Tab";
-import Tabs from "@mui/material/Tabs";
-import Typography from "@mui/material/Typography";
-import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
-import ArrowForwardIosIcon from "@mui/icons-material/ArrowForward";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import FitScreenIcon from "@mui/icons-material/FitScreen";
-import ViewSidebarIcon from "@mui/icons-material/ViewSidebar";
-import ZoomInIcon from "@mui/icons-material/ZoomIn";
-import ZoomOutIcon from "@mui/icons-material/ZoomOut";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Maximize,
+  PanelLeft,
+  PanelRight,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import { JsonViewer } from "@/components/JsonViewer";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { PageRailToggle } from "@/app/(dash)/documents/[id]/layout";
+import { Button } from "@/components/ui/Button";
+import { Badge } from "@/components/ui/Badge";
+import { PageRailToggle } from "@/components/PageRailContext";
 import { imageUrl } from "@/lib/api";
 import { titleCase } from "@/lib/format";
 import { useDocument } from "@/hooks/useDocument";
@@ -86,7 +85,7 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
   }, [id, pageNum, hasPrev, hasNext, router]);
 
   if (!resolved || q.isLoading) return <Skeleton className="h-96 w-full" />;
-  if (q.isError || !q.data) return <Typography color="error" variant="body2">Failed to load page.</Typography>;
+  if (q.isError || !q.data) return <p className="text-sm text-danger">Failed to load page.</p>;
   const { page, structured_json, raw_text } = q.data;
 
   const defaultTab = page.page_summary ? 0 : 1;
@@ -104,84 +103,82 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
     page.confidence_score != null ? `confidence ${page.confidence_score.toFixed(0)}%` : "",
   ].filter(Boolean).join(". ");
 
+  const tabs = [
+    { label: "Summary", content: page.page_summary ?? "No summary available." },
+    { label: "Structured", content: <JsonViewer data={structured_json} /> },
+    { label: "Raw text", content: raw_text ?? "—" },
+  ];
+
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 1,
-          flexWrap: "wrap",
-          position: "sticky",
-          top: 0,
-          zIndex: 1,
-          bgcolor: "background.default",
-          py: 1,
-        }}
-      >
+    <div className="flex flex-col gap-4">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-background/80 py-2 backdrop-blur-md">
         <PageRailToggle />
-        <IconButton
-          component={Link}
-          href={hasPrev ? `/documents/${id}/pages/${pageNum - 1}` : `/documents/${id}/pages/${pageNum}`}
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
           aria-label="Previous page"
           aria-disabled={!hasPrev}
-          onClick={(e) => {
-            if (!hasPrev) e.preventDefault();
-          }}
           tabIndex={hasPrev ? undefined : -1}
-          size="small"
         >
-          <ArrowBackIosNewIcon fontSize="small" />
-        </IconButton>
-        <Typography variant="h6" component="h1" sx={{ fontFamily: "var(--font-display)", fontWeight: 600 }}>
-          Page {page.page_num}
-        </Typography>
-        <IconButton
-          component={Link}
-          href={hasNext ? `/documents/${id}/pages/${pageNum + 1}` : `/documents/${id}/pages/${pageNum}`}
+          <Link
+            href={hasPrev ? `/documents/${id}/pages/${pageNum - 1}` : `/documents/${id}/pages/${pageNum}`}
+            onClick={(e) => {
+              if (!hasPrev) e.preventDefault();
+            }}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Link>
+        </Button>
+        <h1 className="font-display text-lg font-semibold text-foreground">Page {page.page_num}</h1>
+        <Button
+          variant="ghost"
+          size="icon"
+          asChild
           aria-label="Next page"
           aria-disabled={!hasNext}
-          onClick={(e) => {
-            if (!hasNext) e.preventDefault();
-          }}
           tabIndex={hasNext ? undefined : -1}
-          size="small"
         >
-          <ArrowForwardIosIcon fontSize="small" />
-        </IconButton>
+          <Link
+            href={hasNext ? `/documents/${id}/pages/${pageNum + 1}` : `/documents/${id}/pages/${pageNum}`}
+            onClick={(e) => {
+              if (!hasNext) e.preventDefault();
+            }}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+        </Button>
 
-        <Chip size="small" label={titleCase(page.page_type)} />
-        <Chip size="small" color={page.ocr_status === "done" ? "success" : "warning"} label={page.ocr_status} />
-        {page.language_detected && <Chip size="small" color="info" label={page.language_detected} />}
+        <Badge tone="secondary">{titleCase(page.page_type)}</Badge>
+        <Badge tone={page.ocr_status === "done" ? "ok" : "warn"}>{page.ocr_status}</Badge>
+        {page.language_detected && <Badge tone="info">{page.language_detected}</Badge>}
         {page.confidence_score != null && (
-          <Typography variant="caption" className="tnum" color="text.secondary">
+          <span className="tnum text-xs text-muted-foreground">
             conf {page.confidence_score.toFixed(0)}
-          </Typography>
+          </span>
         )}
 
-        <Box sx={{ ml: "auto", display: "flex", gap: 0.5 }}>
-          <IconButton aria-label="Copy link" size="small" onClick={copyLink}>
-            <ContentCopyIcon fontSize="small" />
-          </IconButton>
-          <IconButton
+        <div className="ml-auto flex items-center gap-1">
+          <Button variant="ghost" size="icon" aria-label="Copy link" onClick={copyLink}>
+            <Copy className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label={dataPanel.collapsed ? "Show data panel" : "Hide data panel"}
-            size="small"
-            color={dataPanel.collapsed ? "default" : "primary"}
             onClick={dataPanel.toggle}
+            className={dataPanel.collapsed ? "text-muted-foreground" : "text-primary"}
           >
-            <ViewSidebarIcon fontSize="small" />
-          </IconButton>
-        </Box>
-      </Box>
+            {dataPanel.collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelRight className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
 
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2,
-          gridTemplateColumns: dataPanel.collapsed ? "1fr" : { xs: "1fr", lg: "1fr 1fr" },
-        }}
+      <div
+        className="grid gap-4"
+        style={{ gridTemplateColumns: dataPanel.collapsed ? "1fr" : "1fr 1fr" }}
       >
-        <Paper sx={{ overflow: "hidden", position: "relative" }}>
+        <div className="overflow-hidden rounded-panel border border-border relative bg-surface">
           <TransformWrapper
             key={pageNum}
             minScale={1}
@@ -200,22 +197,22 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={imageUrl(id, pageNum)} alt={imgAlt} style={{ width: "100%", display: "block" }} />
                   </TransformComponent>
-                  <Box sx={{ position: "absolute", right: 8, bottom: 8, display: "flex", flexDirection: "column", gap: 0.5, zIndex: 2 }}>
-                    <IconButton aria-label="Zoom in (plus key)" size="small" onClick={() => zoomIn()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
-                      <ZoomInIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton aria-label="Zoom out (minus key)" size="small" onClick={() => zoomOut()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
-                      <ZoomOutIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton aria-label="Fit to width (zero key)" size="small" onClick={() => resetTransform()} sx={{ bgcolor: "background.paper", boxShadow: 1 }}>
-                      <FitScreenIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
+                  <div className="absolute right-2 bottom-2 z-20 flex flex-col gap-1">
+                    <Button variant="secondary" size="icon" aria-label="Zoom in (plus key)" onClick={() => zoomIn()} className="bg-surface shadow-md">
+                      <ZoomIn className="h-4 w-4" />
+                    </Button>
+                    <Button variant="secondary" size="icon" aria-label="Zoom out (minus key)" onClick={() => zoomOut()} className="bg-surface shadow-md">
+                      <ZoomOut className="h-4 w-4" />
+                    </Button>
+                    <Button variant="secondary" size="icon" aria-label="Fit to width (zero key)" onClick={() => resetTransform()} className="bg-surface shadow-md">
+                      <Maximize className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </>
               );
             }}
           </TransformWrapper>
-        </Paper>
+        </div>
 
         {hasPrev && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -226,33 +223,46 @@ export default function PageDetail({ params }: { params: Promise<{ id: string; n
           <img src={imageUrl(id, pageNum + 1)} alt="" aria-hidden style={{ display: "none" }} />
         )}
 
-        {!dataPanel.collapsed && (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <Tabs value={activeTab} onChange={(_, v) => setTab(v)} aria-label="Page content">
-              <Tab label="Summary" />
-              <Tab label="Structured" />
-              <Tab label="Raw text" />
-            </Tabs>
-            {activeTab === 0 && (
-              <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
-                {page.page_summary ?? "No summary available."}
-              </Typography>
-            )}
-            {activeTab === 1 && <JsonViewer data={structured_json} />}
-            {activeTab === 2 && (
-              <Paper variant="outlined" sx={{ p: 1, maxHeight: "40vh", overflow: "auto" }}>
-                <Typography
-                  component="pre"
-                  variant="body2"
-                  sx={{ fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap", m: 0 }}
-                >
-                  {raw_text ?? "—"}
-                </Typography>
-              </Paper>
-            )}
-          </Box>
-        )}
-      </Box>
-    </Box>
+        <AnimatePresence>
+          {!dataPanel.collapsed && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="flex flex-col gap-2"
+            >
+              <div className="flex gap-1 border-b border-border" role="tablist">
+                {tabs.map((t, i) => (
+                  <button
+                    key={t.label}
+                    role="tab"
+                    aria-selected={activeTab === i}
+                    onClick={() => setTab(i)}
+                    className={`
+                      px-3 py-2 text-sm font-medium transition-colors duration-150
+                      ${activeTab === i ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}
+                    `}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto rounded-panel border border-border p-3">
+                {activeTab === 0 && (
+                  <p className="text-sm text-muted-foreground">{tabs[0].content}</p>
+                )}
+                {activeTab === 1 && tabs[1].content}
+                {activeTab === 2 && (
+                  <pre className="font-mono text-sm whitespace-pre-wrap text-foreground">
+                    {tabs[2].content}
+                  </pre>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
   );
 }

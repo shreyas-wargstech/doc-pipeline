@@ -15,7 +15,7 @@
 - [x] WI-1 (self-healing half): Real OCR self-healing retry (rotate/sharpen transforms + VLM tier escalation), wired into `cloud/ocr/consumer.py::heal_if_needed`
 - [x] WI-2: Match name-variation auto-resolve (known variations + transliteration fallback) + backfill from reference_data
 - [x] WI-3: Real `identity_search` + wired into structure (text-keyword re-classify of `other` pages) — see limitation below
-- [x] WI-4: Stuck-doc monitor (`find_stuck` + real SQS re-enqueue triggers) + runner loop `scripts/run_monitor.py` (local loop; EventBridge schedule NOT yet wired)
+- [x] WI-4: Stuck-doc monitor (`find_stuck` + real SQS re-enqueue triggers) + runner loop `scripts/run_monitor.py` + EventBridge Lambda schedule (`cloud/lambda/monitor/handler.py`, `MonitorFunction` in SAM template, rate(5 minutes))
 - [x] WI-5: Identity consistency score (`consistency_score` column + cross-page comparison at structure stage)
 - [x] WI-6: Learning loop closed — OCR name substitution auto-apply (`data/ocr_name_substitutions.json`) + suggest-only tuner suggestions (`GET /engine/tuning/suggestions`); match thresholds read from `tuning_parameters` with constant fallback
 
@@ -23,7 +23,7 @@
 
 **Phase 4 follow-ups (NOT done — corrected 2026-06-17 verification):**
 
-- [ ] **WI-1 cost-router-v2 NOT wired.** Per-word routing (`cloud/ocr/cost_router_v2.py`) was built+tested in Phase 3 but is NOT called by the OCR consumer/router; the `cost_router_v2_enabled` flag is defined but dead (referenced nowhere in `cloud/`). To finish WI-1: in `OcrRouter.route`, when `cost_router_v2_enabled`, run `route_words` on the Tesseract result and send only uncertain regions to VLM. (Earlier TASKS text wrongly claimed this was wired.)
+- [x] **WI-1 cost-router-v2 WIRED 2026-06-19.** `OcrRouter.route` now calls `_route_form_v2` when `cost_router_v2_enabled` is True and the page is a form. Tesseract-first, uncertain/Devanagari regions cropped and sent to VLM via injected `vlm_run` closure. Tesseract-empty fallback to full-page VLM preserved. `run_vlm_on_crops` implemented for real with bbox offset back to page coordinates. 18/18 cost_router_v2 tests + 21/21 router tests green.
 - [ ] **WI-1 rotate/sharpen heal branches unreachable in production.** `heal_if_needed` passes `result.tier` as the `error_message`, but `attempt_healing_retry` only triggers rotate/sharpen on `"rotation"/"blur"/"skew"` substrings — so only VLM-escalation fires. Needs a real failure-reason signal to reach the rotate/sharpen paths.
 - [ ] **WI-3 recovery is currently a prod no-op.** The text-keyword `_classify` (`classify_page_type`) never emits `"form"`/`"application_form"`, so `find_hidden_identity_page` (which requires those labels) won't match real data. Needs the VLM-image classify path (`VlmPageTyper`) to actually recover hidden identity pages.
 - [ ] POST-DEPLOY: run `python -m scripts.smart_impact_report` + cost_events query to measure real %-gains (manual_review reduction, VLM cost delta, auto-resolve rate). Wire-up shipped this phase; numbers pending live batch.
@@ -57,9 +57,9 @@
 ## Open Work (Carry-over)
 
 - [ ] AWS SAM deploy + end-to-end smoke test (next decision point)
-- [ ] S3PrefixSource — drop-in DocumentSource for AWS production folder runs
-- [ ] NAS batch ingestion wrapper (`scripts/batch_upload.py`) for 200–20k docs
-- [ ] Match fuzzy thresholds calibration (`FUZZY_MATCH_HIGH=90`/`FUZZY_REVIEW_LOW=75` — now live-tunable via `tuning_parameters`; no labeled pairs yet)
+- [x] S3PrefixSource — drop-in DocumentSource for AWS production folder runs (`S3PrefixSource` in `cloud/pipeline_run/source.py` + tests)
+- [x] NAS batch ingestion wrapper (`scripts/batch_upload.py`) for 200–20k docs (concurrent async workers, skip-if-uploaded, progress log)
+- [x] Match fuzzy thresholds calibration — `tuner.py` defaults now import from `match.models` (never drift again); `scripts/seed_tuning_defaults.py` seeds DB with calibrated constants
 - [ ] Manual dashboard smoke test (needs `make up` + `make serve` + `make web-dev` + RBAC setup)
 - [ ] Merge `feat/eval-review-workflow` to main
 - [ ] Merge `feat/document-bookmarks` to main

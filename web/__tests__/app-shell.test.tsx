@@ -15,6 +15,11 @@ vi.mock("@/app/action-bar", () => ({
   useActionBarContent: () => null,
 }));
 
+vi.mock("@/lib/accessibility", () => ({
+  useAccessibility: () => ({ highContrast: false, largeText: false, toggleHighContrast: vi.fn(), toggleLargeText: vi.fn() }),
+  AccessibilityProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 describe("AppShell", () => {
   it("renders all seven top-level nav groups", () => {
     usePathname.mockReturnValue("/");

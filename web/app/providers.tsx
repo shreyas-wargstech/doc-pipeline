@@ -2,7 +2,6 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
-import { EmotionRegistry } from "./EmotionRegistry";
 import { ActionBarProvider } from "./action-bar";
 import { AccessibilityProvider } from "@/lib/accessibility";
 
@@ -35,14 +34,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   }, []);
   const value = useMemo(() => ({ toasts, push }), [toasts, push]);
   return (
-    <EmotionRegistry>
-      <QueryClientProvider client={qc}>
-        <ToastContext.Provider value={value}>
-          <AccessibilityProvider>
-            <ActionBarProvider>{children}</ActionBarProvider>
-          </AccessibilityProvider>
-        </ToastContext.Provider>
-      </QueryClientProvider>
-    </EmotionRegistry>
+    <QueryClientProvider client={qc}>
+      <ToastContext.Provider value={value}>
+        <AccessibilityProvider>
+          <ActionBarProvider>{children}</ActionBarProvider>
+        </AccessibilityProvider>
+      </ToastContext.Provider>
+    </QueryClientProvider>
   );
 }

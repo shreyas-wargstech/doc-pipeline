@@ -6,7 +6,7 @@ import type { PageDetailResponse, DocDetailResponse } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/app/providers", () => ({ useToast: () => ({ push: vi.fn() }) }));
-vi.mock("@/app/(dash)/documents/[id]/layout", () => ({
+vi.mock("@/components/PageRailContext", () => ({
   PageRailToggle: () => <button aria-label="Show page list" />,
 }));
 

@@ -9,6 +9,7 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     globals: true,
-    server: { deps: { inline: [/@mui\/material/, "react-transition-group"] } },
+    pool: "vmThreads",
+    poolOptions: { vmThreads: { maxThreads: 1, minThreads: 1 } },
   },
 });

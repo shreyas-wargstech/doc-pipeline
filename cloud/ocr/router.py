@@ -33,6 +33,9 @@ from cloud.ocr.page_type import PAGE_TYPE_CONF_NET, VlmPageTyper, classify_page_
 from shared.config import get_settings
 from shared.logging import get_logger
 
+import cv2
+import numpy as np
+
 log = get_logger(__name__)
 
 # Escalation order. Index = how hard the page is.
@@ -141,6 +144,57 @@ class OcrRouter:
                 pass
         return base
 
+    async def _route_form_v2(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
+        """Per-word cost-router v2 for form pages.
+
+        Runs Tesseract first, then sends uncertain/Devanagari regions to the VLM.
+        Returns None to fall back to the full-page VLM path."""
+        from cloud.ocr.cost_router_v2 import route_page_v2
+
+        vlm_tier = self._tiers.get("vlm")
+        if vlm_tier is None or isinstance(vlm_tier, _UnavailableTier):
+            return None
+
+        t_tier = self._tiers[_LADDER[_TESSERACT_IDX]]
+        try:
+            tess_result = await t_tier.run(
+                image,
+                document_id=msg.document_id,
+                page_num=msg.page_num,
+                language_hint=msg.language_hint,
+            )
+        except TierNotImplemented:
+            return None
+
+        if tess_result is None or tess_result.is_empty:
+            return None
+
+        page_image = cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
+        if page_image is None:
+            log.warning(
+                "cost_router_v2.decode_failed",
+                document_id=msg.document_id,
+                page_num=msg.page_num,
+            )
+            return None
+
+        async def _vlm_run(crop_bytes: bytes) -> OcrResult:
+            return await vlm_tier.run(
+                crop_bytes,
+                document_id=msg.document_id,
+                page_num=msg.page_num,
+                language_hint=msg.language_hint,
+            )
+
+        v2_result = await route_page_v2(
+            tess_result, page_image, vlm_run=_vlm_run
+        )
+        if v2_result is not None:
+            v2_result.low_conf_count = sum(
+                1 for w in v2_result.words if w.conf < self._threshold
+            )
+        return v2_result
+
     async def route(self, msg: OcrPageMessage, image: bytes) -> OcrResult | None:
         """Run the tier ladder. Identity pages (_IDENTITY_PAGE_TYPES, currently
         just "form") start directly at VLM (_VLM_FIRST_PAGE_TYPES), skipping
@@ -155,6 +209,10 @@ class OcrRouter:
             "content_type": msg.content_type,
         } if hasattr(msg, "content_type") else None
         if vlm_first:
+            if get_settings().cost_router_v2_enabled:
+                v2 = await self._route_form_v2(msg, image)
+                if v2 is not None:
+                    return v2
             start, end = _VLM_IDX, len(_LADDER)          # form: VLM directly
         elif identity:
             start, end = self._start_index(msg.content_type, page_features), len(_LADDER)

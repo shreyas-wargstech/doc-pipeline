@@ -30,7 +30,7 @@ export function ResultsList({
   }
   if (isError) {
     return (
-      <p className="text-sm text-red-600 px-1">Search failed. Please try again.</p>
+      <p className="text-sm text-danger px-1">Search failed. Please try again.</p>
     );
   }
   if (hits.length === 0) {

@@ -1,11 +1,9 @@
 "use client";
 import { useState } from "react";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
-import Typography from "@mui/material/Typography";
 import { MatchBadge } from "@/components/ui/MatchBadge";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Card } from "@/components/ui/Card";
 import { useCorrectDocument } from "@/hooks/useEvalQueue";
 import { useToastSafe } from "@/app/providers";
 import type { CorrectionPatch, DocFull, MatchResultOut, MatchStatus } from "@/lib/types";
@@ -59,29 +57,30 @@ export function EvalCorrectionForm({ doc }: { doc: DocFull }) {
   }
 
   return (
-    <Stack spacing={2}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-        <Typography variant="subtitle2">Match status:</Typography>
+    <Card className="flex flex-col gap-4 p-4">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-foreground">Match status:</span>
         <MatchBadge status={matchStatus} />
         {matchResult?.matched_on && (
-          <Typography variant="caption" color="text.secondary">via {matchResult.matched_on}</Typography>
+          <span className="text-xs text-muted-fg">via {matchResult.matched_on}</span>
         )}
-      </Box>
+      </div>
       {FIELDS.map((f) => (
-        <TextField
-          key={f.key}
-          label={f.label}
-          value={values[f.key] ?? ""}
-          onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-          size="small"
-          fullWidth
-          type={f.key === "dob" ? "date" : f.key === "application_no" ? "number" : "text"}
-          slotProps={f.key === "dob" ? { inputLabel: { shrink: true } } : undefined}
-        />
+        <div key={f.key} className="flex flex-col gap-1">
+          <label htmlFor={`field-${f.key}`} className="text-xs font-medium text-muted-fg">
+            {f.label}
+          </label>
+          <Input
+            id={`field-${f.key}`}
+            value={values[f.key] ?? ""}
+            onChange={(e) => setValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+            type={f.key === "dob" ? "date" : f.key === "application_no" ? "number" : "text"}
+          />
+        </div>
       ))}
-      <Button variant="contained" onClick={onSave} disabled={correct.isPending}>
+      <Button onClick={onSave} disabled={correct.isPending} className="self-start">
         {correct.isPending ? "Saving…" : "Save"}
       </Button>
-    </Stack>
+    </Card>
   );
 }

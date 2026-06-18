@@ -140,8 +140,7 @@ Parameters:
 
 Globals:
   Function:
-    Runtime: python3.12
-    Handler: handler.lambda_handler
+    Runtime: python3.13
     Timeout: 60
     MemorySize: 1024
     Architectures:
@@ -622,6 +621,7 @@ Resources:
                 Effect: Allow
                 Action:
                   - kms:Decrypt
+                  - kms:GenerateDataKey
                   - kms:DescribeKey
                 Resource: !GetAtt SecretsKmsKey.Arn
               - Sid: RDSConnect
@@ -711,6 +711,8 @@ Resources:
                 Effect: Allow
                 Action:
                   - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
                 Resource: !GetAtt SecretsKmsKey.Arn
               - Sid: CloudWatchLogs
                 Effect: Allow
@@ -730,17 +732,21 @@ Resources:
   # LAMBDA FUNCTIONS — Stage Workers (Stubs for Phase 0)
   # ─────────────────────────────────────────────────────────────────────────
 
-  # Note: In Phase 1, these CodeUri paths will point to the actual
-  # Lambda handler code. For Phase 0, they reference stub handlers
-  # that simply log the event and return success.
+  # Note: CodeUri points to the repo root so all shared/ and cloud/
+  # modules are packaged. Handler references the production consumer
+  # handler in each stage module.
 
   OcrFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.ocr
+      DockerContext: ../../..
     Properties:
       FunctionName: !Sub docintel-${Environment}-ocr
       Role: !GetAtt LambdaExecutionRole.Arn
-      CodeUri: ../../lambda/ocr/
-      Handler: handler.lambda_handler
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.ocr.consumer.handler"]
       MemorySize: 1024
       Timeout: 60
       Events:
@@ -757,11 +763,15 @@ Resources:
 
   VlmFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.ocr
+      DockerContext: ../../..
     Properties:
       FunctionName: !Sub docintel-${Environment}-vlm
       Role: !GetAtt LambdaExecutionRole.Arn
-      CodeUri: ../../lambda/vlm/
-      Handler: handler.lambda_handler
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.lambda.vlm.handler.lambda_handler"]
       MemorySize: 2048
       Timeout: 120
       ReservedConcurrentExecutions: 15
@@ -770,11 +780,15 @@ Resources:
 
   StructureFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.light
+      DockerContext: ../../..
     Properties:
       FunctionName: !Sub docintel-${Environment}-structure
       Role: !GetAtt LambdaExecutionRole.Arn
-      CodeUri: ../../lambda/structure/
-      Handler: handler.lambda_handler
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.structure.consumer.handler"]
       MemorySize: 512
       Timeout: 30
       Events:
@@ -789,11 +803,15 @@ Resources:
 
   MatchFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.light
+      DockerContext: ../../..
     Properties:
       FunctionName: !Sub docintel-${Environment}-match
       Role: !GetAtt LambdaExecutionRole.Arn
-      CodeUri: ../../lambda/match/
-      Handler: handler.lambda_handler
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.match.consumer.handler"]
       MemorySize: 256
       Timeout: 15
       Events:
@@ -808,11 +826,15 @@ Resources:
 
   PersistFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.persist-index
+      DockerContext: ../../..
     Properties:
       FunctionName: !Sub docintel-${Environment}-persist
       Role: !GetAtt LambdaExecutionRole.Arn
-      CodeUri: ../../lambda/persist/
-      Handler: handler.lambda_handler
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.persist.consumer.handler"]
       MemorySize: 512
       Timeout: 30
       Events:
@@ -827,11 +849,15 @@ Resources:
 
   IndexFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.persist-index
+      DockerContext: ../../..
     Properties:
       FunctionName: !Sub docintel-${Environment}-index
       Role: !GetAtt LambdaExecutionRole.Arn
-      CodeUri: ../../lambda/index/
-      Handler: handler.lambda_handler
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.index.consumer.handler"]
       MemorySize: 512
       Timeout: 30
       Events:
@@ -843,6 +869,29 @@ Resources:
             FunctionResponseTypes:
               - ReportBatchItemFailures
       ReservedConcurrentExecutions: 20
+
+  MonitorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.light
+      DockerContext: ../../..
+    Properties:
+      FunctionName: !Sub docintel-${Environment}-monitor
+      Role: !GetAtt LambdaExecutionRole.Arn
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.lambda.monitor.handler.lambda_handler"]
+      MemorySize: 256
+      Timeout: 30
+      Events:
+        MonitorSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          MONITOR_ENABLED: "true"
 
   # ─────────────────────────────────────────────────────────────────────────
   # ECR — API Docker Image Repository

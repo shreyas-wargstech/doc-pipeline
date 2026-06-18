@@ -1,7 +1,8 @@
 "use client";
-import { Bookmark } from "lucide-react";
+import { Star, StarOff } from "lucide-react";
 import { useEffect, useState } from "react";
-import IconButton from "@mui/material/IconButton";
+import { motion } from "motion/react";
+import { Button } from "@/components/ui/Button";
 import { useToggleBookmark } from "@/hooks/useBookmarks";
 
 /**
@@ -28,14 +29,20 @@ export function BookmarkStar({
   };
 
   return (
-    <IconButton
-      size="small"
-      aria-label={on ? "Remove bookmark" : "Add bookmark"}
-      aria-pressed={on}
-      onClick={handleClick}
-      color={on ? "primary" : "default"}
+    <motion.div
+      whileTap={{ scale: 0.85 }}
+      transition={{ duration: 0.1, ease: "easeOut" }}
     >
-      <Bookmark className="h-4 w-4" fill={on ? "currentColor" : "none"} />
-    </IconButton>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={on ? "Remove bookmark" : "Add bookmark"}
+        aria-pressed={on}
+        onClick={handleClick}
+        className={on ? "text-primary" : "text-muted-foreground"}
+      >
+        {on ? <Star className="h-4 w-4 fill-current" /> : <StarOff className="h-4 w-4" />}
+      </Button>
+    </motion.div>
   );
 }

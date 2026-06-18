@@ -1,21 +1,24 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import Box from "@mui/material/Box";
-import List from "@mui/material/List";
-import ListItemButton from "@mui/material/ListItemButton";
-import ListItemText from "@mui/material/ListItemText";
-import Tooltip from "@mui/material/Tooltip";
+import { motion } from "motion/react";
 import { FileText, FileSignature, ReceiptText, BookText, FileImage } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { titleCase } from "@/lib/format";
 import type { OcrStatus, PageRow } from "@/lib/types";
 
-const OCR_DOT_COLOR: Record<OcrStatus, string> = {
-  done: "success.main",
-  queued: "warning.main",
-  pending: "text.disabled",
-  failed: "error.main",
-  skipped: "info.main",
+const OCR_DOT_CLASS: Record<OcrStatus, string> = {
+  done: "bg-success",
+  queued: "bg-warn",
+  pending: "bg-tertiary-fg",
+  failed: "bg-danger",
+  skipped: "bg-info",
 };
 
 function iconFor(pageType: string | null) {
@@ -39,80 +42,59 @@ export function PageRail({
   const pathname = usePathname();
 
   return (
-    <Box
-      component="nav"
-      aria-label="Document pages"
-      sx={{
-        width: collapsed ? 56 : 200,
-        flexShrink: 0,
-        display: { xs: "none", sm: "block" },
-        borderRight: 1,
-        borderColor: "divider",
-        overflowY: "auto",
-        transition: (theme) =>
-          theme.transitions.create("width", { duration: theme.transitions.duration.shorter }),
-      }}
-    >
-      {!collapsed && (
-        <Box
-          sx={{
-            px: 1.5,
-            pt: 1.5,
-            pb: 0.5,
-            fontSize: 11,
-            letterSpacing: ".05em",
-            textTransform: "uppercase",
-            color: "text.secondary",
-            fontFamily: "var(--font-mono)",
-          }}
-        >
-          Pages · {pages.length}
-        </Box>
-      )}
-      <List dense disablePadding>
-        {pages.map((p) => {
-          const href = `/documents/${documentId}/pages/${p.page_num}`;
-          const active = pathname === href;
-          const Icon = iconFor(p.page_type);
-          const label = p.page_type ? titleCase(p.page_type) : `Page ${p.page_num}`;
-          return (
-            <Tooltip key={p.page_id} title={collapsed ? label : ""} placement="right">
-              <ListItemButton
-                component={Link}
-                href={href}
-                selected={active}
-                aria-current={active ? "page" : undefined}
-                aria-label={label}
-                sx={{ gap: 1, py: 1, justifyContent: collapsed ? "center" : "flex-start" }}
-              >
-                <Box sx={{ display: "flex", color: active ? "primary.main" : "text.secondary", flexShrink: 0 }}>
-                  <Icon size={16} />
-                </Box>
-                {!collapsed && (
-                  <>
-                    <ListItemText
-                      primary={label}
-                      slotProps={{ primary: { variant: "body2", noWrap: true } }}
-                    />
-                    <Box
-                      component="span"
-                      role="img"
-                      aria-label={`OCR ${p.ocr_status}`}
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        bgcolor: OCR_DOT_COLOR[p.ocr_status],
-                        flexShrink: 0,
-                      }}
-                    />
-                  </>
-                )}
-              </ListItemButton>
-            </Tooltip>
-          );
-        })}
-      </List>
-    </Box>
+    <TooltipProvider>
+      <nav
+        aria-label="Document pages"
+        className="hidden flex-shrink-0 border-r border-border sm:block"
+        style={{ width: collapsed ? 56 : 200 }}
+      >
+        <ScrollArea className="h-[calc(100dvh-56px)]">
+          {!collapsed && (
+            <div className="px-3 pt-3 pb-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              Pages · {pages.length}
+            </div>
+          )}
+          <div className="flex flex-col">
+            {pages.map((p) => {
+              const href = `/documents/${documentId}/pages/${p.page_num}`;
+              const active = pathname === href;
+              const Icon = iconFor(p.page_type);
+              const label = p.page_type ? titleCase(p.page_type) : `Page ${p.page_num}`;
+              return (
+                <Tooltip key={p.page_id} delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <Link
+                      href={href}
+                      aria-current={active ? "page" : undefined}
+                      aria-label={label}
+                      className={`
+                        flex items-center gap-2 border-b border-border px-3 py-2.5 text-sm transition-colors duration-150
+                        ${active ? "bg-primary-tint text-primary" : "text-foreground hover:bg-surface-hover"}
+                        ${collapsed ? "justify-center" : "justify-start"}
+                      `}
+                    >
+                      <span className={active ? "text-primary" : "text-muted-foreground"}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      {!collapsed && (
+                        <>
+                          <span className="flex-1 truncate">{label}</span>
+                          <span
+                            role="img"
+                            aria-label={`OCR ${p.ocr_status}`}
+                            className={`h-2 w-2 flex-shrink-0 rounded-full ${OCR_DOT_CLASS[p.ocr_status]}`}
+                          />
+                        </>
+                      )}
+                    </Link>
+                  </TooltipTrigger>
+                  {collapsed && <TooltipContent side="right">{label}</TooltipContent>}
+                </Tooltip>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </nav>
+    </TooltipProvider>
   );
 }

@@ -1,13 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
-import Paper from "@mui/material/Paper";
-import Table from "@mui/material/Table";
-import TableBody from "@mui/material/TableBody";
-import TableCell from "@mui/material/TableCell";
-import TableContainer from "@mui/material/TableContainer";
-import TableHead from "@mui/material/TableHead";
-import TableRow from "@mui/material/TableRow";
-import Typography from "@mui/material/Typography";
+import { Table } from "@/components/ui/Table";
+import { Badge } from "@/components/ui/Badge";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { MatchBadge } from "@/components/ui/MatchBadge";
 import { fmtDateTime, titleCase } from "@/lib/format";
@@ -18,47 +12,44 @@ export function EvalQueueTable({ rows }: { rows: EvalQueueRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
-        <Typography color="text.secondary" variant="body2">No documents need review.</Typography>
-      </Paper>
+      <div className="flex flex-col items-center justify-center rounded-panel border border-border bg-surface p-8 text-center">
+        <p className="text-sm text-muted-fg">No documents need review.</p>
+      </div>
     );
   }
 
   return (
-    <TableContainer component={Paper} variant="outlined">
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>Applicant</TableCell>
-            <TableCell>Reg. no</TableCell>
-            <TableCell>DOB</TableCell>
-            <TableCell>Type</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Match</TableCell>
-            <TableCell>Updated</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
+    <div className="overflow-x-auto rounded-lg border">
+      <table className="w-full border-collapse text-sm">
+        <thead>
+          <tr className="border-b bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-fg">
+            <th className="px-3 py-2 font-medium">Applicant</th>
+            <th className="px-3 py-2 font-medium">Reg. no</th>
+            <th className="px-3 py-2 font-medium">DOB</th>
+            <th className="px-3 py-2 font-medium">Type</th>
+            <th className="px-3 py-2 font-medium">Status</th>
+            <th className="px-3 py-2 font-medium">Match</th>
+            <th className="px-3 py-2 font-medium">Updated</th>
+          </tr>
+        </thead>
+        <tbody>
           {rows.map((r) => (
-            <TableRow
+            <tr
               key={r.document_id}
-              hover
               onClick={() => router.push(`/eval/${r.document_id}`)}
-              sx={{ cursor: "pointer" }}
+              className="border-b last:border-0 transition-colors duration-150 hover:bg-muted/40 cursor-pointer"
             >
-              <TableCell>{r.applicant_name_raw ?? "—"}</TableCell>
-              <TableCell sx={{ fontFamily: "var(--font-mono)" }}>{r.registration_no ?? "—"}</TableCell>
-              <TableCell>{r.dob ?? "—"}</TableCell>
-              <TableCell>{titleCase(r.document_type)}</TableCell>
-              <TableCell><StatusBadge status={r.status} /></TableCell>
-              <TableCell><MatchBadge status={r.match_status} /></TableCell>
-              <TableCell className="tnum">
-                <Typography variant="body2" color="text.secondary">{fmtDateTime(r.updated_at)}</Typography>
-              </TableCell>
-            </TableRow>
+              <td className="px-3 py-2 align-middle">{r.applicant_name_raw ?? "—"}</td>
+              <td className="px-3 py-2 align-middle font-mono text-xs">{r.registration_no ?? "—"}</td>
+              <td className="px-3 py-2 align-middle">{r.dob ?? "—"}</td>
+              <td className="px-3 py-2 align-middle">{titleCase(r.document_type)}</td>
+              <td className="px-3 py-2 align-middle"><StatusBadge status={r.status} /></td>
+              <td className="px-3 py-2 align-middle"><MatchBadge status={r.match_status} /></td>
+              <td className="px-3 py-2 align-middle tnum text-xs text-muted-fg">{fmtDateTime(r.updated_at)}</td>
+            </tr>
           ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+        </tbody>
+      </table>
+    </div>
   );
 }

@@ -7,6 +7,7 @@ parser is exercised by monkeypatching `pytesseract.image_to_data`.
 from __future__ import annotations
 
 import types as _types
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -274,6 +275,137 @@ async def test_identity_form_starts_vlm_direct():
 
 
 # ── page_type assignment ──────────────────────────────────────────────────
+
+
+class FakeTyper:
+    def __init__(self, label="aadhaar"):
+        self.calls = 0
+        self._label = label
+
+    async def classify(self, image):
+        self.calls += 1
+        return self._label
+
+
+# ── cost_router_v2 wiring ─────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_route_form_v2_returns_mixed_result(monkeypatch):
+    """When cost_router_v2_enabled, _route_form_v2 runs Tesseract first,
+    then calls route_page_v2 with a VLM closure."""
+    import numpy as np
+    from unittest.mock import AsyncMock
+
+    t = FakeTier("tesseract", mean_conf=60.0, words=2)
+    vlm = FakeTier("vlm", mean_conf=88.0, words=1)
+    router = _router(t=t, vlm=vlm)
+
+    fake_arr = np.zeros((100, 100, 3), dtype=np.uint8)
+    monkeypatch.setattr(router_mod.cv2, "imdecode", lambda *a, **k: fake_arr)
+
+    mock_v2 = AsyncMock()
+    mock_v2.return_value = OcrResult(
+        document_id="doc1",
+        page_num=2,
+        tier="mixed",
+        words=[OcrWord(text="x", conf=85.0, bbox=(0, 0, 1, 1), page_num=2)],
+        raw_text="x",
+        mean_conf=85.0,
+    )
+    monkeypatch.setattr("cloud.ocr.cost_router_v2.route_page_v2", mock_v2)
+
+    res = await router._route_form_v2(_msg_type("form"), b"img")
+    assert res is not None
+    assert res.tier == "mixed"
+    assert t.calls == 1
+    mock_v2.assert_awaited_once()
+    # vlm_run closure passed to route_page_v2
+    call_kwargs = mock_v2.call_args.kwargs
+    assert "vlm_run" in call_kwargs
+
+
+@pytest.mark.anyio
+async def test_route_form_v2_tesseract_empty_falls_back(monkeypatch):
+    """Tesseract empty on a form page → _route_form_v2 returns None so the
+    normal full-page VLM path is taken."""
+    t = FakeTier("tesseract", mean_conf=0.0, words=0)
+    vlm = FakeTier("vlm", mean_conf=88.0, words=1)
+    router = _router(t=t, vlm=vlm)
+    monkeypatch.setattr(
+        router_mod,
+        "get_settings",
+        lambda: _types.SimpleNamespace(cost_router_v2_enabled=True),
+    )
+
+    res = await router._route_form_v2(_msg_type("form"), b"img")
+    assert res is None  # signals fallback to full-page VLM
+
+
+@pytest.mark.anyio
+async def test_route_form_v2_vlm_unavailable_falls_back():
+    """VLM tier unavailable → _route_form_v2 returns None."""
+    t = FakeTier("tesseract", mean_conf=60.0, words=2)
+    router = _router(t=t, vlm=router_mod._UnavailableTier("vlm", "no creds"))
+    res = await router._route_form_v2(_msg_type("form"), b"img")
+    assert res is None
+
+
+@pytest.mark.anyio
+async def test_form_v2_flag_on_uses_mixed_result(monkeypatch):
+    """Integration: route() calls _route_form_v2 when the flag is enabled."""
+    import numpy as np
+    from unittest.mock import AsyncMock
+
+    t = FakeTier("tesseract", mean_conf=60.0, words=2)
+    vlm = FakeTier("vlm", mean_conf=88.0, words=1)
+    router = _router(t=t, vlm=vlm)
+
+    fake_arr = np.zeros((100, 100, 3), dtype=np.uint8)
+    monkeypatch.setattr(router_mod.cv2, "imdecode", lambda *a, **k: fake_arr)
+
+    mock_v2 = AsyncMock()
+    mock_v2.return_value = OcrResult(
+        document_id="doc1",
+        page_num=2,
+        tier="mixed",
+        words=[OcrWord(text="x", conf=85.0, bbox=(0, 0, 1, 1), page_num=2)],
+        raw_text="x",
+        mean_conf=85.0,
+    )
+    monkeypatch.setattr("cloud.ocr.cost_router_v2.route_page_v2", mock_v2)
+    monkeypatch.setattr(
+        router_mod,
+        "get_settings",
+        lambda: _types.SimpleNamespace(cost_router_v2_enabled=True),
+    )
+
+    res = await router.route(_msg_type("form"), b"img")
+    assert res is not None
+    assert res.tier == "mixed"
+    assert t.calls == 1
+    assert vlm.calls == 0  # VLM called via closure inside route_page_v2, not directly
+
+
+@pytest.mark.anyio
+async def test_form_v2_flag_off_uses_normal_vlm_first(monkeypatch):
+    """When the flag is disabled, form pages go straight to VLM (existing path)."""
+    t = FakeTier("tesseract", mean_conf=95.0)
+    vlm = FakeTier("vlm", mean_conf=88.0)
+    router = _router(t=t, vlm=vlm)
+    monkeypatch.setattr(
+        router_mod,
+        "get_settings",
+        lambda: _types.SimpleNamespace(cost_router_v2_enabled=False),
+    )
+
+    res = await router.route(_msg_type("form"), b"img")
+    assert res is not None
+    assert res.tier == "vlm"
+    assert t.calls == 0 and vlm.calls == 1
+
+
+# ── page_type assignment (continued) ───────────────────────────────────────
 
 
 class FakeTyper:

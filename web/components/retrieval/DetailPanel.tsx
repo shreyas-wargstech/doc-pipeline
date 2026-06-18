@@ -18,7 +18,7 @@ export function DetailPanel({ documentId }: { documentId: string | null }) {
         </div>
       ) : isError ? (
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-sm text-red-600">Failed to load pages.</p>
+          <p className="text-sm text-danger">Failed to load pages.</p>
         </div>
       ) : isLoading || !data ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-fg" aria-busy="true">

@@ -62,11 +62,9 @@ ENV LD_LIBRARY_PATH=/var/task/lib:${LD_LIBRARY_PATH}
 
 ENV TESSDATA_PREFIX=/usr/share/tesseract/tessdata
 
-RUN pip install --no-cache-dir uv
-
-WORKDIR /var/task
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev
+# Install Python dependencies via pip (requirements.txt generated from pyproject.toml)
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY shared/ shared/
 COPY nas/ nas/

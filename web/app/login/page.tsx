@@ -1,4 +1,5 @@
 "use client";
+import { motion } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -43,7 +44,7 @@ export default function LoginPage() {
       <div className="flex flex-col justify-center bg-background px-8 py-12 sm:px-16">
         <div className="mx-auto w-full max-w-sm">
           <h2 className="font-display text-3xl font-semibold tracking-tight text-foreground">Welcome back</h2>
-          <p className="mb-8 mt-1.5 text-sm text-muted-fg">Sign in to the document intelligence workspace.</p>
+          <p className="mb-8 mt-1.5 text-sm text-muted-foreground">Sign in to the document intelligence workspace.</p>
 
           <form onSubmit={onSubmit} className="flex flex-col gap-4">
             <label className="text-sm font-semibold text-foreground">
@@ -75,8 +76,8 @@ export default function LoginPage() {
             </div>
 
             <div className="flex items-center justify-between text-sm">
-              <label className="flex cursor-pointer items-center gap-2 text-muted-fg">
-                <input type="checkbox" className="h-4 w-4 accent-[rgb(13_148_136)]" /> Keep me signed in
+              <label className="flex cursor-pointer items-center gap-2 text-muted-foreground">
+                <input type="checkbox" className="h-4 w-4 accent-primary" /> Keep me signed in
               </label>
             </div>
 
@@ -93,17 +94,20 @@ export default function LoginPage() {
                 Demo accounts · dev only
               </p>
               <div className="grid grid-cols-2 gap-2">
-                {DEMO_USERS.map((u) => (
-                  <button
+                {DEMO_USERS.map((u, i) => (
+                  <motion.button
                     key={u.username}
                     type="button"
                     disabled={login.isPending}
                     onClick={() => void signIn(u.username, DEMO_PASSWORD)}
+                    initial={{ opacity: 0, y: 8, filter: "blur(4px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                    transition={{ delay: i * 0.06, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                     className="flex flex-col items-start rounded-lg border border-border-strong bg-surface px-3 py-2 text-left transition-colors hover:border-primary disabled:opacity-50"
                   >
                     <span className="text-sm font-semibold text-foreground">{u.name}</span>
-                    <span className="text-xs text-muted-fg">{u.role}</span>
-                  </button>
+                    <span className="text-xs text-muted-foreground">{u.role}</span>
+                  </motion.button>
                 ))}
               </div>
             </div>
