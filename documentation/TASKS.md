@@ -65,6 +65,7 @@
 - [ ] Merge `feat/document-bookmarks` to main
 - [ ] Merge `feat/pipeline-folder-runner` to main
 - [ ] Merge `feat/content-type-eval-lab` to main
+- [ ] **40+ doc batch test** — `make down-clean && make up && make init` (picks up FIX-059 300s visibility timeout), then upload full sample folder, run multi-worker pipeline, verify match rate and cost.
 
 ## Deferred / Future
 

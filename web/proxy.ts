@@ -3,7 +3,7 @@ import { redirectTarget } from "@/lib/auth-guard";
 
 const COOKIE = "dash_session";
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const authed = req.cookies.has(COOKIE);
   const target = redirectTarget(req.nextUrl.pathname, authed);
   if (target) return NextResponse.redirect(new URL(target, req.url));

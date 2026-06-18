@@ -178,7 +178,20 @@ def get_external_service_params() -> dict:
         params["DashboardSessionSecret"] = auto_secret
     else:
         params["DashboardSessionSecret"] = input("   Enter secret (min 32 chars): ").strip()
-    
+
+    # Qdrant Cloud (managed vector store — https://cloud.qdrant.io/)
+    print("\n   Qdrant Cloud (https://cloud.qdrant.io/)")
+    print("   Managed vector store for semantic retrieval + persist embeddings.")
+    params["QdrantUrl"] = input("   Qdrant cluster URL (e.g. https://xxx.aws.cloud.qdrant.io:6333): ").strip()
+    params["QdrantApiKey"] = input("   Qdrant API Key: ").strip()
+
+    # Neo4j Aura (managed graph DB — https://neo4j.com/cloud/aura/)
+    print("\n   Neo4j Aura (https://console.neo4j.io/)")
+    print("   Managed graph DB for entity/person relationships.")
+    params["Neo4jUri"] = input("   Neo4j URI (e.g. neo4j+s://xxxx.databases.neo4j.io): ").strip()
+    params["Neo4jUser"] = input("   Neo4j user [neo4j]: ").strip() or "neo4j"
+    params["Neo4jPassword"] = input("   Neo4j password: ").strip()
+
     return params
 
 
@@ -196,6 +209,11 @@ def get_sam_config(env: str, region: str, vpc: dict, externals: dict) -> dict:
         "OpenRouterBaseUrl": externals.get("OpenRouterBaseUrl", "https://openrouter.ai/api/v1"),
         "OpenRouterModel": externals.get("OpenRouterModel", "google/gemini-2.5-flash"),
         "DashboardSessionSecret": externals["DashboardSessionSecret"],
+        "QdrantUrl": externals["QdrantUrl"],
+        "QdrantApiKey": externals["QdrantApiKey"],
+        "Neo4jUri": externals["Neo4jUri"],
+        "Neo4jUser": externals.get("Neo4jUser", "neo4j"),
+        "Neo4jPassword": externals["Neo4jPassword"],
     }
     
     # Optional overrides
@@ -244,69 +262,221 @@ def build_sam_template(config: dict) -> None:
     print("   ✅ SAM build complete")
 
 
+def get_stack_status(stack_name: str, region: str) -> str | None:
+    """Return the CloudFormation stack status, or None if it doesn't exist."""
+    try:
+        status_json = run([
+            "aws", "cloudformation", "describe-stacks",
+            "--stack-name", stack_name,
+            "--region", region,
+            "--query", "Stacks[0].StackStatus",
+            "--output", "text",
+        ])
+        return status_json.strip()
+    except SystemExit:
+        return None
+
+
+def ecr_repo_exists(repo_name: str, region: str) -> bool:
+    """Check if an ECR repository already exists."""
+    try:
+        run([
+            "aws", "ecr", "describe-repositories",
+            "--repository-names", repo_name,
+            "--region", region,
+        ])
+        return True
+    except SystemExit:
+        return False
+
+
+def ensure_ecr_repo(repo_name: str, region: str) -> None:
+    """Create the ECR repository if it doesn't already exist (idempotent).
+
+    The repo is managed here, NOT in CloudFormation, so the image can be pushed
+    before the stack deploys (CFN can't push an image mid-deploy).
+    """
+    if ecr_repo_exists(repo_name, region):
+        print(f"   ✅ ECR repository exists: {repo_name}")
+        return
+    print(f"   Creating ECR repository: {repo_name}")
+    run([
+        "aws", "ecr", "create-repository",
+        "--repository-name", repo_name,
+        "--region", region,
+        "--image-scanning-configuration", "scanOnPush=true",
+    ])
+    print(f"   ✅ ECR repository created")
+
+
+def build_and_push_api_image(config: dict) -> None:
+    """Build the FastAPI Docker image and push to ECR."""
+    print("\n🐳 Building and pushing API Docker image...")
+    
+    env = config["Environment"]
+    region = config["Region"]
+    repo_name = f"docintel-{env}-api"
+    account = json.loads(run(["aws", "sts", "get-caller-identity"]))["Account"]
+    ecr_uri = f"{account}.dkr.ecr.{region}.amazonaws.com"
+    image_tag = f"{ecr_uri}/{repo_name}:latest"
+    
+    # Log in to ECR — pipe the token into `docker login --password-stdin`.
+    # (The token must reach docker's stdin; capturing it into a var and not
+    # feeding it through is a silent auth failure / hang.)
+    print("   Logging in to ECR...")
+    login_password = run(["aws", "ecr", "get-login-password", "--region", region])
+    login = subprocess.run(
+        ["docker", "login", "--username", "AWS", "--password-stdin", ecr_uri],
+        input=login_password,
+        text=True,
+        capture_output=True,
+    )
+    if login.returncode != 0:
+        print(f"\n❌ docker login to ECR failed:\n{login.stderr}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Build image
+    dockerfile = PROJECT_ROOT / "cloud" / "Dockerfile"
+    print(f"   Building image from {dockerfile}...")
+    # --platform linux/amd64: Fargate task has no RuntimePlatform set → defaults
+    # to LINUX/X86_64. Pin the build arch so an ARM build host can't produce an
+    # image the task can't run ("exec format error").
+    run([
+        "docker", "build",
+        "--platform", "linux/amd64",
+        "-t", "docintel-api:latest",
+        "-f", str(dockerfile),
+        str(PROJECT_ROOT),
+    ], capture=False)
+    
+    # Tag and push
+    print(f"   Tagging and pushing to {image_tag}...")
+    run(["docker", "tag", "docintel-api:latest", image_tag])
+    run(["docker", "push", image_tag], capture=False)
+    print("   ✅ API image pushed to ECR")
+
+
+def update_ecs_service(config: dict) -> None:
+    """Force a new ECS service deployment to pick up the new image."""
+    print("\n🔄 Forcing new ECS service deployment...")
+    
+    env = config["Environment"]
+    region = config["Region"]
+    cluster_name = f"docintel-{env}-api-cluster"
+    service_name = f"docintel-{env}-api"
+    
+    try:
+        run([
+            "aws", "ecs", "update-service",
+            "--cluster", cluster_name,
+            "--service", service_name,
+            "--force-new-deployment",
+            "--region", region,
+        ])
+        print("   ✅ ECS service update initiated")
+    except SystemExit:
+        print("   ⚠️  Could not update ECS service (may not exist yet)")
+
+
 def deploy_stack(config: dict) -> dict:
     """Deploy the CloudFormation stack via SAM."""
     print(f"\n🚀 Deploying DocIntel stack to {config['Region']}...")
     
     stack_name = f"docintel-{config['Environment']}"
     s3_bucket = f"docintel-sam-artifacts-{config['Environment']}"
+    region = config["Region"]
+    env = config["Environment"]
+    repo_name = f"docintel-{env}-api"
     
     # Ensure S3 bucket exists for SAM artifacts
     try:
         run([
             "aws", "s3api", "head-bucket",
             "--bucket", s3_bucket,
-            "--region", config["Region"]
+            "--region", region
         ])
         print(f"   ✅ SAM artifacts bucket exists: {s3_bucket}")
     except:
         print(f"   Creating SAM artifacts bucket: {s3_bucket}")
         run([
             "aws", "s3", "mb", f"s3://{s3_bucket}",
-            "--region", config["Region"]
+            "--region", region
         ])
     
+    stack_status = get_stack_status(stack_name, region)
+    # Track whether this is an update to a live stack — if so we force a new ECS
+    # deployment after deploy so a freshly-pushed :latest image is picked up
+    # (an unchanged task def means sam deploy alone won't redeploy the service).
+    stack_preexisted = stack_status in {
+        "CREATE_COMPLETE", "UPDATE_COMPLETE", "UPDATE_ROLLBACK_COMPLETE",
+    }
+
+    # Delete stack if it's in a terminal state that can't be updated. A failed
+    # CREATE leaves ROLLBACK_COMPLETE; a failed rollback/delete (e.g. RDS
+    # deletion protection blocked teardown) leaves *_FAILED — re-issuing delete
+    # retries cleanly once the blocking resource is gone.
+    undeployable = {
+        "ROLLBACK_COMPLETE",
+        "ROLLBACK_FAILED",
+        "UPDATE_ROLLBACK_FAILED",
+        "DELETE_FAILED",
+    }
+    if stack_status in undeployable:
+        print(f"   ⚠️  Stack is in {stack_status} — deleting before redeploy...")
+        run([
+            "aws", "cloudformation", "delete-stack",
+            "--stack-name", stack_name,
+            "--region", region,
+        ])
+        run([
+            "aws", "cloudformation", "wait", "stack-delete-complete",
+            "--stack-name", stack_name,
+            "--region", region,
+        ], capture=False)
+        print(f"   ✅ Stack deleted, proceeding with fresh deploy")
+
+    # ── ECR repo + image MUST exist before the ECS service comes up ─────────
+    # CloudFormation can't push an image mid-deploy, so the repo is managed here
+    # (not in the template) and the image is pushed first. This lets the ECS
+    # service pull on its first attempt → the stack reaches CREATE_COMPLETE in a
+    # single pass (no intentional-failure / re-run dance).
+    ensure_ecr_repo(repo_name, region)
+    build_and_push_api_image(config)
+
     # Build parameter overrides string
     param_overrides = " ".join([
         f"{k}={v}" for k, v in config.items()
     ])
-    
+
+    built_template = SAM_DIR / ".aws-sam" / "build" / "template.yaml"
     deploy_cmd = [
         "sam", "deploy",
-        # NO --template flag — SAM auto-discovers the built template
-        # from .aws-sam/build/template.yaml
+        "--template-file", str(built_template),
         "--stack-name", stack_name,
         "--s3-bucket", s3_bucket,
-        "--region", config["Region"],
+        "--region", region,
         "--capabilities", "CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND",
         "--parameter-overrides", param_overrides,
         "--no-confirm-changeset",
         "--no-fail-on-empty-changeset",
     ]
-    
+
     print(f"   Stack name: {stack_name}")
-    print(f"   Region: {config['Region']}")
+    print(f"   Region: {region}")
     print(f"   This will take 8-15 minutes...")
-    
+
     output = run(deploy_cmd, capture=False)
-    
+
+    # On an update to a live stack, force the service to pull the new :latest.
+    if stack_preexisted:
+        update_ecs_service(config)
+
     # Extract outputs
     print("\n📤 Retrieving stack outputs...")
     outputs_json = run([
         "aws", "cloudformation", "describe-stacks",
         "--stack-name", stack_name,
-        "--region", config["Region"],
-        "--query", "Stacks[0].Outputs",
-        "--output", "json"
-    ])
-    outputs = json.loads(outputs_json)
-    
-    result = {}
-    for o in outputs:
-        result[o["OutputKey"]] = o["OutputValue"]
-    
-    return result
-
+        "--region", region,
         "--query", "Stacks[0].Outputs",
         "--output", "json"
     ])
@@ -364,6 +534,9 @@ def print_summary(outputs: dict, config: dict) -> None:
     print("\n📦 S3 Bucket:")
     print(f"   {outputs.get('S3Bucket', 'N/A')}")
     
+    print("\n🐳 ECR Repository:")
+    print(f"   {outputs.get('ApiEcrRepositoryUri', 'N/A')}")
+    
     print("\n📨 SQS Queues:")
     print(f"   OCR:       {outputs.get('OcrQueueUrl', 'N/A')}")
     print(f"   Structure: {outputs.get('StructureQueueUrl', 'N/A')}")
@@ -379,10 +552,9 @@ def print_summary(outputs: dict, config: dict) -> None:
     
     print("\n⚡ Next Steps:")
     print("   1. Seed the RDS database with schema.sql and reference data")
-    print("   2. Build and push the API Docker image to ECR")
-    print("   3. Deploy the Next.js app to Vercel")
-    print("   4. Run the NAS upload agent: python nas/upload_agent.py <pdf>")
-    print("   5. Monitor the pipeline in the CloudWatch dashboard")
+    print("   2. Deploy the Next.js app to Vercel")
+    print("   3. Run the NAS upload agent: python nas/upload_agent.py <pdf>")
+    print("   4. Monitor the pipeline in the CloudWatch dashboard")
     
     print("\n💰 Estimated Monthly Cost:")
     print("   RDS (db.t3.medium):      ~$45")
@@ -449,6 +621,11 @@ def main() -> int:
             "OpenRouterBaseUrl": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             "OpenRouterModel": os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash"),
             "DashboardSessionSecret": os.environ.get("DASHBOARD_SESSION_SECRET", ""),
+            "QdrantUrl": os.environ.get("QDRANT_URL", ""),
+            "QdrantApiKey": os.environ.get("QDRANT_API_KEY", ""),
+            "Neo4jUri": os.environ.get("NEO4J_URI", ""),
+            "Neo4jUser": os.environ.get("NEO4J_USER", "neo4j"),
+            "Neo4jPassword": os.environ.get("NEO4J_PASSWORD", ""),
         }
         config = get_sam_config(args.env, args.region, vpc, externals)
     else:

@@ -20,6 +20,9 @@ async def test_find_by_registration_no_returns_identity_fields():
         f_name="Nidhi",
         m_name="Sanjay",
         l_name="Toshniwal",
+        f_name_change="",
+        m_name_change="",
+        l_name_change="",
         gender="F",
     )
     result_obj = MagicMock()
@@ -59,6 +62,9 @@ async def test_find_by_registration_no_includes_name_parts_and_gender():
         f_name="Manisha",
         m_name="Baban",
         l_name="Yewale",
+        f_name_change="",
+        m_name_change="",
+        l_name_change="",
         gender="F",
     )
     result_obj = MagicMock()
@@ -85,6 +91,9 @@ async def test_find_by_id_returns_full_row():
         f_name="Nidhi",
         m_name="Sanjay",
         l_name="Toshniwal",
+        f_name_change="",
+        m_name_change="",
+        l_name_change="",
         gender="F",
         date_of_birth="1995-02-27",
     )

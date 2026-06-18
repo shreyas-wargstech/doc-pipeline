@@ -12,7 +12,7 @@ Description: >
 Parameters:
   Environment:
     Type: String
-    Default: production
+    Default: development
     AllowedValues: [development, staging, production]
     Description: Deployment environment name.
 
@@ -106,6 +106,29 @@ Parameters:
     Description: HMAC secret for dashboard signed-cookie sessions.
     NoEcho: true
 
+  QdrantUrl:
+    Type: String
+    Description: Qdrant Cloud cluster URL (e.g. https://xyz.aws.cloud.qdrant.io:6333).
+
+  QdrantApiKey:
+    Type: String
+    Description: Qdrant Cloud API key (stored in Secrets Manager).
+    NoEcho: true
+
+  Neo4jUri:
+    Type: String
+    Description: Neo4j Aura connection URI (e.g. neo4j+s://xxxx.databases.neo4j.io).
+
+  Neo4jUser:
+    Type: String
+    Default: neo4j
+    Description: Neo4j username.
+
+  Neo4jPassword:
+    Type: String
+    Description: Neo4j Aura password (stored in Secrets Manager).
+    NoEcho: true
+
   AllowedCidr:
     Type: String
     Default: 0.0.0.0/0
@@ -125,7 +148,9 @@ Globals:
       - x86_64
     Environment:
       Variables:
-        AWS_REGION: !Ref Region
+        # NOTE: AWS_REGION is a Lambda-reserved key and is auto-injected by the
+        # runtime (set to the function's own region) — setting it explicitly is
+        # rejected at create time. shared/config.py reads it from the runtime env.
         ENVIRONMENT: !Ref Environment
         SECRETS_MANAGER_ARN: !Ref DocIntelSecrets
         S3_BUCKET: !Ref DocumentsBucket
@@ -138,10 +163,16 @@ Globals:
         RDS_PORT: '5432'
         RDS_DATABASE: 'doc_pipeline'
         RDS_USERNAME: 'pipeline'
-        REDIS_HOST: !GetAtt RedisCluster.RedisEndpoint
+        REDIS_HOST: !GetAtt RedisCluster.RedisEndpoint.Address
         REDIS_PORT: '6379'
         OPENROUTER_BASE_URL: !Ref OpenRouterBaseUrl
         OPENROUTER_MODEL: !Ref OpenRouterModel
+        # QDRANT_URL / NEO4J_URI / NEO4J_USER are required by shared/config.py;
+        # secrets (QDRANT_API_KEY, NEO4J_PASSWORD) are read from Secrets Manager
+        # at runtime via _load_secret_value (Lambda env can't reference SM).
+        QDRANT_URL: !Ref QdrantUrl
+        NEO4J_URI: !Ref Neo4jUri
+        NEO4J_USER: !Ref Neo4jUser
     VpcConfig:
       SecurityGroupIds:
         - !Ref LambdaSecurityGroup
@@ -179,7 +210,9 @@ Resources:
           {
             "RDS_PASSWORD": "",
             "OPENROUTER_API_KEY": "${OpenRouterApiKey}",
-            "DASHBOARD_SESSION_SECRET": "${DashboardSessionSecret}"
+            "DASHBOARD_SESSION_SECRET": "${DashboardSessionSecret}",
+            "QDRANT_API_KEY": "${QdrantApiKey}",
+            "NEO4J_PASSWORD": "${Neo4jPassword}"
           }
         GenerateStringKey: RDS_PASSWORD
         PasswordLength: 32
@@ -313,21 +346,13 @@ Resources:
           - Id: TransitionToInfrequentAccess
             Status: Enabled
             Transition:
-              - TransitionInDays: 30
-                StorageClass: STANDARD_IA
+              TransitionInDays: 30
+              StorageClass: STANDARD_IA
           - Id: ArchiveToGlacier
             Status: Enabled
             Transition:
-              - TransitionInDays: 365
-                StorageClass: GLACIER
-      NotificationConfiguration:
-        QueueConfigurations:
-          - Event: s3:ObjectCreated:*
-            Filter:
-              KeyFilterRules:
-                - Name: suffix
-                  Value: manifest.json
-            Queue: !GetAtt OcrQueue.Arn
+              TransitionInDays: 365
+              StorageClass: GLACIER
 
   DocumentsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -472,7 +497,7 @@ Resources:
       DBInstanceIdentifier: !Sub docintel-${Environment}-postgres
       DBInstanceClass: !Ref RdsInstanceClass
       Engine: postgres
-      EngineVersion: '16.3'
+      EngineVersion: '16.9'
       MasterUsername: pipeline
       MasterUserPassword: !Sub '{{resolve:secretsmanager:${DocIntelSecrets}:SecretString:RDS_PASSWORD}}'
       AllocatedStorage: !Ref RdsAllocatedStorage
@@ -484,7 +509,7 @@ Resources:
         - !Ref RdsSecurityGroup
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
       BackupRetentionPeriod: 7
-      DeletionProtection: !If [IsProduction, true, false]
+      DeletionProtection: false
       EnablePerformanceInsights: true
       PerformanceInsightsRetentionPeriod: 7
       EnableCloudwatchLogsExports:
@@ -503,7 +528,7 @@ Resources:
     Type: AWS::ElastiCache::SubnetGroup
     Properties:
       Description: Subnets for DocIntel ElastiCache Redis
-      SubnetGroupName: !Sub docintel-${Environment}-cache-subnet-group
+      CacheSubnetGroupName: !Sub docintel-${Environment}-cache-subnet-group
       SubnetIds:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
@@ -516,7 +541,7 @@ Resources:
       EngineVersion: '7.1'
       NumCacheNodes: 1
       CacheSubnetGroupName: !Ref CacheSubnetGroup
-      SecurityGroupIds:
+      VpcSecurityGroupIds:
         - !Ref RedisSecurityGroup
       PreferredMaintenanceWindow: sun:03:00-sun:04:00
       Tags:
@@ -713,6 +738,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub docintel-${Environment}-ocr
+      Role: !GetAtt LambdaExecutionRole.Arn
       CodeUri: ../../lambda/ocr/
       Handler: handler.lambda_handler
       MemorySize: 1024
@@ -725,17 +751,20 @@ Resources:
             BatchSize: 10
             FunctionResponseTypes:
               - ReportBatchItemFailures
-      ReservedConcurrentExecutions: 100
+      # Reserved concurrency caps (not throughput guarantees). Sum must stay
+      # under account_limit(400) − 100 unreserved floor. Total here = 135.
+      ReservedConcurrentExecutions: 40
 
   VlmFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub docintel-${Environment}-vlm
+      Role: !GetAtt LambdaExecutionRole.Arn
       CodeUri: ../../lambda/vlm/
       Handler: handler.lambda_handler
       MemorySize: 2048
       Timeout: 120
-      ReservedConcurrentExecutions: 50
+      ReservedConcurrentExecutions: 15
       # Invoked by OCR function, not by SQS directly
       Events: {}
 
@@ -743,6 +772,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub docintel-${Environment}-structure
+      Role: !GetAtt LambdaExecutionRole.Arn
       CodeUri: ../../lambda/structure/
       Handler: handler.lambda_handler
       MemorySize: 512
@@ -755,12 +785,13 @@ Resources:
             BatchSize: 5
             FunctionResponseTypes:
               - ReportBatchItemFailures
-      ReservedConcurrentExecutions: 50
+      ReservedConcurrentExecutions: 20
 
   MatchFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub docintel-${Environment}-match
+      Role: !GetAtt LambdaExecutionRole.Arn
       CodeUri: ../../lambda/match/
       Handler: handler.lambda_handler
       MemorySize: 256
@@ -773,12 +804,13 @@ Resources:
             BatchSize: 5
             FunctionResponseTypes:
               - ReportBatchItemFailures
-      ReservedConcurrentExecutions: 50
+      ReservedConcurrentExecutions: 20
 
   PersistFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub docintel-${Environment}-persist
+      Role: !GetAtt LambdaExecutionRole.Arn
       CodeUri: ../../lambda/persist/
       Handler: handler.lambda_handler
       MemorySize: 512
@@ -791,12 +823,13 @@ Resources:
             BatchSize: 5
             FunctionResponseTypes:
               - ReportBatchItemFailures
-      ReservedConcurrentExecutions: 50
+      ReservedConcurrentExecutions: 20
 
   IndexFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub docintel-${Environment}-index
+      Role: !GetAtt LambdaExecutionRole.Arn
       CodeUri: ../../lambda/index/
       Handler: handler.lambda_handler
       MemorySize: 512
@@ -809,7 +842,18 @@ Resources:
             BatchSize: 5
             FunctionResponseTypes:
               - ReportBatchItemFailures
-      ReservedConcurrentExecutions: 50
+      ReservedConcurrentExecutions: 20
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # ECR — API Docker Image Repository
+  # ─────────────────────────────────────────────────────────────────────────
+  # NOTE: the ECR repo is intentionally NOT managed by this stack. CloudFormation
+  # cannot push an image *during* a deploy, so an in-template repo guarantees the
+  # ECS service tries to pull a non-existent image on first create → hang/fail.
+  # deploy.py creates the repo (idempotent) and pushes the image BEFORE this stack
+  # deploys, so the ECS service pulls successfully on its first attempt. The task
+  # definition references the image by its computed URI string (AccountId/Region/
+  # docintel-${Environment}-api:latest), not by !Ref to a repo resource.
 
   # ─────────────────────────────────────────────────────────────────────────
   # ECS — API Server (FastAPI + WebSocket)
@@ -871,20 +915,28 @@ Resources:
             - Name: SQS_INDEX_QUEUE_URL
               Value: !Ref IndexQueue
             - Name: REDIS_HOST
-              Value: !GetAtt RedisCluster.RedisEndpoint
+              Value: !GetAtt RedisCluster.RedisEndpoint.Address
             - Name: OPENROUTER_BASE_URL
               Value: !Ref OpenRouterBaseUrl
             - Name: OPENROUTER_MODEL
               Value: !Ref OpenRouterModel
             - Name: SECRETS_MANAGER_ARN
               Value: !Ref DocIntelSecrets
+            - Name: QDRANT_URL
+              Value: !Ref QdrantUrl
+            - Name: NEO4J_URI
+              Value: !Ref Neo4jUri
+            - Name: NEO4J_USER
+              Value: !Ref Neo4jUser
           Secrets:
             - Name: OPENROUTER_API_KEY
-              ValueFrom:
-                Fn::Sub: "${DocIntelSecrets}:SecretString:OPENROUTER_API_KEY::"
+              ValueFrom: !Sub '${DocIntelSecrets}:OPENROUTER_API_KEY::'
             - Name: DASHBOARD_SESSION_SECRET
-              ValueFrom:
-                Fn::Sub: "${DocIntelSecrets}:SecretString:DASHBOARD_SESSION_SECRET::"
+              ValueFrom: !Sub '${DocIntelSecrets}:DASHBOARD_SESSION_SECRET::'
+            - Name: QDRANT_API_KEY
+              ValueFrom: !Sub '${DocIntelSecrets}:QDRANT_API_KEY::'
+            - Name: NEO4J_PASSWORD
+              ValueFrom: !Sub '${DocIntelSecrets}:NEO4J_PASSWORD::'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -921,9 +973,9 @@ Resources:
           SecurityGroups:
             - !Ref EcsSecurityGroup
           Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-          AssignPublicIp: DISABLED
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+          AssignPublicIp: ENABLED
       LoadBalancers:
         - ContainerName: api
           ContainerPort: 8000
@@ -1099,7 +1151,7 @@ Resources:
               "properties": {
                 "title": "ALB Request Count",
                 "metrics": [
-                  [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${ApiAlb}" ]
+                  [ "AWS/ApplicationELB", "RequestCount", "LoadBalancer", "${ApiAlb.LoadBalancerFullName}" ]
                 ],
                 "period": 60,
                 "region": "${AWS::Region}",
@@ -1112,7 +1164,7 @@ Resources:
               "properties": {
                 "title": "ALB 5xx Error Rate",
                 "metrics": [
-                  [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${ApiAlb}" ]
+                  [ "AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${ApiAlb.LoadBalancerFullName}" ]
                 ],
                 "period": 60,
                 "region": "${AWS::Region}",
@@ -1230,7 +1282,7 @@ Outputs:
 
   RedisEndpoint:
     Description: ElastiCache Redis endpoint
-    Value: !GetAtt RedisCluster.RedisEndpoint
+    Value: !GetAtt RedisCluster.RedisEndpoint.Address
     Export:
       Name: !Sub ${AWS::StackName}-RedisEndpoint
 
@@ -1275,6 +1327,12 @@ Outputs:
     Value: !Ref DocIntelSecrets
     Export:
       Name: !Sub ${AWS::StackName}-SecretsArn
+
+  ApiEcrRepositoryUri:
+    Description: ECR repository URI for the API Docker image (repo managed by deploy.py, not this stack)
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/docintel-${Environment}-api
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEcrRepositoryUri
 
   DashboardUrl:
     Description: CloudWatch Dashboard URL

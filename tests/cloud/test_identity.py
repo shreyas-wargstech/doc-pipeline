@@ -150,13 +150,19 @@ async def test_consistency_report_with_inconsistency():
 @pytest.mark.asyncio
 async def test_identity_endpoint_returns_report(client: AsyncClient, as_reviewer):
     with patch("cloud.dashboard.api.generate_consistency_report", new=AsyncMock()) as gen, \
-         patch("cloud.dashboard.api.DocumentRepository") as repo_cls:
+         patch("cloud.dashboard.api.DocumentRepository") as repo_cls, \
+         patch("cloud.dashboard.api.PageRepository") as page_repo_cls, \
+         patch("cloud.dashboard.api.session_scope") as mock_scope:
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=AsyncMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
         doc = MagicMock()
         doc.document_id = "a" * 64
         repo = MagicMock()
         repo.get = AsyncMock(return_value=doc)
-        repo.list_for_document = AsyncMock(return_value=[])
         repo_cls.return_value = repo
+        page_repo = MagicMock()
+        page_repo.list_for_document = AsyncMock(return_value=[])
+        page_repo_cls.return_value = page_repo
         gen.return_value = {
             "document_id": "a" * 64,
             "overall_score": 95,

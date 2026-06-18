@@ -26,8 +26,7 @@ async def main() -> int:
         ("qdrant", init_qdrant.main),
         ("neo4j", init_neo4j.main),
         ("sqs", init_sqs.main),
-        ("data", load_reference_data.main),
-
+        ("data", lambda: load_reference_data.main()),
     ]
     for name, fn in steps:
         log.info("init.step.start", step=name)

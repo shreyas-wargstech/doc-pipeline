@@ -1096,3 +1096,89 @@ Same pattern applied to `cloud/lambda/vlm/handler.py` and `scripts/init_minio.py
 **Files:** `shared/config.py`, `shared/storage_s3.py`, `cloud/lambda/vlm/handler.py`, `scripts/init_minio.py`
 
 **Rule:** When deploying to ECS or Lambda, never require static AWS credentials in the Settings model. boto3's default credential chain handles IAM roles automatically. Only pass explicit credentials when running against non-AWS S3 (MinIO, local ElasticMQ) where static keys are genuinely needed.
+
+---
+
+## 2026-06-17 — `make init` fails on `load_reference_data` step (FIX-058)
+
+**Symptom:**
+```
+init.step.start                step=data
+TypeError: main() missing 3 required positional arguments: 'path', 'chunk_size', and 'dry_run'
+```
+`scripts/init_all.py` calls `load_reference_data.main()` with no arguments, but `main` had 3 required positional args (`path: Path, chunk_size: int, dry_run: bool`). Also returned `None` (no `return` statement), while `init_all` expects `Awaitable[int]`.
+
+**Root cause:** `load_reference_data.py` was built as a CLI script (argparse in `__main__` block). The `main()` function was never designed for programmatic import — it had no defaults and no return. When `init_all` added it as a step, the signature mismatch crashed the init sequence.
+
+**Fix:**
+(a) `scripts/load_reference_data.py` — changed `main` signature to default all args:
+```python
+async def main(path: Path = DEFAULT_EXCEL, chunk_size: int = DEFAULT_CHUNK, dry_run: bool = False) -> int:
+```
+Added `return 0` on success, `return 1` on failure (replacing `sys.exit()` calls inside the function).
+
+(b) `scripts/init_all.py` — wrapped the call with `lambda` to satisfy `Callable[[], Awaitable[int]]`:
+```python
+("data", lambda: load_reference_data.main()),
+```
+
+**Files:** `scripts/load_reference_data.py`, `scripts/init_all.py`
+
+**Rule:** Any script added to `init_all` or called programmatically must have a `main()` with **default args** and **return int** — not argparse-only with `sys.exit()` inside. CLI scripts and programmatic entry points share the same `main()`; the CLI `__main__` block passes explicit args, the programmatic caller relies on defaults.
+
+
+---
+
+## 2026-06-17 — Multiple OCR workers fail with `ReceiptHandleIsInvalid` (FIX-059)
+
+**Symptom:**
+When running `make ocr-worker` in multiple terminals to parallelize OCR, workers intermittently crash with:
+```
+botocore.errorfactory.ReceiptHandleIsInvalid: An error occurred (ReceiptHandleIsInvalid) when calling the DeleteMessage operation: The receipt handle "..." is not valid.
+```
+
+**Root cause:**
+ElasticMQ's default visibility timeout is 30 seconds. OCR processing per page takes 30-60 seconds (especially VLM classify calls to OpenRouter). When a message's visibility timeout expires while the first worker is still processing, the message becomes visible again in the queue. A second worker picks it up, gets a new receipt handle. The first worker finishes processing and tries to delete the message with its now-stale receipt handle → `ReceiptHandleIsInvalid`.
+
+**Fix:**
+`scripts/init_sqs.py` — added `VisibilityTimeout=300` (5 minutes) to all queue creation:
+```python
+attrs: dict[str, str] = {"VisibilityTimeout": "300"}
+if queue_name.endswith(".fifo"):
+    attrs["FifoQueue"] = "true"
+```
+
+**Files:** `scripts/init_sqs.py`
+
+**Rule:** Any SQS queue whose messages take >30 seconds to process must have visibility timeout ≥ 2× expected processing time. For OCR/VLM, 300 seconds is safe. For structure/match/persist/index, 120 seconds is usually sufficient. This applies to both ElasticMQ local and AWS SQS production.
+
+---
+
+## 2026-06-18 — Pre-existing test failures: retrieval auth, identity DB mock, match_reference attrs, config .env (FIX-060)
+
+**Symptom:**
+`make test` showed 7 failures:
+- `tests/cloud/retrieval/test_api.py` — 2 tests: `assert 401 == 200` / `assert 401 == 400`
+- `tests/cloud/test_identity.py` — 1 test: `ConnectionRefusedError: [WinError 1225]`
+- `tests/cloud/test_match_reference.py` — 3 tests: `AttributeError: 'SimpleNamespace' object has no attribute 'f_name_change'`
+- `tests/test_config_index.py` — 1 test: `AssertionError: assert 'http://localhost:9324/...' == ''`
+
+**Root cause:**
+- Retrieval `/api/search` endpoint added `Depends(require_session)` but tests were not updated with auth fixture.
+- `doc_identity` endpoint uses `session_scope()` + `PageRepository` internally; test only mocked `DocumentRepository`, leaving `PageRepository` to hit a real DB.
+- `ReferenceRepository` SQL queries added `f_name_change`, `m_name_change`, `l_name_change` columns; test `SimpleNamespace` mock rows were not updated.
+- `Settings` loads `.env` via `pydantic-settings`. Test expected empty default for `sqs_index_queue_url`, but `.env` had a real value. Passing field name in constructor doesn't override `.env` in pydantic-settings v2.
+
+**Fix:**
+- `tests/cloud/retrieval/test_api.py`: add `as_reviewer` fixture, inject into 2 tests.
+- `tests/cloud/test_identity.py`: add `patch("cloud.dashboard.api.session_scope")` and `patch("cloud.dashboard.api.PageRepository")` to `test_identity_endpoint_returns_report`.
+- `tests/cloud/test_match_reference.py`: add `f_name_change=""`, `m_name_change=""`, `l_name_change=""` to all 3 mock rows.
+- `tests/test_config_index.py`: pass `SQS_INDEX_QUEUE_URL=""` (alias) in constructor to override `.env`.
+
+**Files:** `tests/cloud/retrieval/test_api.py`, `tests/cloud/test_identity.py`, `tests/cloud/test_match_reference.py`, `tests/test_config_index.py`
+
+**Rule:**
+- Any endpoint test that adds `Depends(require_session)` must update all existing tests for that endpoint to include an auth fixture (or mock the dependency).
+- When mocking a repository endpoint that uses multiple repos inside `session_scope()`, patch **every** repo class + `session_scope` itself.
+- `SimpleNamespace` mock rows must stay in sync with the real SQL `SELECT` columns. When adding new columns to a repo query, grep all test files for `SimpleNamespace` rows and update them.
+- pydantic-settings v2 ignores field-name kwargs in `BaseSettings` constructor; use the alias (or `populate_by_name=True`) to override `.env` values in tests.

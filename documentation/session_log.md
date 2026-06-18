@@ -1,5 +1,7 @@
 # Session Log — Document Intelligence Pipeline
 
+> **New rule (2026-06-18):** Every entry must be prefixed with `[KIMI]` or `[CLAUDE]` so we know which agent did the work. This prevents collision and lets both assistants track who did what.
+
 ## 2026-05-16 — Ingest v1 built, architecture revised mid-session
 - Stage worked on: ingest → architecture redesign (preprocess + persist scope expanded)
 - Done: Built ingest v1 (sha256 stream-hash, S3 `put_if_absent`, Postgres idempotent upsert via SQLAlchemy 2.0 async, structured logging, stage-specific exceptions). User then redesigned: NAS handles preprocessing + upload, S3 event drives cloud pipeline. Proposed 3-table Postgres schema (`documents` + `pages` + `reference_data`) and manifest.json contract.
@@ -1004,3 +1006,60 @@ User wants to fix all known issues, then `make down-clean && make up && make ini
 - **Open questions:** Full AWS end-to-end smoke test (S3 event → Lambda → pipeline) not yet run; RDS seeding still pending
 - **Next step:** Seed RDS database with schema.sql + reference data; run full AWS end-to-end smoke test
 - **Files touched:** `shared/config.py`, `shared/storage_s3.py`, `cloud/lambda/vlm/handler.py`, `scripts/init_minio.py`
+
+## 2026-06-17 — Phase 5 scope deep-research (file-only, 12 dimensions)
+
+- **Stage:** docs / frontend (research only — no code)
+- **Done:**
+  - Deep-research-swarm analysis of Phase 5 scope across 5 documentation files: `TASKS.md`, `APP_DOCUMENTATION.md`, `REIMAGINING.md`, `REIMAGINING_COMPARISON.md`, `REIMAGINING_ADDENDUM.md`
+  - Decomposed into 12 research dimensions: Phase Identity, Aether Chat, Engine Room, Document Autopsy, Design Philosophy, Backend Readiness, Architecture, Scope Boundaries, Sequencing, Testing/Performance/Accessibility, Cost/Risk, Implementation Complexity
+  - Cross-verified 150+ claims across all dimensions; classified into High/Medium/Low/Conflict Zone confidence tiers
+  - Extracted 10 cross-dimension insights: backend-first trap, zero-cost product pattern, API completeness illusion, design-as-scope contract, template engine as architecture, accessibility-as-feature, risk concentration in Engine Room, documentation debt, deferred frontend as competitive moat, query parser as strategic pivot
+  - Produced comprehensive report: `research/phase5_report.md` (37 KB) + `research/phase5_report.docx` (53 KB)
+  - 15 supporting research artifacts saved to `research/`: file analysis, dimension decomposition, 12 dimension deep-dives, cross-verification, insights
+- **Decisions locked:** none new (research-only session; no implementation decisions made)
+- **Open questions:**
+  - Query parser mismatch: existing LLM-first vs. grounded plan's regex-first — needs A/B test before Aether Chat ships
+  - Engine Room pipeline runner abstraction does not exist (start/stop/pause/resume controls)
+  - "Show all pages of this person" needs new person-scoped backend endpoint
+  - `APP_DOCUMENTATION.md` §9.8 still references stale Phase 5 definition ("Scale: CDN, caching") — needs correction
+  - No detailed frontend technical spec, testing strategy, performance budget, or deployment target decision
+- **Next step:** Pre-flight (merge 4 branches, smoke test, fix stale docs) → build Phase 5 features in waves (Autopsy → Aether Chat → Engine Room)
+- **Files touched:** `research/phase5_report.md`, `research/phase5_report.docx`, `research/phase5_file_analysis.md`, `research/phase5_dimensions.md`, `research/phase5_dim01.md` through `phase5_dim12.md`, `research/phase5_cross_verification.md`, `research/phase5_insight.md`
+
+
+## 2026-06-17 — Gap analysis: in-house Meilisearch-style keyword engine vs. existing DocIntel retrieval
+- Stage worked on: retrieval / architecture analysis (read-only, no code changes)
+- Done: Explored existing `cloud/retrieval/`, `cloud/index/`, `db/schema.sql`, `shared/qdrant_client.py`, `shared/neo4j_client.py`, frontend `/retrieval` page. Wrote `documentation/gap_analysis_inhouse_search.md` mapping proposed inverted-index + deterministic-ranking engine against current system.
+- Key findings:
+  - PRESENT: Document store (Postgres+S3), vector fallback (Qdrant), graph traversal (Neo4j), page-level keyword/entity/summary extraction, retrieval UI + API + suggestions, fast regex + LLM query parsers.
+  - PARTIAL: JSONB GIN `search_keywords` acts as a coarse inverted index but lacks token positions, field weights, and posting-list intersection. Prefix autocomplete is DB `LIKE` not trie/FST. Query parser lacks general filter DSL (`type:receipt`, date ranges).
+  - MISSING: Paragraph-level chunking, true inverted index with word offsets, deterministic ranking stack (title match + phrase proximity + typo penalty + recency), field-weighted search, offset-based highlighting/snippets, shared tokenizer, compressed bitmaps, dedicated prefix index.
+- Decisions locked: none new — analysis only.
+- Open questions: does user want to implement the minimal delta (add `chunk_index` table + tokenizer + keyword engine) or adopt an external library (e.g., `tantivy`) instead of building in-house.
+- Next step: user's decision — implement minimal keyword engine delta, or spike `tantivy` integration, or leave system as-is.
+- Files touched: `documentation/gap_analysis_inhouse_search.md` (new, read-only analysis)
+
+## 2026-06-17 — Local 5-doc pipeline test (OCR → structure → match → persist → index)
+
+- **Done:** User ran local end-to-end test on 5 sample PDFs from `C:\Users\Wargstech\Downloads\mch-pipeline-incoming\sample2\` (AMR-MCH-26-A-01021..01025). Full pipeline processed: OCR (23+21+27+20+14 = 105 pages), structure, match, persist, index. Result: 2 matched, 2 manual_review, 1 unmatched. Qdrant indexed 10 identity pages (2 per doc). Neo4j graph populated.
+- **Bugs found + fixed during test:**
+  - **FIX-059 (OCR worker race condition):** Multiple `make ocr-worker` terminals caused `ReceiptHandleIsInvalid` errors. Root cause: ElasticMQ default visibility timeout = 30s; OCR processing takes 30-60s per page (VLM classify). Message became visible before processing finished → another worker consumed it → first worker's delete failed. **Fix:** `scripts/init_sqs.py` now sets `VisibilityTimeout=300` on all queue creations. **Rule:** Any queue whose messages take >30s to process must have visibility timeout ≥ 2× expected processing time.
+  - **FIX-058 (already fixed in this session):** `make init` failed on `load_reference_data` step because `main()` had 3 required positional args, no defaults, and returned `None`. `init_all` called it with `fn()` no args. Fixed by adding defaults and `return int`.
+- **Fixes already in code from prior work:** `consistency_score` was missing from `_DOCUMENT_UPDATE_WHITELIST` in `storage_db.py` (FIX-056 area). Added during this session.
+- **Schema drift noted:** `match_confidence` column referenced in code but does NOT exist in `db/schema.sql` `documents` table. Pre-existing, not blocking. `match_status` works without it.
+- **Status at end of session:** Pipeline completed. All 5 docs at `status=processed`. Next real test: 40+ docs with `make down-clean && make up && make init` (picks up 300s visibility timeout).
+- **Decisions locked:** None new.
+- **Open questions:** None new.
+- **Files touched:** `scripts/init_sqs.py` (FIX-059 — VisibilityTimeout=300), `cloud/ingest/storage_db.py` (consistency_score whitelist), `scripts/load_reference_data.py` (FIX-058), `scripts/init_all.py` (FIX-058), `check_status.py` (temp, can delete).
+- **Next step:** User will run larger batch (40+ docs) for full validation, then switch to production AWS stack for real workload.
+
+## 2026-06-18 — Fix 7 pre-existing test failures (retrieval auth, identity DB mock, match_reference attrs, config .env)
+
+- **Done:** Fixed all 7 pre-existing test failures that were blocking `make test` (764 passed + 7 failed → 771 passed).
+  - **Retrieval API tests (2):** `test_search_returns_hits`, `test_search_requires_q` — both returned 401 because `/api/search` requires `Depends(require_session)`. Added `as_reviewer` fixture to inject a mock session into the tests.
+  - **Identity API test (1):** `test_identity_endpoint_returns_report` — crashed with `ConnectionRefusedError` because `doc_identity` endpoint uses `session_scope()` internally + `PageRepository`, but the test only mocked `DocumentRepository` and `generate_consistency_report`. Added `session_scope` + `PageRepository` patches.
+  - **Match reference tests (3):** `test_find_by_registration_no_returns_identity_fields`, `test_find_by_registration_no_includes_name_parts_and_gender`, `test_find_by_id_returns_full_row` — all failed with `AttributeError: 'SimpleNamespace' object has no attribute 'f_name_change'`. `ReferenceRepository` queries now select `f_name_change`, `m_name_change`, `l_name_change` from SQL, but the test mock rows were missing them. Added the missing fields to all `SimpleNamespace` mock rows.
+  - **Config test (1):** `test_index_defaults` — expected `sqs_index_queue_url == ""` but `.env` overrides it to `http://localhost:9324/000000000000/index-queue.fifo`. pydantic-settings v2 ignores field-name kwargs in constructor; must pass alias `SQS_INDEX_QUEUE_URL=""` to override `.env`.
+- **Files touched:** `tests/cloud/retrieval/test_api.py`, `tests/cloud/test_identity.py`, `tests/cloud/test_match_reference.py`, `tests/test_config_index.py`
+- **Next step:** Full `make test` run to confirm 771 green.

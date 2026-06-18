@@ -189,6 +189,7 @@ class DocumentRepository:
             "dob",
             "gender",
             "reference_data_id",
+            "consistency_score",
         }
     )
 

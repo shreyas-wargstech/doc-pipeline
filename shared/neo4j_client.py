@@ -61,7 +61,12 @@ INDEXES: list[str] = [
 def get_driver() -> AsyncDriver:
     """Caller owns the driver — close via `await driver.close()`."""
     s = get_settings()
-    return AsyncGraphDatabase.driver(s.neo4j_uri, auth=(s.neo4j_user, s.neo4j_password))
+    password = s.neo4j_password
+    # Same pattern as Settings.database_url: in Lambda/ECS the password lives in
+    # Secrets Manager (Lambda env can't reference it directly).
+    if not password and s.secrets_manager_arn:
+        password = s._load_secret_value("NEO4J_PASSWORD")
+    return AsyncGraphDatabase.driver(s.neo4j_uri, auth=(s.neo4j_user, password))
 
 
 @asynccontextmanager

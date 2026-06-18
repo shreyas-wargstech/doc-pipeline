@@ -20,6 +20,10 @@ dependencies = [
     "structlog>=24.1",
     # Graph
     "neo4j>=5.18",
+    # Vector store (cloud.persist + retrieval import qdrant_client at module load)
+    "qdrant-client>=1.7",
+    # Cache / suggestions (cloud.retrieval.redis_suggestions imports redis.asyncio)
+    "redis>=5",
     # OCR + image
     "pytesseract>=0.3.10",
     "pymupdf>=1.23",
@@ -83,5 +87,4 @@ markers = [
 [dependency-groups]
 dev = [
     "fakeredis>=2.36.1",
-    "redis>=8.0.0",
 ]

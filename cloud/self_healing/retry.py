@@ -82,13 +82,13 @@ async def attempt_healing_retry(
 
     msg = (error_message or "").lower()
 
-    if "rotation" in msg or "rotate" in msg or "skew" in msg:
+    if "rotation" in msg or "rotate" in msg or "skew" in msg or "empty" in msg:
         r = await reprocess(auto_rotate_page(image), force_tier=None)
         if _usable(r):
             log.info("self_healing.rotation_fixed")
             return r
 
-    if "blur" in msg or "sharp" in msg:
+    if "blur" in msg or "sharp" in msg or "empty" in msg:
         r = await reprocess(auto_sharpen_page(image), force_tier=None)
         if _usable(r):
             log.info("self_healing.sharpen_fixed")

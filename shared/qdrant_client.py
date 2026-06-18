@@ -23,9 +23,18 @@ DISTANCE = Distance.COSINE
 
 
 def get_qdrant() -> AsyncQdrantClient:
-    """Construct an async Qdrant client. Caller closes via `await client.close()`."""
+    """Construct an async Qdrant client. Caller closes via `await client.close()`.
+
+    Passes an API key when set (Qdrant Cloud); omits it for a local/no-auth
+    instance so the same code path works in dev and production.
+    """
     s = get_settings()
-    return AsyncQdrantClient(url=s.qdrant_url)
+    api_key = s.qdrant_api_key
+    # Same pattern as Settings.database_url: in Lambda/ECS the key lives in
+    # Secrets Manager (env can't reference it directly for Lambda).
+    if not api_key and s.secrets_manager_arn:
+        api_key = s._load_secret_value("QDRANT_API_KEY")
+    return AsyncQdrantClient(url=s.qdrant_url, api_key=api_key or None)
 
 
 async def ensure_collection(

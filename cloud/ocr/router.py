@@ -199,6 +199,9 @@ class OcrRouter:
                 threshold=self._threshold,
             )
 
+        if best is not None and best.is_empty:
+            best.failure_reason = f"empty_{best.tier}"
+
         if best is None and msg.page_type == "form":
             # VLM unavailable on the mixed-content form → fall back to Tesseract,
             # which still extracts the printed registration_no (the authoritative
@@ -218,6 +221,8 @@ class OcrRouter:
                 fallback.low_conf_count = sum(
                     1 for w in fallback.words if w.conf < self._threshold
                 )
+                if fallback.is_empty:
+                    fallback.failure_reason = "empty_tesseract_fallback"
                 best = fallback
                 log.info("ocr_form_vlm_fallback_tesseract",
                          document_id=msg.document_id, page_num=msg.page_num)

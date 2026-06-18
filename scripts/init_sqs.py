@@ -42,7 +42,7 @@ async def main() -> int:
             if not url:
                 continue
             queue_name = url.rsplit("/", 1)[-1]
-            attrs: dict[str, str] = {}
+            attrs: dict[str, str] = {"VisibilityTimeout": "300"}
             if queue_name.endswith(".fifo"):
                 attrs["FifoQueue"] = "true"
             try:

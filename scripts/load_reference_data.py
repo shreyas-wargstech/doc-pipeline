@@ -462,18 +462,18 @@ async def upsert_chunks(rows: list[dict[str, Any]], chunk_size: int, dry_run: bo
 # Entry point
 # ---------------------------------------------------------------------------
 
-async def main(path: Path, chunk_size: int, dry_run: bool) -> None:
+async def main(path: Path = DEFAULT_EXCEL, chunk_size: int = DEFAULT_CHUNK, dry_run: bool = False) -> int:
     configure_logging(fmt="console")
     log.info("load_reference_data_start", source=str(path), chunk_size=chunk_size, dry_run=dry_run)
 
     if not path.exists():
         log.error("file_not_found", path=str(path))
-        sys.exit(1)
+        return 1
 
     rows = load_and_map(path)
     if not rows:
         log.error("no_valid_rows_found")
-        sys.exit(1)
+        return 1
 
     total = await upsert_chunks(rows, chunk_size, dry_run)
 
@@ -481,7 +481,7 @@ async def main(path: Path, chunk_size: int, dry_run: bool) -> None:
         log.info("dry_run_complete", rows_would_upsert=len(rows))
     else:
         log.info("load_reference_data_done", total_upserted=total)
-
+    return 0
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Load Excel reference data into Postgres.")

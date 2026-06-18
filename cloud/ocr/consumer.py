@@ -61,7 +61,7 @@ async def heal_if_needed(
 
     healed = await attempt_healing_retry(
         image,
-        error_message=(result.tier if result is not None else None),
+        error_message=(result.failure_reason if result is not None else None),
         current_tier="tesseract",
         reprocess=reprocess,
     )

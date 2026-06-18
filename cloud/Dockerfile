@@ -13,7 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
         libzbar0 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
+# curl is required by the ECS container HealthCheck (curl -f localhost:8000/health)
 
 WORKDIR /app
 RUN pip install --no-cache-dir uv

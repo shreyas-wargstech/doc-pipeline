@@ -4,6 +4,16 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from cloud.app import app
+from cloud.dashboard.session import SessionData, require_session
+
+
+@pytest.fixture
+def as_reviewer():
+    app.dependency_overrides[require_session] = lambda: SessionData(
+        username="reviewer1", role="reviewer"
+    )
+    yield "reviewer1"
+    app.dependency_overrides.pop(require_session, None)
 
 
 @pytest.fixture
@@ -13,7 +23,7 @@ async def client():
 
 
 @pytest.mark.anyio
-async def test_search_returns_hits(client):
+async def test_search_returns_hits(client, as_reviewer):
     from cloud.retrieval.explainer import RetrievalHit
     from cloud.retrieval.query_parser import QueryIntent
 
@@ -40,7 +50,7 @@ async def test_search_returns_hits(client):
 
 
 @pytest.mark.anyio
-async def test_search_requires_q(client):
+async def test_search_requires_q(client, as_reviewer):
     resp = await client.get("/api/search")
     assert resp.status_code == 400
 

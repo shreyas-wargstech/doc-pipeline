@@ -34,6 +34,7 @@ class OcrResult(BaseModel):
     mean_conf: float = 0.0  # mean over non-empty words; 0.0 when no words
     low_conf_count: int = 0  # words below the threshold the router used
     language_detected: str = "unknown"
+    failure_reason: str | None = None  # diagnostic: "rotation"|"blur"|"low_conf"|"empty"|...
 
     @property
     def is_empty(self) -> bool:
