@@ -487,3 +487,19 @@ Reviewed `feat/dark-mode` (commits 1052c9b, e4cb76b, e512dfb) against `docs/supe
 
 **Next:** Claude review vs spec + scorecard. Merge `feat/remove-pre-reimagining-surfaces` → `main` after review passes.
 
+
+## [CLAUDE] 2026-06-20 — Reviewed Kimi's remove-pre-reimagining-surfaces execution
+
+Reviewed `feat/remove-pre-reimagining-surfaces` (commits `109e92b`..`534bbcc`) against `docs/superpowers/plans/2026-06-20-remove-pre-reimagining-surfaces.md`.
+
+**Ground truth (my run):**
+- Backend `uv run pytest -m "not integration"` → **691 passed / 0 failed / 1 skipped** (Kimi reported 688/3 — env tesseract diff, immaterial).
+- Web `npx tsc --noEmit` → 0; `next build` → 9 routes (was 14, −5 pages); `vitest` → 138 passed.
+- Grep guard clean; all KEEP-list deps intact; all planned deletions done.
+- Good catches: `test_aether_api.py` (misnamed — actually tested removed `/api/search`) correctly removed; `SearchResultsCard.tsx` dangling `/retrieval`→`/documents` link fixed.
+
+**Score: Overall 7/10** (Correctness 7, TDD 6, Scope 6, Cleanliness 9). Recorded in `documentation/scorecard.md` (Current Standing overwritten + Review Log entry appended).
+
+**Blocking issue — NOT merge-ready:** `tests/cloud/test_dashboard_api.py` was deleted wholesale (33 tests), but only 5 targeted removed routes (audit×2, costs×3). The other ~28 covered *surviving* endpoints — login/me/logout/documents/`/metrics`/doc+page detail/ingest/requeue/reclassify/eval-queue/eval-correction/bookmarks + **RBAC role guards** — and are not covered elsewhere (`test_dashboard_session.py` only tests token logic). Violates the plan's Task 3 Step 5 ("delete that *specific test*").
+
+**Next (KIMI):** restore `test_dashboard_api.py` minus only the 5 removed-route tests (`test_audit_returns_rows`, `test_audit_forwards_result_filter`, `test_costs_returns_summary_and_breakdowns`, `test_cost_events_forwards_stage_and_limit`, `test_costs_requires_auth`); re-run backend suite. Then merge to `main`.
