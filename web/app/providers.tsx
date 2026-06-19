@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { ActionBarProvider } from "./action-bar";
 import { AccessibilityProvider } from "@/lib/accessibility";
+import { ThemeProvider } from "@/lib/theme";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: 1 } },
@@ -36,9 +37,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={qc}>
       <ToastContext.Provider value={value}>
-        <AccessibilityProvider>
-          <ActionBarProvider>{children}</ActionBarProvider>
-        </AccessibilityProvider>
+        <ThemeProvider>
+          <AccessibilityProvider>
+            <ActionBarProvider>{children}</ActionBarProvider>
+          </AccessibilityProvider>
+        </ThemeProvider>
       </ToastContext.Provider>
     </QueryClientProvider>
   );

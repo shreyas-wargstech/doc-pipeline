@@ -19,6 +19,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: `
               (function() {
                 try {
+                  var t = localStorage.getItem('docintel:theme') || 'system';
+                  var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                  if (t === 'dark' || (t === 'system' && prefersDark)) {
+                    document.documentElement.classList.add('dark');
+                  }
                   if (localStorage.getItem('docintel:high-contrast') === 'true') {
                     document.documentElement.classList.add('high-contrast');
                   }
