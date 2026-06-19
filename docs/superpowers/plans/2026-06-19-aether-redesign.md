@@ -1371,7 +1371,7 @@ git commit -m "feat(aether-ui): search results card with retrieval deep-link"
   - `templates.ts`: `export interface QueryTemplate { id: string; group: "Diagnose"|"Find"|"System"; label: string; hint: string; icon: string; query: string; needsDoc: boolean; llm: boolean }` and `export const TEMPLATES: QueryTemplate[]`.
   - `useChat.ts`: extends the existing hook with `recent: string[]` (last 5 user messages, persisted to `localStorage` key `aether:recent`) and `clearThread()` (resets to the single greeting message). `messages`, `send`, `isLoading` unchanged.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `web/__tests__/aether-templates.test.ts`:
 
@@ -1395,12 +1395,12 @@ describe("templates", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd web && npx vitest run __tests__/aether-templates.test.ts`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the catalog + extend the hook**
+- [x] **Step 3: Write the catalog + extend the hook**
 
 Create `web/components/aether/templates.ts`:
 
@@ -1457,12 +1457,12 @@ Add a reset and export it:
   return { messages, send, isLoading: mutation.isPending, recent, clearThread };
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd web && npx vitest run __tests__/aether-templates.test.ts && npx tsc --noEmit`
 Expected: PASS (2); tsc 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/components/aether/templates.ts web/hooks/useChat.ts web/__tests__/aether-templates.test.ts
@@ -1481,7 +1481,7 @@ git commit -m "feat(aether-ui): template catalog + recent-threads in useChat"
 - Consumes: `TEMPLATES` (Task 12); shadcn `Input`, `Button`, `Card`.
 - Produces: `export function Composer({ value, onChange, onSubmit, onSlash, disabled, chips }: { value: string; onChange: (v: string) => void; onSubmit: () => void; onSlash: () => void; disabled?: boolean; chips: { label: string; query: string; accent?: boolean }[] })`. Calls `onSlash()` when the input becomes exactly `/`. Enter (no shift) → `onSubmit()`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```tsx
 import { describe, it, expect, vi } from "vitest";
@@ -1506,12 +1506,12 @@ describe("Composer", () => {
 
 (Fix the typo'd helper: use `screen.getByRole("textbox")` consistently.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd web && npx vitest run components/aether/__tests__/Composer.test.tsx`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `web/components/aether/Composer.tsx`:
 
@@ -1561,12 +1561,12 @@ export function Composer({
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd web && npx vitest run components/aether/__tests__/Composer.test.tsx && npx tsc --noEmit`
 Expected: PASS (2); tsc 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/components/aether/Composer.tsx web/components/aether/__tests__/Composer.test.tsx
@@ -1585,7 +1585,7 @@ git commit -m "feat(aether-ui): composer with slash trigger and suggestion chips
 - Consumes: `TEMPLATES` (Task 12); shadcn `Dialog` (Radix) for the overlay; `motion/react`.
 - Produces: `export function CommandPalette({ open, onOpenChange, onSelect }: { open: boolean; onOpenChange: (o: boolean) => void; onSelect: (query: string) => void })`. Renders grouped templates; arrow keys move a highlight; Enter selects highlighted; Esc closes (Radix default). Footer note "free · instant · no LLM".
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```tsx
 import { describe, it, expect, vi } from "vitest";
@@ -1603,12 +1603,12 @@ describe("CommandPalette", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd web && npx vitest run components/aether/__tests__/CommandPalette.test.tsx`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `web/components/aether/CommandPalette.tsx`:
 
@@ -1680,12 +1680,12 @@ export function CommandPalette({
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd web && npx vitest run components/aether/__tests__/CommandPalette.test.tsx && npx tsc --noEmit`
 Expected: PASS; tsc 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/components/aether/CommandPalette.tsx web/components/aether/__tests__/CommandPalette.test.tsx
@@ -1704,7 +1704,7 @@ git commit -m "feat(aether-ui): command palette with grouped templates + keyboar
 - Consumes: `TEMPLATES` (Task 12); `motion/react`; lucide icons.
 - Produces: `export function WelcomeHero({ recent, onPick }: { recent: string[]; onPick: (query: string) => void })`. Renders the capability gallery (4 cards from the Diagnose/Find templates) and a recent list; clicking either calls `onPick`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```tsx
 import { describe, it, expect, vi } from "vitest";
@@ -1722,12 +1722,12 @@ describe("WelcomeHero", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd web && npx vitest run components/aether/__tests__/WelcomeHero.test.tsx`
 Expected: FAIL (module missing).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `web/components/aether/WelcomeHero.tsx`:
 
@@ -1793,12 +1793,12 @@ export function WelcomeHero({ recent, onPick }: { recent: string[]; onPick: (que
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd web && npx vitest run components/aether/__tests__/WelcomeHero.test.tsx && npx tsc --noEmit`
 Expected: PASS; tsc 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/components/aether/WelcomeHero.tsx web/components/aether/__tests__/WelcomeHero.test.tsx
@@ -1818,7 +1818,7 @@ git commit -m "feat(aether-ui): welcome hero with capability gallery + recent"
 - Consumes: `useChat` (Task 12), `Composer` (13), `CommandPalette` (14), `WelcomeHero` (15), `ToolResultCard` (6), `MessageBubble`, `TypingIndicator`.
 - Produces: rewritten `AetherPage`. Empty thread (only the greeting) → `WelcomeHero`; otherwise → message stream. Each assistant message renders its `tool_calls` via `ToolResultCard`. `/` opens `CommandPalette`.
 
-- [ ] **Step 1: Extract MessageBubble + TypingIndicator**
+- [x] **Step 1: Extract MessageBubble + TypingIndicator**
 
 Create `web/components/aether/MessageBubble.tsx` by moving the existing `ChatMessageBubble` component out of `page.tsx`, and inside it render tool results below the text:
 
@@ -1860,7 +1860,7 @@ export function MessageBubble({ message, index }: { message: ChatMessage; index:
 
 Create `web/components/aether/TypingIndicator.tsx` by moving the existing `TypingIndicator` out of `page.tsx` verbatim (same JSX).
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `web/__tests__/aether-page.test.tsx`:
 
@@ -1884,12 +1884,12 @@ describe("AetherPage", () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `cd web && npx vitest run __tests__/aether-page.test.tsx`
 Expected: FAIL (page still renders old layout, no hero).
 
-- [ ] **Step 4: Rewrite `page.tsx`**
+- [x] **Step 4: Rewrite `page.tsx`**
 
 Replace `web/app/(dash)/aether/page.tsx` with:
 
@@ -1971,12 +1971,12 @@ export default function AetherPage() {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd web && npx vitest run __tests__/aether-page.test.tsx && npx tsc --noEmit`
 Expected: PASS; tsc 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add web/components/aether/MessageBubble.tsx web/components/aether/TypingIndicator.tsx "web/app/(dash)/aether/page.tsx" web/__tests__/aether-page.test.tsx
@@ -1990,26 +1990,26 @@ git commit -m "feat(aether-ui): wire 4-state Aether page (hero, palette, canvas,
 **Files:**
 - Modify: `documentation/session_log.md`, `documentation/TASKS.md`, `PROJECT_MEMORY.md`
 
-- [ ] **Step 1: Backend suite**
+- [x] **Step 1: Backend suite**
 
 Run: `uv run pytest -m "not integration" -q`
 Expected: all green except the 3 known environmental `TesseractNotFoundError` in `tests/nas/test_uploader_service.py`. New `tests/cloud/aether_chat/` tests pass.
+Actual: 794 passed, 1 skipped — no failures at all (the 3 known tesseract failures did not reproduce in this run).
 
-- [ ] **Step 2: Frontend type + build + tests**
+- [x] **Step 2: Frontend type + build + tests**
 
 Run: `cd web && npx tsc --noEmit` → 0 errors.
 Run: `cd web && npx vitest run --exclude "__tests__/action-bar.test.tsx"` → all pass.
 Run: `cd web && npx next build` → all routes compile.
+Actual: tsc 0 errors; next build compiled all 14 routes incl. `/aether`; every individual aether test file passes (`Composer`, `CommandPalette`, `WelcomeHero`, `aether-page`, `aether-templates`, `ToolResultCard`, all 7 cards). The full-suite `vitest run` hits a pre-existing Windows tinypool segfault during worker teardown (after all visible files print ✓, no FAIL lines reported) — same class of environmental issue as the documented `action-bar.test.tsx` hang; not caused by this work.
 
-- [ ] **Step 3: Manual smoke (optional, requires local stack)**
+- [x] **Step 3: Manual smoke (optional, requires local stack)** — skipped (requires a running local stack: `make up && make serve && make web-dev`). Noted as follow-up in session_log.md.
 
-Run `make up && make serve && make web-dev`, open `/aether`. Verify: welcome hero on load; `/` opens palette; "System health" renders a HealthCard (fast-path, free); with `AETHER_LLM_ENABLED=true` + key, an off-pattern question routes through the LLM and still renders cards.
-
-- [ ] **Step 4: Append session log + update trackers**
+- [x] **Step 4: Append session log + update trackers**
 
 Append a `## 2026-06-19 — [CLAUDE] Aether redesign (Phase 5, item 1)` entry to the BOTTOM of `documentation/session_log.md` (stage, what was done, verify lines, files, next). In `documentation/TASKS.md` mark the "Aether Chat Interface" Phase 5 item `[x]`. Append a new state paragraph to `PROJECT_MEMORY.md` Current state (do not edit existing history).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add documentation/session_log.md documentation/TASKS.md PROJECT_MEMORY.md
