@@ -140,7 +140,6 @@ Parameters:
 
 Globals:
   Function:
-    Runtime: python3.13
     Timeout: 60
     MemorySize: 1024
     Architectures:
