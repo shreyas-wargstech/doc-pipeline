@@ -40,6 +40,7 @@ INTENT_PATTERNS: list[tuple[str, list[str]]] = [
     ("identity", [r"identity", r"consistency", r"match", r"verify", r"who is this"]),
     ("inspector", [r"inspector", r"pipeline", r"stage", r"progress", r"where is it"]),
     ("health", [r"health", r"status", r"system", r"how is the engine", r"engine room"]),
+    ("search", [r"find all pages", r"^find\b", r"^search\b", r"look up", r"find document"]),
 ]
 
 
@@ -180,6 +181,16 @@ async def chat(message: str, document_id: str | None = None) -> ChatResponse:
         for check in result.get("checks", []):
             lines.append(f"- {check['name']}: {check['status']} ({check['detail']})")
         return ChatResponse(content="\n".join(lines), tool_calls=tool_calls)
+
+    # --- Search --------------------------------------------------------------
+    if intent == "search":
+        try:
+            result = await tool_search(message)
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("search", result))
+        total = result.get("total", 0)
+        return ChatResponse(content=f"Found {total} matching page(s).", tool_calls=tool_calls)
 
     # --- No fast-path intent matched ---------------------------------------
     settings = get_settings()

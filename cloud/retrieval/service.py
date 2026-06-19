@@ -209,14 +209,14 @@ async def _vector_search(
         vector = model.encode(intent.raw).tolist()
 
         client = get_qdrant()
-        results = await client.search(
+        results = await client.query_points(
             collection_name=s.qdrant_collection,
-            query_vector=vector,
+            query=vector,
             limit=limit,
         )
 
         hits: list[RetrievalHit] = []
-        for r in results:
+        for r in results.points:
             hits.append(
                 explain_vector_hit(
                     document_id=r.payload.get("document_id", ""),

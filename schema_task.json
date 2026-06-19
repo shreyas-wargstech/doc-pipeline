@@ -1,8 +1,0 @@
-{
-  "containerOverrides": [
-    {
-      "name": "api",
-      "command": ["uv", "run", "python", "-m", "scripts.apply_schema"]
-    }
-  ]
-}

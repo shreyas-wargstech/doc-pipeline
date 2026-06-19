@@ -14,6 +14,16 @@ async def test_fast_path_health_still_works():
 
 
 @pytest.mark.asyncio
+async def test_fast_path_search_still_works():
+    fake = {"kind": "search", "hits": [{"document_id": "abc"}], "total": 1}
+    with patch.object(service, "tool_search", new=AsyncMock(return_value=fake)) as ts:
+        resp = await service.chat("Find all pages for NAINSI RAMESH GUPTA")
+    ts.assert_awaited_once_with("Find all pages for NAINSI RAMESH GUPTA")
+    assert resp.tool_calls[0].tool == "search"
+    assert resp.tool_calls[0].result["kind"] == "search"
+
+
+@pytest.mark.asyncio
 async def test_unmatched_flag_off_returns_help():
     with patch.object(service, "get_settings") as gs:
         gs.return_value.aether_llm_enabled = False
