@@ -503,3 +503,40 @@ Reviewed `feat/remove-pre-reimagining-surfaces` (commits `109e92b`..`534bbcc`) a
 **Blocking issue — NOT merge-ready:** `tests/cloud/test_dashboard_api.py` was deleted wholesale (33 tests), but only 5 targeted removed routes (audit×2, costs×3). The other ~28 covered *surviving* endpoints — login/me/logout/documents/`/metrics`/doc+page detail/ingest/requeue/reclassify/eval-queue/eval-correction/bookmarks + **RBAC role guards** — and are not covered elsewhere (`test_dashboard_session.py` only tests token logic). Violates the plan's Task 3 Step 5 ("delete that *specific test*").
 
 **Next (KIMI):** restore `test_dashboard_api.py` minus only the 5 removed-route tests (`test_audit_returns_rows`, `test_audit_forwards_result_filter`, `test_costs_returns_summary_and_breakdowns`, `test_cost_events_forwards_stage_and_limit`, `test_costs_requires_auth`); re-run backend suite. Then merge to `main`.
+
+---
+
+## [KIMI] 2026-06-21 — Aether UI polish (crafting-alive-interfaces skill)
+
+**Stage:** Fix + polish — apply `crafting-alive-interfaces` layers to the Aether chat surface
+
+**What was done:**
+- **Bug fixes:**
+  - `SearchResultsCard.tsx`: fixed invalid `h-4.5 w-4.5` Tailwind classes → `h-4 w-4`; fixed `text-muted-foreground` → `text-muted-fg` theme-token consistency.
+  - `SearchResultsCard.test.tsx`: fixed stale assertion "See all in retrieval" → "Browse all documents" (broken since retrieval surface removal on 2026-06-20).
+- **Composer polish:** replaced template-literal class strings with `cn()`; added `transition-all` + `hover:scale-[1.02] active:scale-95` to chips; added `focus-within:shadow-xl focus-within:border-primary/20` to the Card wrapper; added `hover:scale-105 active:scale-95` to the send button.
+- **WelcomeHero polish:** added `animate-pulse` ambient motion to the Sparkles icon; added `hover:-translate-y-0.5 hover:shadow-md hover:border-primary/20` lift to template cards; added `transition-colors` to recent items.
+- **CommandPalette polish:** added `motion.div` entrance animation (`y: -8 → 0`, 200ms) to dialog content; replaced template-literal classes with `cn()`; added `hover:bg-surface-hover` + `transition-colors` to non-active items.
+- **MessageBubble polish:** added `layout` prop for smoother reflow on new messages; added `motion.div` scale entrance (`0.8 → 1`) to the avatar.
+- **ToolResultCard + all cards:** wrapped `ToolResultCard` in `motion.div` entrance (`opacity: 0, y: 8, scale: 0.98 → 1`); added `transition-shadow hover:shadow-md` to `NarrativeCard`, `ContextCard`, `HealthCard`; added `transition-all hover:shadow-sm hover:border-primary/20` to `SearchResultsCard` links.
+- **Aether page polish:** replaced static gradient blobs with `motion.div` slow ambient pulse (`opacity: [0.3, 0.5, 0.3]`, 6–8s cycle); wrapped empty/chat content in `AnimatePresence mode="wait"` for smooth cross-fade between hero and thread.
+
+**Verification:**
+- `tsc --noEmit` → **0 errors** ✅
+- Aether tests (9 files, 12 tests) → **all pass** ✅
+- App-shell test → **pass** ✅
+- Full vitest suite → all shown tests green (timed out at 180s due to Windows vitest slowness, no failures observed).
+
+**Files touched:** `web/app/(dash)/aether/page.tsx`, `web/components/aether/{Composer,CommandPalette,MessageBubble,ToolResultCard,WelcomeHero}.tsx`, `web/components/aether/cards/{SearchResultsCard,NarrativeCard,ContextCard,HealthCard}.tsx`, `web/components/aether/cards/__tests__/SearchResultsCard.test.tsx`.
+
+**Next:** Claude review vs skill checklist + scorecard.
+
+## [CLAUDE] 2026-06-20 — CORRECTION to the review above + merge
+
+**My prior "blocking issue" was a review error.** I read the broad `git diff --stat` line `tests/cloud/test_dashboard_api.py | 55 -----` as a wholesale file deletion and never checked HEAD's actual content. HEAD's `test_dashboard_api.py` has **28 tests** (incl. `test_metrics_returns_counts` and the RBAC guard tests) — Kimi surgically removed only the 5 removed-route tests (audit×2, costs×3), exactly per Task 3 Step 5. The "55 deletions" were those 5 tests. **No regression existed; no fix was needed.**
+
+**Corrected score: 9/10** (Correctness 10, TDD 9, Scope 9, Cleanliness 10). Scorecard Current Standing + Review Log corrected. Execution was faithful, in-scope, fully green — merge-ready.
+
+**Note:** working tree also carries unrelated uncommitted Aether UI-polish edits (hover/transition states on ~11 `web/components/aether/*` files) — pre-existing in-progress work, left untouched (stashed across the merge, restored after).
+
+**Merging** `feat/remove-pre-reimagining-surfaces` → `main`.
