@@ -172,3 +172,51 @@
 - `web/__tests__/document-detail.test.tsx`, `web/__tests__/document-overview.test.tsx`, `web/__tests__/app-shell.test.tsx`
 
 **Next:** Next.js `next build` full verification (timed out in this environment, but tsc clean). Backend full suite verification. AWS e2e smoke test.
+
+## 2026-06-19 — [CLAUDE] Aether redesign (Phase 5, item 1)
+
+**Stage:** Frontend feature build-out — Aether Chat Interface, full redesign per
+`docs/superpowers/specs/2026-06-19-aether-redesign-design.md` and
+`docs/superpowers/plans/2026-06-19-aether-redesign.md` (17 TDD tasks, all complete).
+
+**What was done:**
+- **Backend** — extracted the 6 existing Aether intent handlers into 7 independently callable
+  tool functions (`cloud/aether_chat/tools.py`, incl. new `tool_search` wrapping
+  `retrieve_documents`), each returning a `kind`-discriminated dict. `service.py` orchestrator
+  now: fast-path regex → gated LLM tool-calling fallback (`cloud/aether_chat/llm.py`, bounded
+  4-iteration loop over the 7 tools, cost-tracked via `shared.llm_usage.chat_completion` under
+  site `aether_llm`) → static help. New `aether_llm_enabled` config flag (default `False`) in
+  `shared/config.py`; HTTP envelope `{role, content, tool_calls[]}` unchanged.
+- **Frontend** — typed `ToolResult` discriminated union (`web/lib/types.ts`); discriminated
+  `ToolResultCard` renderer with unknown-kind fallback; 7 purpose-built cards (Autopsy,
+  Narrative, Context, Identity w/ SVG consistency gauge, Inspector w/ horizontal pipeline rail,
+  Health status grid, SearchResults w/ retrieval deep-link); template catalog
+  (`templates.ts`) + `useChat` recent-threads (localStorage); `Composer` (slash trigger +
+  chips); `CommandPalette` (grouped templates, keyboard nav, Radix `Dialog`); `WelcomeHero`
+  (capability gallery + recent); `MessageBubble`/`TypingIndicator` extracted from the old
+  page; `/aether` page rewritten to orchestrate the 4 states (welcome / palette / canvas /
+  cards).
+
+**Verify:**
+- `uv run pytest -m "not integration" -q` → **794 passed, 1 skipped** ✅ (incl. new
+  `tests/cloud/aether_chat/{test_tools,test_service,test_llm}.py`)
+- `cd web && npx tsc --noEmit` → **0 errors** ✅
+- `cd web && npx next build` → all 14 routes compile, incl. `/aether` ✅
+- `cd web && npx vitest run <each new aether test file>` → all green individually. A
+  full-suite `vitest run` hits a pre-existing Windows tinypool segfault on worker teardown
+  (after all visible test files print ✓, no FAIL lines) — same class of environmental issue
+  noted for `action-bar.test.tsx`; not caused by this work.
+
+**Files touched:** `cloud/aether_chat/{tools,llm}.py` (new), `cloud/aether_chat/service.py`,
+`shared/config.py`, `.env.example`, `tests/cloud/aether_chat/*` (new),
+`web/lib/types.ts`, `web/hooks/useChat.ts`,
+`web/components/aether/{templates,Composer,CommandPalette,WelcomeHero,MessageBubble,TypingIndicator,ToolResultCard}.tsx`,
+`web/components/aether/cards/*.tsx` (new), `web/app/(dash)/aether/page.tsx`,
+`web/__tests__/aether-{templates,page}.test.ts(x)`,
+`web/components/aether/__tests__/*`, `web/components/aether/cards/__tests__/*`.
+
+**Next:** Manual smoke test against a running local stack (`make up && make serve && make
+web-dev`, open `/aether`, verify hero/palette/cards, then flip `AETHER_LLM_ENABLED=true` with
+an OpenRouter key to confirm the LLM fallback path also renders cards) — not run in this
+session (requires local stack). Engine Room and Document Autopsy redesigns remain separate
+Phase 5 items.

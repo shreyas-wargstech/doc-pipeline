@@ -42,7 +42,7 @@
 > local `main` outside the numbered phases (warm-editorial redesign, document viewer,
 > admin/RBAC, retrieval search UI, observability) — this phase covers what remains.
 
-- [ ] Aether Chat Interface — search bar + autocomplete, template query parsing, card results, "show all pages of this person" (frontend + backend API)
+- [x] Aether Chat Interface — search bar + autocomplete, template query parsing, card results, "show all pages of this person" (frontend + backend API) — redesigned 2026-06-19: conversational canvas, typed result cards, command palette, welcome hero, default-off LLM-tool fallback
 - [ ] Engine Room v1 full UI — frontend controls for pipeline run (start/stop/pause/resume), stage inspector, parameter tuner, A/B test, system health
 - [ ] Document Autopsy mode — template-based explanation for every failed/manual_review doc (explanation-only, no heatmap)
 
