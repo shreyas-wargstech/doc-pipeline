@@ -35,10 +35,10 @@ const config: Config = {
         mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
       },
       boxShadow: {
-        sm: "0 1px 2px rgba(60,45,25,0.04)",
-        md: "0 4px 12px -4px rgba(60,45,25,0.10)",
-        lg: "0 10px 30px -12px rgba(60,45,25,0.16)",
-        xl: "0 24px 60px -24px rgba(60,45,25,0.28)",
+        sm: "0 1px 2px rgb(var(--color-shadow) / 0.04)",
+        md: "0 4px 12px -4px rgb(var(--color-shadow) / 0.10)",
+        lg: "0 10px 30px -12px rgb(var(--color-shadow) / 0.16)",
+        xl: "0 24px 60px -24px rgb(var(--color-shadow) / 0.28)",
       },
       borderRadius: {
         base: "8px",
