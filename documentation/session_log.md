@@ -458,6 +458,32 @@ Reviewed `feat/dark-mode` (commits 1052c9b, e4cb76b, e512dfb) against `docs/supe
 - Manual verification still pending (open running app: toggle cycle, dark palette, OS-follow, no-FOUC, high-contrast-wins) — needs `make web-dev`.
 - Merge `feat/dark-mode` → `main` after manual pass.
 
-## [CLAUDE] 2026-06-20 — dark-mode manual verification PASS
+## [KIMI] 2026-06-20 — Remove pre-reimagining surfaces (Retrieval, Pipelines, Observability, metrics/audit)
 
-User confirmed in running app: theme toggle cycles + recolors dark palette, high-contrast still wins. Manual checklist done. `feat/dark-mode` is review-passed + manually verified → ready to merge to `main`.
+**Stage:** Cleanup — remove superseded surfaces now replaced by Aether + Engine Room
+
+**What was done:**
+- **Task 1 — Retrieval surface removed:** deleted `web/app/(dash)/retrieval/`, `web/components/retrieval/`, `web/hooks/useSearch.ts`, `cloud/retrieval/api.py`, `cloud/retrieval/fast_query_parser.py`, `cloud/retrieval/suggestions.py`, `cloud/retrieval/redis_suggestions.py`, plus all associated tests. Removed `/retrieve` endpoint and `retrieval_api` router from `cloud/app.py`.
+- **Task 2 — Pipelines surface removed:** deleted `web/app/(dash)/pipelines/`, `web/components/pipelines/`, `web/hooks/useRunPipeline.ts`, `cloud/pipeline_run/` package (6 modules), plus all associated tests. Removed `pipeline_run_api` router from `cloud/app.py`.
+- **Task 3 — Observability + orphan metrics/audit removed:** deleted `web/app/(dash)/observability/`, `web/app/(dash)/metrics/`, `web/app/(dash)/audit/`, `AuditActivity.tsx`, `AuditDetailDrawer.tsx`, `AuditTable.tsx`, `MetricBar.tsx`, `CostSection.tsx`, `useAudit.ts`, `useCosts.ts`, plus associated tests. Removed `/api/audit`, `/api/costs`, `/api/costs/events` routes from `cloud/dashboard/api.py`. Deleted `cloud/dashboard/cost_queries.py`.
+- **Task 4 — Nav trimmed + dead types pruned:** `AppShell.tsx` nav reduced from 9 → 6 items (Documents, Bookmarks, Evaluation, Engine Room, Aether, Admin). Removed unused `GitBranch`/`Search`/`Activity` lucide imports. Updated `app-shell.test.tsx` to 6 nav groups + absence assertions. Pruned dead types from `web/lib/types.ts`: `AuditRow`, `AuditResponse`, `CostSummary`, `CostBreakdownEntry`, `CostsResponse`, `CostEventRow`, `CostEventsResponse`, `RunItemStatus`, `RunStatus`, `RunItem`, `RunState`, `RunEvent`, `RetrievalHit`, `SearchResponse`, `SearchPageHit`, `SearchPagesResponse`. Also deleted `pipeline-reducer.ts` + test. Fixed `SearchResultsCard.tsx` link from `/retrieval` → `/documents`.
+
+**What was kept (surviving dependencies):**
+- `cloud/retrieval/service.py`, `cloud/retrieval/query_parser.py`, `cloud/retrieval/explainer.py` — Aether's `tool_search` imports these.
+- `cloud/dashboard/audit.py` — write path used by `_audit` helper across surviving mutations.
+- `GET /api/metrics` — Documents home page uses `useMetrics` + `KpiCard` + `Filters`.
+- `cloud/engine_room/` + Engine Room endpoints, Aether, eval, documents, bookmarks, autopsy, narrative, identity, admin/RBAC all untouched.
+
+**Accepted gap:** No UI folder-run control remains (Pipelines page deleted). Folder runs revert to `make` commands until/unless a "start run" control is later added to Engine Room.
+
+**Verification:**
+- Backend: **688 passed / 3 failed** (3 pre-existing `TesseractNotFoundError` environmental failures in `tests/nas/test_uploader_service.py` — not caused by this work). No new failures.
+- Web tsc: **0 errors** ✅
+- Web `next build`: **10/10 routes compiled** ✅ (was 14, removed 5 pages, added 1 net change from prior state)
+- Web vitest: **46 test files passed, 138 tests passed** ✅
+- Grep guard: **clean** — no dangling references to deleted surfaces.
+
+**Files touched (major):** `cloud/app.py`, `cloud/dashboard/api.py`, `web/components/AppShell.tsx`, `web/lib/types.ts`, `web/__tests__/app-shell.test.tsx`, 20+ deleted files across frontend/backend/test.
+
+**Next:** Claude review vs spec + scorecard. Merge `feat/remove-pre-reimagining-surfaces` → `main` after review passes.
+

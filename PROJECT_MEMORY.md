@@ -92,6 +92,8 @@ Full pipeline end-to-end (ingest→classify→OCR→structure→match→persist�
 
 **Aether redesign — COMPLETE on local `feat/aether-redesign` (2026-06-19), all 17 tasks of `docs/superpowers/plans/2026-06-19-aether-redesign.md`:** the old zero-LLM-only Aether chat is now a conversational canvas. Backend: 6 existing intent handlers extracted into `cloud/aether_chat/tools.py` (7 `kind`-discriminated tool functions, incl. new `tool_search`); orchestrator (`service.py`) is fast-path regex → gated LLM tool-calling fallback (`cloud/aether_chat/llm.py`, bounded 4-iteration loop, cost-tracked under `cost_events` site `aether_llm`) → static help; new `aether_llm_enabled` flag (default `False`) in `shared/config.py`. HTTP envelope unchanged. Frontend: typed `ToolResult` union + discriminated `ToolResultCard` (unknown-kind fallback); 7 cards (Autopsy/Narrative/Context/Identity-w/-SVG-gauge/Inspector-w/-pipeline-rail/Health-grid/SearchResults); template catalog + `useChat` recent-threads; `Composer`/`CommandPalette`/`WelcomeHero`; `/aether` page rewritten for the 4 states (welcome/palette/canvas/cards). Verified: backend 794 passed/1 skipped, `tsc` 0, `next build` 14/14 routes incl. `/aether`. Engine Room and Document Autopsy redesigns remain separate Phase 5 items.
 
+**Pre-reimagining surfaces REMOVED 2026-06-20 (branch `feat/remove-pre-reimagining-surfaces`):** Retrieval search UI, Pipelines folder-runner, Observability page, and orphan metrics/audit pages all deleted (frontend + backend). Nav trimmed to 6 items. Surviving dependencies preserved: `cloud/retrieval/service.py` + `query_parser.py` for Aether `tool_search`, `/api/metrics` for Documents home, `audit.py` write path. Accepted gap: no UI folder-run (reverts to `make`). Backend 688 pass / 3 pre-existing tesseract failures. Web tsc 0, next build 10/10 routes, vitest 138 pass. Ready for Claude review + merge.
+
 > Per-stage durable detail (gotchas, signatures, txn models) lives in **`session_log.md`** (`Key X facts` were migrated there) and the **code**. This file keeps only cross-cutting facts + active threads. Treat `make test` as ground truth.
 
 Cross-cutting facts (bitten — remember):
@@ -125,3 +127,13 @@ Local run needs: tesseract on PATH (`eng+mar+hin`+`osd`); `make up` (elasticmq +
 - Reference dataset fits in memory (~92K rows ok).
 - One document per run; batch orchestration handled by SQS/Lambda.
 - Minutes-per-document latency fine. Not real-time.
+
+## Agent review & scoring loop (2026-06-20)
+
+Two-agent workflow with a quality feedback loop:
+
+- **Claude = Architect** (`CLAUDE.md`): designs, plans, writes specs, **reviews + scores Kimi's executions**.
+- **Kimi = Executor** (`AGENTS.md`): implements/tests/deploys the plans.
+- **Loop:** user hands an execution job to Kimi → Kimi implements → Claude verifies against the spec/plan + `make test`, scores 0–10 on Correctness / TDD-Test-discipline / Scope-adherence / Code-cleanliness (+ holistic Overall + verdict) → records it in `documentation/scorecard.md` → Kimi reads **Current Standing** at the start of its next job and applies the improvement asks.
+- **`documentation/scorecard.md`** is the persistent ledger. Claude writes it; Kimi reads it (never edits). Rubric + template live in that file.
+- Note: `CLAUDE.md` still carries its blanket "do NOT modify AGENTS.md" rule; the one-time AGENTS.md edit that wired this loop in was an explicit user override, rule intentionally left unchanged.
