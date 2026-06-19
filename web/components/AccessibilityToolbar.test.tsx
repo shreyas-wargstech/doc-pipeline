@@ -1,10 +1,33 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AccessibilityToolbar } from "./AccessibilityToolbar";
 import { AccessibilityProvider } from "@/lib/accessibility";
+import { ThemeProvider } from "@/lib/theme";
+
+beforeEach(() => {
+  document.documentElement.classList.remove("dark");
+  vi.stubGlobal("localStorage", { getItem: vi.fn(() => null), setItem: vi.fn() });
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({
+      matches: false,
+      media: "(prefers-color-scheme: dark)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      onchange: null,
+    }))
+  );
+});
 
 function renderWithProvider(ui: React.ReactNode) {
-  return render(<AccessibilityProvider>{ui}</AccessibilityProvider>);
+  return render(
+    <ThemeProvider>
+      <AccessibilityProvider>{ui}</AccessibilityProvider>
+    </ThemeProvider>
+  );
 }
 
 describe("AccessibilityToolbar", () => {
@@ -43,5 +66,16 @@ describe("AccessibilityToolbar", () => {
   it("group has accessibility label", () => {
     renderWithProvider(<AccessibilityToolbar />);
     expect(screen.getByRole("group", { name: "Accessibility controls" })).toBeInTheDocument();
+  });
+
+  it("renders the theme toggle starting in system mode", () => {
+    renderWithProvider(<AccessibilityToolbar />);
+    expect(screen.getByRole("button", { name: "Theme: system" })).toBeInTheDocument();
+  });
+
+  it("cycling the theme button advances system -> light", () => {
+    renderWithProvider(<AccessibilityToolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Theme: system" }));
+    expect(screen.getByRole("button", { name: "Theme: light" })).toBeInTheDocument();
   });
 });

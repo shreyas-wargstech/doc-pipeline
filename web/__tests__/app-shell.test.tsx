@@ -20,6 +20,11 @@ vi.mock("@/lib/accessibility", () => ({
   AccessibilityProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("@/lib/theme", () => ({
+  useTheme: () => ({ theme: "system", resolvedTheme: "light", cycleTheme: vi.fn() }),
+  ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 describe("AppShell", () => {
   it("renders all nine top-level nav groups", () => {
     usePathname.mockReturnValue("/");
