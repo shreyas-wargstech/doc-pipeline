@@ -8,13 +8,15 @@ import { ToolResultCard } from "@/components/aether/ToolResultCard";
 export function MessageBubble({ message, index }: { message: ChatMessage; index: number }) {
   const isUser = message.role === "user";
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+    <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.03, duration: 0.25, ease: "easeOut" }}
       className={cn("flex items-start gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
-      <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-        isUser ? "bg-primary text-on-primary" : "bg-secondary text-on-secondary")}>
+      <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        transition={{ delay: index * 0.03 + 0.05, duration: 0.2, ease: "easeOut" }}
+        className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+          isUser ? "bg-primary text-on-primary" : "bg-secondary text-on-secondary")}>
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-      </div>
+      </motion.div>
       <div className={cn("min-w-0", isUser ? "max-w-[80%]" : "flex-1")}>
         {message.content && (
           <div className={cn("rounded-2xl px-4 py-2.5 text-sm leading-relaxed",

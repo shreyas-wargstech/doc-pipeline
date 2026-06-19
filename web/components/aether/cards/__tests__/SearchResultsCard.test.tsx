@@ -7,7 +7,7 @@ describe("SearchResultsCard", () => {
     render(<SearchResultsCard result={{ kind: "search", total: 1,
       hits: [{ document_id: "7c20bd99", document_type: "application", page_type: "form" }] }} />);
     expect(screen.getByText(/7c20bd99/)).toBeInTheDocument();
-    expect(screen.getByText(/See all in retrieval/i)).toBeInTheDocument();
+    expect(screen.getByText(/Browse all documents/i)).toBeInTheDocument();
   });
   it("renders an empty state", () => {
     render(<SearchResultsCard result={{ kind: "search", total: 0, hits: [] }} />);

@@ -13,7 +13,7 @@ function dot(status: string) {
 
 export function HealthCard({ result }: { result: Extract<ToolResult, { kind: "health" }> }) {
   return (
-    <Card className="border p-3">
+    <Card className="border p-3 transition-shadow duration-200 hover:shadow-md">
       <div className="flex items-center gap-2 mb-3">
         <Activity className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">System health</span>

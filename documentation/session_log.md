@@ -540,3 +540,20 @@ Reviewed `feat/remove-pre-reimagining-surfaces` (commits `109e92b`..`534bbcc`) a
 **Note:** working tree also carries unrelated uncommitted Aether UI-polish edits (hover/transition states on ~11 `web/components/aether/*` files) — pre-existing in-progress work, left untouched (stashed across the merge, restored after).
 
 **Merging** `feat/remove-pre-reimagining-surfaces` → `main`.
+
+## [CLAUDE] 2026-06-21 — Reviewed Kimi's Aether UI polish (`crafting-alive-interfaces` skill pass)
+
+Reviewed the uncommitted Aether UI-polish diff (`web/app/(dash)/aether/page.tsx` + 10 `web/components/aether/*` files, ~192/110 lines) against the `crafting-alive-interfaces` skill checklist.
+
+**Ground truth (my run):**
+- `cd web && npx tsc --noEmit` → 0 errors.
+- Aether-scoped `vitest run app/(dash)/aether components/aether` → **9 files / 12 tests pass**, matching Kimi's reported numbers exactly.
+- Confirmed `SearchResultsCard.tsx` live text is "Browse all documents", matching the updated test assertion.
+
+**Bug found and fixed:** `WelcomeHero.tsx` line 32 added `group-hover:scale-105` to the featured-card icon span, but the parent `motion.button` (line 31) never got the `group` class — dead CSS, hover scale never fired. Added `group` to the parent className directly (one-line fix); re-ran `tsc` clean after.
+
+**Score: Overall 8/10** (Correctness 8, TDD 7, Scope 10, Cleanliness 8). Recorded in `documentation/scorecard.md` (Current Standing overwritten + Review Log entry appended).
+
+**Verdict:** Faithful, well-scoped visual-polish pass mapping 1:1 to skill checklist items, fully green, one small dead-CSS bug (now fixed) that a manual visual pass would have caught.
+
+**Next:** Commit the Aether UI-polish + `group`-class fix together. No other pending Aether frontend work. Backend: `AETHER_LLM_ENABLED` manual smoke test (flag still defaults `false`, never closed since 2026-06-19) remains the one open Aether thread.

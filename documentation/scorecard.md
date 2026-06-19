@@ -19,11 +19,11 @@
 
 ## Current Standing
 
-**Latest overall:** 9/10 — remove-pre-reimagining-surfaces plan (2026-06-20). Faithful, in-scope, all green. Merge-ready. (My first-pass review wrongly flagged a test regression — corrected below; the execution was clean.)
+**Latest overall:** 8/10 — Aether UI polish, `crafting-alive-interfaces` skill (2026-06-21). Clean, in-scope, fully green, one dead-CSS bug (`group-hover` with no `group` ancestor).
 
 **Improvement asks for next job:**
-1. **Flag every out-of-plan file you touch by name in the handoff** — including the surgical test edits. You correctly removed only the 5 removed-route tests from `test_dashboard_api.py` (keeping 28, incl. RBAC) and deleted `test_aether_api.py`/`test_dashboard_cost_queries.py` (which targeted removed surface) — all correct, but the handoff said "plus all associated tests" generically. Naming each (with kept-test counts for mixed files) would have prevented a reviewer misread. Carries forward the prior ask.
-2. Keep the good instincts: the `SearchResultsCard` dangling `/retrieval`→`/documents` link fix, spotting that `test_aether_api.py` (misnamed) actually tested the removed `/api/search` routes, and the surgical `test_dashboard_api.py` excision were all exactly right.
+1. **Tailwind `group-hover:` needs a `group` class on the actual ancestor.** `WelcomeHero.tsx` line 31/32: the icon span uses `group-hover:scale-105` but the parent `motion.button` (line 31) was never given `className="... group ..."` — the hover scale never fires. Small, but it's dead code shipped as if it worked; grep for `group-hover:` and verify the matching `group` exists before calling a hover effect done.
+2. Keep doing: precise, minimal diffs that map 1:1 to skill checklist items (motion entrance, hover lift/scale, `cn()` over template-literal classes, focus-within states) — no scope creep, no unrelated refactors; the verification numbers in the handoff (9 files/12 tests, tsc 0) matched exactly on re-run.
 
 ---
 
@@ -56,3 +56,11 @@
 - Code cleanliness: 10/10 — Deletions clean, no dead code/dangling refs left, types pruned thoroughly, unused lucide icons removed, dangling `/retrieval` link repointed, handoff well-structured.
 - **Verdict:** Excellent, faithful, fully green cleanup with two genuinely good catches (misnamed `test_aether_api`, SearchResultsCard link) and a correct surgical test excision. Merge-ready. (Reviewer owes the −2 it briefly cost on a misread stat.)
 - **Do next time:** (1) name every out-of-plan file touched in the handoff — for mixed test files, state how many surviving tests you kept; (2) keep the dangling-link / misnamed-test / surgical-excision instincts.
+
+### 2026-06-21 — Aether UI polish, `crafting-alive-interfaces` skill (no formal plan doc; applied skill checklist to existing Aether surface) — Overall 8/10
+- Correctness: 8/10 — `tsc --noEmit` 0 errors (re-verified). Aether suite re-run: **9 files / 12 tests, all pass** (matches handoff exactly). `SearchResultsCard.test.tsx` assertion correctly updated to "Browse all documents", matching the live component text. **Bug found on review:** `WelcomeHero.tsx` adds `group-hover:scale-105` to the featured-card icon span (line 32) but the parent `motion.button` (line 31) was never given the `group` class — the hover scale is dead CSS, never fires. Everything else (motion entrance/exit, `AnimatePresence mode="wait"` cross-fade, ambient blob pulse, chip/button hover-scale, focus-within shadow) verified present and wired correctly.
+- TDD/Test discipline: 7/10 — This was a polish pass over existing covered surfaces, not new functionality, so no new tests were owed; the one stale assertion (`SearchResultsCard.test.tsx`) was correctly caught and fixed. Lost a point because the `group-hover` bug would have been caught by even a manual visual check, which wasn't reported as done.
+- Scope adherence: 10/10 — Every change traces to a `crafting-alive-interfaces` layer (entrance motion, micro-interaction hover/active states, ambient motion, `cn()` cleanup) and stays within the 12 files named in the handoff. No unrelated edits.
+- Code cleanliness: 8/10 — Consistent use of `cn()` over template-literal class strings, sensible transition durations, theme-token fix (`text-muted-foreground` → `text-muted-fg`) and Tailwind-class fix (`h-4.5`→`h-4`) folded in cleanly. The `group-hover` defect is the one cleanliness miss.
+- **Verdict:** Faithful, well-scoped visual-polish pass, fully green, one small but real dead-CSS bug shipped silently.
+- **Do next time:** (1) when adding any `group-hover:`/`group-focus:` utility, confirm the `group` class exists on the actual ancestor in the same diff; (2) call out in the handoff whether a manual visual pass (not just tsc/tests) was done for animation/hover-only changes, since those don't show up in any test.

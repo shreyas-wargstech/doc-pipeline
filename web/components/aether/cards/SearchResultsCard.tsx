@@ -13,11 +13,11 @@ export function SearchResultsCard({ result }: { result: Extract<ToolResult, { ki
       <div className="grid gap-2">
         {result.hits.map((h) => (
           <Link key={h.document_id} href={`/documents/${h.document_id}`}
-            className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 transition-colors hover:bg-surface-hover">
-            <FileText className="h-4.5 w-4.5 text-primary shrink-0" />
+            className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 transition-all duration-200 hover:bg-surface-hover hover:shadow-sm hover:border-primary/20">
+            <FileText className="h-4 w-4 text-primary shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-xs font-medium capitalize">{h.document_type ?? "document"}</div>
-              <div className="text-[11px] text-muted-foreground font-mono truncate">
+              <div className="text-[11px] text-muted-fg font-mono truncate">
                 {h.document_id.slice(0, 12)}…{h.page_type ? ` · ${h.page_type}` : ""}
               </div>
             </div>

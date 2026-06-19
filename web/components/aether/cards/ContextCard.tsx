@@ -7,7 +7,7 @@ import type { ToolResult } from "@/lib/types";
 export function ContextCard({ result }: { result: Extract<ToolResult, { kind: "context" }> }) {
   const related = result.related_documents ?? [];
   return (
-    <Card className="border p-3">
+    <Card className="border p-3 transition-shadow duration-200 hover:shadow-md">
       <div className="flex items-center gap-2 mb-2">
         <Link2 className="h-4 w-4 text-primary" />
         <span className="text-sm font-medium">Context</span>
