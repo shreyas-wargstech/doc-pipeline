@@ -329,10 +329,22 @@ export interface AutopsyReport {
 }
 
 // Chat / Aether
+export interface FieldAgreement { field: string; present_pages: number; total_pages: number; agree: boolean }
+export interface DocHit { document_id: string; document_type?: string | null; score?: number; page_type?: string; s3_key_pdf?: string }
+
+export type ToolResult =
+  | ({ kind: "autopsy" } & AutopsyReport)
+  | { kind: "narrative"; document_id: string; narrative: string }
+  | { kind: "context"; related_documents?: unknown[]; practitioner_history?: unknown }
+  | { kind: "identity"; consistency_score: number; summary?: string; fields?: FieldAgreement[] }
+  | { kind: "inspector"; overall_status: string; stages: InspectorStage[] }
+  | { kind: "health"; overall: string; checks: HealthCheck[] }
+  | { kind: "search"; hits: DocHit[]; total: number };
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
-  tool_calls?: { tool: string; result: unknown }[];
+  tool_calls?: { tool: string; result: ToolResult }[];
   timestamp: string;
 }
 export interface ChatRequest {
@@ -342,5 +354,5 @@ export interface ChatRequest {
 export interface ChatResponse {
   role: "assistant";
   content: string;
-  tool_calls?: { tool: string; result: unknown }[];
+  tool_calls?: { tool: string; result: ToolResult }[];
 }
