@@ -1,8 +1,8 @@
 """Aether Chat — zero-LLM intent router.
 
 Routes natural-language queries to existing pipeline services using regex
-intent matching. No API calls to OpenRouter or any LLM. All responses are
-derived from existing DB data through the existing service layer.
+intent matching. No API calls to OpenRouter or any LLM by default. All
+responses are derived from existing DB data through the existing service layer.
 """
 from __future__ import annotations
 
@@ -10,14 +10,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from cloud.autopsy.service import generate_autopsy
-from cloud.context.service import build_context
-from cloud.identity.intelligence import generate_consistency_report
-from cloud.narratives.service import generate_narrative, get_document_and_pages
-from cloud.engine_room.health import check_all
-from cloud.engine_room.inspector import inspect_document
-from cloud.ingest.storage_db import DocumentRepository, PageRepository
-from shared.db import session_scope
+from cloud.aether_chat.tools import (
+    ToolError, tool_autopsy, tool_context, tool_health,
+    tool_identity, tool_inspector, tool_narrative, tool_search,
+)
+from shared.config import get_settings
 from shared.logging import get_logger
 
 log = get_logger(__name__)
@@ -67,6 +64,20 @@ def _extract_doc_id(message: str) -> str | None:
     return None
 
 
+def _help_response() -> ChatResponse:
+    return ChatResponse(content=(
+        "I'm Aether, your pipeline assistant. I can help with:\n\n"
+        "- **Summary** — 'Summarize doc <id>'\n"
+        "- **Autopsy** — 'Why did doc <id> fail?'\n"
+        "- **Identity** — 'Verify identity of <id>'\n"
+        "- **Context** — 'Related docs for <id>'\n"
+        "- **Inspector** — 'Inspect <id>'\n"
+        "- **Search** — 'Find all pages for <name>'\n"
+        "- **Health** — 'System health'\n\n"
+        "Just mention a document ID and what you'd like to know."
+    ))
+
+
 async def chat(message: str, document_id: str | None = None) -> ChatResponse:
     """Process a chat message and return a response."""
     intent = _detect_intent(message)
@@ -82,16 +93,16 @@ async def chat(message: str, document_id: str | None = None) -> ChatResponse:
                 content="I can run an autopsy, but I need a document ID. Try: 'Why did doc abc123 fail?'"
             )
         try:
-            report = await generate_autopsy(target_doc_id)
-            tool_calls.append(ToolCall("autopsy", report.to_dict()))
-            lines = [f"**Autopsy for {target_doc_id[:16]}…**\n"]
-            for stage in report.stages:
-                lines.append(f"- **{stage.name}**: {stage.status} — {stage.detail}")
-            if report.recommendation:
-                lines.append(f"\n**Recommendation:** {report.recommendation}")
-            return ChatResponse(content="\n".join(lines), tool_calls=tool_calls)
-        except ValueError as exc:
-            return ChatResponse(content=f"Document not found: {exc}")
+            result = await tool_autopsy(target_doc_id)
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("autopsy", result))
+        lines = [f"**Autopsy for {target_doc_id[:16]}…**\n"]
+        for stage in result.get("stages", []):
+            lines.append(f"- **{stage['name']}**: {stage['status']} — {stage['detail']}")
+        if result.get("recommendation"):
+            lines.append(f"\n**Recommendation:** {result['recommendation']}")
+        return ChatResponse(content="\n".join(lines), tool_calls=tool_calls)
 
     # --- Narrative ---------------------------------------------------------
     if intent == "narrative":
@@ -99,12 +110,12 @@ async def chat(message: str, document_id: str | None = None) -> ChatResponse:
             return ChatResponse(
                 content="I can summarize a document, but I need its ID. Try: 'Summarize doc abc123'"
             )
-        doc, pages = await get_document_and_pages(target_doc_id)
-        if doc is None:
-            return ChatResponse(content="Document not found.")
-        narrative = await generate_narrative(doc, pages)
-        tool_calls.append(ToolCall("narrative", {"document_id": target_doc_id, "narrative": narrative}))
-        return ChatResponse(content=narrative, tool_calls=tool_calls)
+        try:
+            result = await tool_narrative(target_doc_id)
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("narrative", result))
+        return ChatResponse(content=result.get("narrative", ""), tool_calls=tool_calls)
 
     # --- Context -----------------------------------------------------------
     if intent == "context":
@@ -112,24 +123,15 @@ async def chat(message: str, document_id: str | None = None) -> ChatResponse:
             return ChatResponse(
                 content="I need a document ID to build context. Try: 'Context for doc abc123'"
             )
-        async with session_scope() as db:
-            doc = await DocumentRepository(db).get(target_doc_id)
-            if doc is None:
-                return ChatResponse(content="Document not found.")
-            college = doc.metadata_.get("college") if isinstance(doc.metadata_, dict) else None
-            exam_year = doc.metadata_.get("exam_year") if isinstance(doc.metadata_, dict) else None
-            ctx = await build_context(
-                db, target_doc_id,
-                registration_no=doc.registration_no,
-                applicant_name_raw=doc.applicant_name_raw,
-                college=college,
-                exam_year=exam_year,
-            )
-        tool_calls.append(ToolCall("context", ctx))
+        try:
+            result = await tool_context(target_doc_id)
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("context", result))
         parts = [f"**Context for {target_doc_id[:16]}…**"]
-        if ctx.get("related_documents"):
-            parts.append(f"Related documents: {len(ctx['related_documents'])}")
-        if ctx.get("practitioner_history"):
+        if result.get("related_documents"):
+            parts.append(f"Related documents: {len(result['related_documents'])}")
+        if result.get("practitioner_history"):
             parts.append("Practitioner history available.")
         return ChatResponse(content="\n".join(parts), tool_calls=tool_calls)
 
@@ -139,13 +141,14 @@ async def chat(message: str, document_id: str | None = None) -> ChatResponse:
             return ChatResponse(
                 content="I need a document ID to check identity. Try: 'Verify identity of abc123'"
             )
-        async with session_scope() as db:
-            pages = await PageRepository(db).list_for_document(target_doc_id)
-            report = await generate_consistency_report(target_doc_id, pages)
-        tool_calls.append(ToolCall("identity", report))
-        score = report.get("consistency_score", "N/A")
+        try:
+            result = await tool_identity(target_doc_id)
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("identity", result))
+        score = result.get("consistency_score", "N/A")
         return ChatResponse(
-            content=f"**Identity consistency:** {score}/100. {report.get('summary', '')}",
+            content=f"**Identity consistency:** {score}/100. {result.get('summary', '')}",
             tool_calls=tool_calls,
         )
 
@@ -155,35 +158,32 @@ async def chat(message: str, document_id: str | None = None) -> ChatResponse:
             return ChatResponse(
                 content="I need a document ID to inspect. Try: 'Inspect abc123'"
             )
-        result = await inspect_document(target_doc_id)
-        if result is None:
-            return ChatResponse(content="Document not found.")
-        tool_calls.append(ToolCall("inspector", result.to_dict()))
+        try:
+            result = await tool_inspector(target_doc_id)
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("inspector", result))
         lines = [f"**Pipeline stages for {target_doc_id[:16]}…**"]
-        for stage in result.stages:
-            lines.append(f"- {stage.stage}: {stage.status}")
+        for stage in result.get("stages", []):
+            lines.append(f"- {stage['stage']}: {stage['status']}")
         return ChatResponse(content="\n".join(lines), tool_calls=tool_calls)
 
     # --- Health ------------------------------------------------------------
     if intent == "health":
-        report = await check_all()
-        tool_calls.append(ToolCall("health", report.to_dict()))
-        overall = report.overall
+        try:
+            result = await tool_health()
+        except ToolError as exc:
+            return ChatResponse(content=str(exc))
+        tool_calls.append(ToolCall("health", result))
+        overall = result.get("overall", "unknown")
         lines = [f"**System health:** {overall}"]
-        for check in report.checks:
-            lines.append(f"- {check.name}: {check.status} ({check.detail})")
+        for check in result.get("checks", []):
+            lines.append(f"- {check['name']}: {check['status']} ({check['detail']})")
         return ChatResponse(content="\n".join(lines), tool_calls=tool_calls)
 
-    # --- Fallback / help ---------------------------------------------------
-    return ChatResponse(
-        content=(
-            "I'm Aether, your pipeline assistant. I can help with:\n\n"
-            "- **Summary** — 'Summarize doc <id>'\n"
-            "- **Autopsy** — 'Why did doc <id> fail?'\n"
-            "- **Identity** — 'Verify identity of <id>'\n"
-            "- **Context** — 'Related docs for <id>'\n"
-            "- **Inspector** — 'Inspect <id>'\n"
-            "- **Health** — 'System health'\n\n"
-            "Just mention a document ID and what you'd like to know."
-        )
-    )
+    # --- No fast-path intent matched ---------------------------------------
+    settings = get_settings()
+    if settings.aether_llm_enabled and settings.openrouter_api_key:
+        from cloud.aether_chat.llm import run_llm_fallback
+        return await run_llm_fallback(message, document_id=target_doc_id)
+    return _help_response()
