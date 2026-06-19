@@ -24,8 +24,6 @@ from cloud.dashboard import admin_api as admin_dashboard_api
 from cloud.dashboard import api as dashboard_api
 from cloud.ingest.service import handle_manifest
 from cloud.pipeline_run import api as pipeline_run_api
-from cloud.retrieval import api as retrieval_api
-from cloud.retrieval.service import find_pages
 from nas.manifest.models import Manifest
 from shared.config import get_settings
 from shared.db import dispose_engine, session_scope
@@ -80,7 +78,6 @@ app.add_middleware(
 app.include_router(dashboard_api.router, prefix="/api")
 app.include_router(admin_dashboard_api.router, prefix="/api")
 app.include_router(pipeline_run_api.router, prefix="/api")
-app.include_router(retrieval_api.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
@@ -157,43 +154,6 @@ async def _run_ingest(manifest: Manifest) -> None:
         log.exception("pipeline_notify.unexpected_error", document_id=doc_id, error=str(exc))
 
 
-# ---------------------------------------------------------------------------
-# Retrieval
-# ---------------------------------------------------------------------------
 
-
-@app.get("/retrieve", tags=["retrieval"], summary="Find pages by owner × page_type")
-async def retrieve(
-    page_type: str,
-    registration_no: str | None = None,
-    name: str | None = None,
-) -> dict[str, Any]:
-    """Return verified-owner pages of `page_type`. Provide registration_no or name."""
-    if not registration_no and not name:
-        return JSONResponse(  # type: ignore[return-value]
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"detail": "provide registration_no or name"},
-        )
-    async with session_scope() as session:
-        hits = await find_pages(
-            session, page_type=page_type,
-            registration_no=registration_no, name=name,
-        )
-    return {
-        "count": len(hits),
-        "hits": [
-            {
-                "page_id": h.page_id,
-                "page_num": h.page_num,
-                "page_type": h.page_type,
-                "s3_key_image": h.s3_key_image,
-                "document_id": h.document_id,
-                "s3_key_pdf": h.s3_key_pdf,
-                "applicant_name_raw": h.applicant_name_raw,
-                "registration_no": h.registration_no,
-            }
-            for h in hits
-        ],
-    }
 
 
