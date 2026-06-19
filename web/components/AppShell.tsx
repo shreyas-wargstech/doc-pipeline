@@ -17,6 +17,8 @@ import {
   Activity,
   Shield,
   Bookmark,
+  Wrench,
+  MessageCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -51,6 +53,8 @@ const NAV_ITEMS = [
   { href: "/pipelines", label: "Pipelines", icon: GitBranch },
   { href: "/retrieval", label: "Retrieval", icon: Search },
   { href: "/observability", label: "Observability", icon: Activity },
+  { href: "/engine-room", label: "Engine Room", icon: Wrench },
+  { href: "/aether", label: "Aether", icon: MessageCircle },
   { href: "/admin", label: "Admin", icon: Shield },
 ] as const;
 
@@ -64,7 +68,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const role = useRole();
 
   const visibleNavItems = NAV_ITEMS.filter(
-    ({ href }) => href !== "/admin" || role === "administrator",
+    ({ href }) =>
+      !(["/admin", "/engine-room"] as const).includes(href as any) ||
+      role === "administrator",
   );
 
   const isActive = (href: string) =>

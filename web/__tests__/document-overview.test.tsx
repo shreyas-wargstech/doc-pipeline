@@ -7,6 +7,8 @@ const setActionBar = vi.fn();
 vi.mock("@/app/action-bar", () => ({ useSetActionBar: (node: React.ReactNode) => setActionBar(node) }));
 vi.mock("@/components/ActionButtons", () => ({ ActionButtons: ({ documentId }: { documentId: string }) => <div data-testid="action-buttons">{documentId}</div> }));
 vi.mock("@/hooks/useBookmarks", () => ({ useToggleBookmark: () => ({ mutate: vi.fn() }) }));
+vi.mock("@/hooks/useAuth", () => ({ useRole: () => "administrator" }));
+vi.mock("@/components/AutopsyPanel", () => ({ AutopsyPanel: () => <div data-testid="autopsy-panel" /> }));
 
 function makeDoc(): DocDetailResponse {
   return {

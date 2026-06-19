@@ -238,3 +238,109 @@ export interface AdminUser {
 export interface AdminUsersResponse {
   users: AdminUser[];
 }
+
+// Engine Room
+export interface HealthCheck {
+  name: string;
+  status: "ok" | "warn" | "error";
+  detail: string;
+  latency_ms?: number;
+}
+export interface HealthReport {
+  overall: "ok" | "warn" | "error";
+  checks: HealthCheck[];
+}
+
+export interface DiagnosticResult {
+  name: string;
+  passed: boolean;
+  detail: string;
+  severity: "info" | "warn" | "error";
+}
+
+export interface TuningParameter {
+  name: string;
+  value: string;
+  source: "default" | "database" | "override";
+  description?: string;
+}
+
+export interface TuningSuggestion {
+  parameter: string;
+  current_value: string;
+  suggested_value: string;
+  confidence: number;
+  reason: string;
+  sample_size: number;
+}
+
+export interface ABTestResult {
+  hypothesis: string;
+  sample_size: number;
+  baseline: Record<string, number | string>;
+  variant: Record<string, number | string>;
+  winner: "baseline" | "variant" | "tie";
+  improvement_pct: number | null;
+}
+
+export interface CostRunEntry {
+  run_id: string;
+  total_cost: number;
+  page_count: number;
+  avg_cost_per_page: number;
+  stages: Record<string, number>;
+}
+export interface EngineCostSummary {
+  total_cost: number;
+  total_runs: number;
+  avg_cost_per_run: number;
+  avg_cost_per_page: number;
+  per_stage: Record<string, number>;
+  per_model: Record<string, number>;
+  runs: CostRunEntry[];
+}
+
+export interface InspectorStage {
+  stage: string;
+  status: string;
+  detail: string;
+  duration_sec?: number;
+  document_id?: string;
+}
+
+export interface InspectorReport {
+  document_id: string;
+  overall_status: string;
+  stages: InspectorStage[];
+}
+
+// Autopsy
+export interface AutopsyStage {
+  name: string;
+  status: string;
+  detail: string;
+  duration_sec?: number | null;
+}
+export interface AutopsyReport {
+  document_id: string;
+  overall_status: string;
+  stages: AutopsyStage[];
+  recommendation: string | null;
+}
+
+// Chat / Aether
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  tool_calls?: { tool: string; result: unknown }[];
+  timestamp: string;
+}
+export interface ChatRequest {
+  message: string;
+  document_id?: string;
+}
+export interface ChatResponse {
+  role: "assistant";
+  content: string;
+  tool_calls?: { tool: string; result: unknown }[];
+}

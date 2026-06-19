@@ -14,6 +14,7 @@ OPENROUTER_API_KEY; absent → TierNotImplemented so the router degrades
 gracefully. The sync SDK call is offloaded to anyio.to_thread.run_sync,
 identical to TesseractTier.
 """
+
 from __future__ import annotations
 
 import base64
@@ -64,9 +65,7 @@ class VlmTier:
         else:
             settings = get_settings()
             if not settings.openrouter_api_key:
-                raise TierNotImplemented(
-                    "OpenRouter not configured: set OPENROUTER_API_KEY"
-                )
+                raise TierNotImplemented("OpenRouter not configured: set OPENROUTER_API_KEY")
             self._client = OpenAI(
                 base_url=settings.openrouter_base_url,
                 api_key=settings.openrouter_api_key,
@@ -81,9 +80,7 @@ class VlmTier:
         page_num: int,
         language_hint: str = "unknown",
     ) -> OcrResult:
-        raw_text, words = await anyio.to_thread.run_sync(
-            self._ocr_sync, image, page_num
-        )
+        raw_text, words = await anyio.to_thread.run_sync(self._ocr_sync, image, page_num)
         mean_conf = _CONF_PRIOR if words else 0.0
         log.info(
             "vlm_done",

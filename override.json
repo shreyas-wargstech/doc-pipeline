@@ -3,9 +3,9 @@
     {
       "name": "api",
       "command": [
-        "sh",
+        "python3",
         "-c",
-        "python -c 'import socket;s=socket.socket();s.settimeout(5);s.connect(('docintel-production-postgres.cbcc084q6q9j.ap-south-1.rds.amazonaws.com',5432));print('connected');s.close()'"
+        "import socket; h='docintel-production-postgres.cbcc084q6q9j.ap-south-1.rds.amazonaws.com'; print(socket.gethostbyname(h)); s=socket.create_connection((h,5432),10); print('OK')"
       ]
     }
   ]

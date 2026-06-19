@@ -32,6 +32,8 @@ from shared.db import dispose_engine, session_scope
 from shared.exceptions import IngestError
 from shared.logging import configure_logging, get_logger
 
+from fastapi.middleware.cors import CORSMiddleware
+
 log = get_logger(__name__)
 
 
@@ -59,6 +61,17 @@ app = FastAPI(
     description="Local dev trigger for the cloud ingest pipeline.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://doc-pipeline.vercel.app",  # production
+        "http://localhost:3000",              # local dev
+    ],
+    allow_credentials=True,  # session cookies
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Operations / control dashboard — JSON API consumed by the Next.js app in

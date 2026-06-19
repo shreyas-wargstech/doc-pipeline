@@ -457,6 +457,7 @@ def deploy_stack(config: dict) -> dict:
         "--region", region,
         "--capabilities", "CAPABILITY_IAM", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND",
         "--parameter-overrides", param_overrides,
+        "--resolve-image-repos",
         "--no-confirm-changeset",
         "--no-fail-on-empty-changeset",
     ]

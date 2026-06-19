@@ -22,6 +22,7 @@ from sqlalchemy import inspect as sa_inspect, text
 from cloud.identity.intelligence import generate_consistency_report
 from cloud.context.service import build_context
 from cloud.narratives.service import generate_narrative, get_document_and_pages
+from cloud.aether_chat.service import chat as aether_chat
 from cloud.autopsy.service import generate_autopsy
 from cloud.corrections.models import CorrectionType, HumanCorrectionCreate
 from cloud.corrections.service import (
@@ -732,3 +733,27 @@ async def tuning_suggestions(
     async with session_scope() as db:
         suggestions = await get_threshold_suggestions(session=db)
     return {"suggestions": suggestions}
+
+
+# --- Aether Chat ------------------------------------------------------------
+
+class ChatBody(BaseModel):
+    message: str
+    document_id: str | None = None
+
+
+@router.post("/chat", summary="Aether Chat — zero-LLM pipeline assistant")
+async def chat_endpoint(
+    body: ChatBody,
+    _session: SessionData = Depends(require_session),
+) -> dict[str, Any]:
+    """Process a chat message and return a response using existing pipeline services."""
+    result = await aether_chat(body.message, document_id=body.document_id)
+    return {
+        "role": result.role,
+        "content": result.content,
+        "tool_calls": [
+            {"tool": tc.tool, "result": tc.result}
+            for tc in result.tool_calls
+        ],
+    }

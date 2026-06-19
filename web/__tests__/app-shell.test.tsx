@@ -21,10 +21,10 @@ vi.mock("@/lib/accessibility", () => ({
 }));
 
 describe("AppShell", () => {
-  it("renders all seven top-level nav groups", () => {
+  it("renders all nine top-level nav groups", () => {
     usePathname.mockReturnValue("/");
     render(<AppShell><div>content</div></AppShell>);
-    for (const label of ["Documents", "Bookmarks", "Evaluation", "Pipelines", "Retrieval", "Observability", "Admin"]) {
+    for (const label of ["Documents", "Bookmarks", "Evaluation", "Pipelines", "Retrieval", "Observability", "Engine Room", "Aether", "Admin"]) {
       expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
   });

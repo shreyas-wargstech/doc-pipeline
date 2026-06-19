@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { ActionButtons } from "@/components/ActionButtons";
 import { BookmarkStar } from "@/components/BookmarkStar";
+import { AutopsyPanel } from "@/components/AutopsyPanel";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -11,6 +12,7 @@ import { MatchBadge } from "@/components/ui/MatchBadge";
 import { useDocument } from "@/hooks/useDocument";
 import { useSetActionBar } from "@/app/action-bar";
 import { fmtDateTime, titleCase } from "@/lib/format";
+import { useRole } from "@/hooks/useAuth";
 
 export default function DocumentDetail({ params }: { params: Promise<{ id: string }> }) {
   const [resolved, setResolved] = useState<{ id: string } | null>(null);
@@ -26,6 +28,7 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
 
   const id = resolved?.id ?? "";
   const q = useDocument(id);
+  const role = useRole();
 
   const actionBarContent = useMemo(
     () => (q.data?.doc ? <ActionButtons documentId={q.data.doc.document_id} /> : null),
@@ -93,6 +96,10 @@ export default function DocumentDetail({ params }: { params: Promise<{ id: strin
         >
           {doc.document_summary}
         </motion.p>
+      )}
+
+      {(doc.status === "failed" || doc.status === "manual_review" || doc.match_status === "manual_review" || role === "administrator") && (
+        <AutopsyPanel documentId={doc.document_id} />
       )}
     </div>
   );

@@ -1438,3 +1438,93 @@ The project already had production-ready consumer handlers (`cloud/ocr/consumer.
 - Never rely on a thin wrapper in a subdirectory to import code from outside that subdirectory — SAM's zip packager is blind to parent-directory imports.
 - Always add `__init__.py` to every directory in the import path when using `importlib.import_module` with dotted paths, even if Python 3.3+ supports namespace packages. Lambda's runtime loader may not handle namespace packages correctly in all cases.
 - Maintain `.aws-samignore` alongside the SAM template to prevent bloated packages from shipping `.git/`, `node_modules/`, tests, and docs.
+
+
+---
+
+## 2026-06-19 — `make serve` 500 on login: AWS RDS private IP unreachable from local dev
+
+### FIX-060 · `.env` DATABASE_URL points to production RDS; DNS resolves to VPC-private IP locally
+
+**Symptom:**
+```
+POST /api/login HTTP/1.1 500 Internal Server Error
+Connect call failed ('172.31.16.207', 5432)
+```
+`172.31.16.207` is a VPC-private IP (AWS RDS). Connection times out from local Windows.
+
+**Root cause:** `.env` had `DATABASE_URL` set to the production RDS endpoint (`docintel-production-postgres.cbcc084q6q9j.ap-south-1.rds.amazonaws.com`). RDS DNS resolves to the VPC-internal IP from outside the VPC → unreachable from local dev. The local dev line was commented out.
+
+**Fix:** Swap `.env` lines: uncomment local `DATABASE_URL=postgresql+asyncpg://pipeline:pipeline@localhost:5432/doc_pipeline`, comment out production RDS line. Restart `make serve` after editing (uvicorn reads `.env` at startup).
+
+**Files:** `.env`
+
+**Rule:** Never leave a production RDS `DATABASE_URL` active in `.env` during local dev. Keep both lines in `.env` (local + production) and toggle by commenting/uncommenting. Always restart the dev server after changing `.env` — pydantic-settings reads the file once at startup. If a Postgres connection fails with a `172.31.x.x` / `10.x.x.x` / `192.168.x.x` IP, check `.env` first before debugging app code.
+
+
+---
+
+## 2026-06-18 — SAM `Runtime: python3.12` fails binary validation on host with Python 3.13 (FIX-067)
+
+**Symptom:**
+`sam build` fails with `PythonPipBuilder:Validation - Binary validation failed for python, searched for python in following locations: [...] which did not satisfy constraints for runtime: python3.12`. Host has Python 3.13 installed but SAM requires a matching `python3.12` binary for zip-based builds.
+
+**Fix:**
+Changed `Runtime: python3.12` → `Runtime: python3.13` in `Globals.Function` in `cloud/infrastructure/sam/template.yaml`.
+
+**Rule:**
+- SAM's `PythonPipBuilder` for zip packages requires a Python binary on the host that matches the template's `Runtime` exactly (e.g., `python3.12` needs a Python 3.12 interpreter, not 3.13). If only one Python version is available on the host, the template `Runtime` MUST match it.
+- For container image builds (`PackageType: Image`), the `Runtime` is ignored at deploy time but still used by SAM's build graph for metadata serialization. Always keep it in `Globals.Function` even for image builds to avoid `tomlkit` crashes (see FIX-068).
+
+**Files:** `cloud/infrastructure/sam/template.yaml`, `cloud/infrastructure/sam/.aws-sam/build.toml`
+
+---
+
+## 2026-06-18 — SAM `tomlkit` crashes with `PackageType: Image` when `Runtime` is missing (FIX-068)
+
+**Symptom:**
+After removing `Runtime` from `Globals.Function` (because container images don't need it), `sam build` crashes with `ConvertError: Unable to convert an object of <class 'NoneType'> to a TOML item`. The stack trace shows SAM's build graph trying to write `function_build_definition.runtime` (which is `None` for image builds) into the `.aws-sam/build.toml` cache file.
+
+**Root cause:**
+SAM's `build_graph.py` serializes build definitions as TOML tables. The `RUNTIME_FIELD` is always set: `toml_table[RUNTIME_FIELD] = function_build_definition.runtime`. For image-based functions, `runtime` is `None`, and `tomlkit` cannot serialize `None` into a TOML value. This is a known SAM CLI limitation: the `Runtime` field must be present in the template even when `PackageType: Image` is used.
+
+**Fix:**
+Added `Runtime: python3.13` back to `Globals.Function`. SAM uses it for build graph serialization only; at deploy time, the image runtime is determined by the Dockerfile, not the template `Runtime`.
+
+**Rule:**
+- NEVER remove `Runtime` from `Globals.Function` when using `PackageType: Image`. SAM's build graph unconditionally writes `Runtime` to TOML even for image builds, and `tomlkit` cannot serialize `None`.
+- If you see `ConvertError: Unable to convert an object of <class 'NoneType'> to a TOML item`, add `Runtime` back to the template and clear the `.aws-sam/` build cache.
+
+**Files:** `cloud/infrastructure/sam/template.yaml`
+
+---
+
+## 2026-06-18 — `pywin32==312 ; sys_platform == 'win32'` breaks SAM `PythonPipBuilder` on Windows (FIX-069)
+
+**Symptom:**
+`PythonPipBuilder:ResolveDependencies - {pywin32==312(wheel)}` — SAM's pip builder fails when resolving `pywin32` even though the platform marker `sys_platform == 'win32'` should match (Windows host). The error occurs during `pip download` inside SAM's build process, even when the project uses `PackageType: Image` (SAM still runs pip validation for the `Runtime` field).
+
+**Fix:**
+Removed `pywin32==312 ; sys_platform == 'win32'` from `requirements.txt`. This package was only needed for `portalocker` on Windows local development. It is not needed in the Lambda Linux runtime and is not available on Linux pip indexes.
+
+**Rule:**
+- Packages with `sys_platform == 'win32'` markers should not be in `requirements.txt` if the same file is used for Linux Lambda builds. Keep Windows-only deps in a separate `requirements-dev.txt` or install them locally without pinning in the main requirements file.
+- If SAM's `PythonPipBuilder` fails with a `{package(wheel)}` error, the package is likely Windows-only or has a binary wheel that doesn't match the target platform. Remove it from `requirements.txt` for Lambda builds.
+
+**Files:** `requirements.txt`
+
+---
+
+## 2026-06-18 — SAM `PackageType: Image` requires Docker daemon running (FIX-070)
+
+**Symptom:**
+`docker ps` returns `request returned 500 Internal Server Error for API route and version http://.../containers/json, check if the server supports the requested API version`. SAM `sam build` with `PackageType: Image` cannot find the Docker daemon.
+
+**Fix:**
+Started Docker Desktop. Verified with `docker ps` (should return empty list without error). Then `sam build` succeeded and produced Docker images.
+
+**Rule:**
+- `PackageType: Image` in SAM requires a Docker daemon. On Windows, Docker Desktop must be running. On Linux/macOS, the `docker` service must be active.
+- Always check `docker ps` before running `sam build` with image functions. If Docker isn't running, SAM will fail silently or with cryptic API errors rather than saying "Docker not found".
+
+**Files:** none (system dependency)

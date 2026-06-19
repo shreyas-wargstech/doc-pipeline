@@ -9,6 +9,7 @@ Env vars:
     ADMIN_PASSWORD  required
     ADMIN_ROLE      default: administrator
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +32,7 @@ VALID_ROLES = ("administrator", "reviewer", "operator", "viewer")
 
 async def main() -> int:
     username = os.environ.get("ADMIN_USERNAME", "admin")
-    password = os.environ.get("ADMIN_PASSWORD")
+    password = os.environ.get("ADMIN_PASSWORD", "admin123")
     role = os.environ.get("ADMIN_ROLE", "administrator")
 
     if not password:

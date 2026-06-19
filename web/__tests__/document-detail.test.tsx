@@ -6,6 +6,8 @@ import type { DocDetailResponse } from "@/lib/types";
 vi.mock("@/app/action-bar", () => ({ useSetActionBar: () => {} }));
 vi.mock("@/components/ActionButtons", () => ({ ActionButtons: () => <div /> }));
 vi.mock("@/hooks/useBookmarks", () => ({ useToggleBookmark: () => ({ mutate: vi.fn() }) }));
+vi.mock("@/hooks/useAuth", () => ({ useRole: () => "administrator" }));
+vi.mock("@/components/AutopsyPanel", () => ({ AutopsyPanel: () => <div data-testid="autopsy-panel" /> }));
 
 const data = {
   doc: {
