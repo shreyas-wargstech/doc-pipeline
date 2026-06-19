@@ -23,7 +23,6 @@ from fastapi.responses import JSONResponse
 from cloud.dashboard import admin_api as admin_dashboard_api
 from cloud.dashboard import api as dashboard_api
 from cloud.ingest.service import handle_manifest
-from cloud.pipeline_run import api as pipeline_run_api
 from nas.manifest.models import Manifest
 from shared.config import get_settings
 from shared.db import dispose_engine, session_scope
@@ -77,7 +76,6 @@ app.add_middleware(
 # auth were removed in the Next.js cutover; FastAPI serves /api only.
 app.include_router(dashboard_api.router, prefix="/api")
 app.include_router(admin_dashboard_api.router, prefix="/api")
-app.include_router(pipeline_run_api.router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
