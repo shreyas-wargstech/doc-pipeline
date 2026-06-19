@@ -66,7 +66,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://doc-pipeline.vercel.app",  # production
+        "https://doc-pipeline-nine.vercel.app",  # production
         "http://localhost:3000",              # local dev
     ],
     allow_credentials=True,  # session cookies
