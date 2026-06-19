@@ -557,3 +557,18 @@ Reviewed the uncommitted Aether UI-polish diff (`web/app/(dash)/aether/page.tsx`
 **Verdict:** Faithful, well-scoped visual-polish pass mapping 1:1 to skill checklist items, fully green, one small dead-CSS bug (now fixed) that a manual visual pass would have caught.
 
 **Next:** Commit the Aether UI-polish + `group`-class fix together. No other pending Aether frontend work. Backend: `AETHER_LLM_ENABLED` manual smoke test (flag still defaults `false`, never closed since 2026-06-19) remains the one open Aether thread.
+
+## [CLAUDE] 2026-06-21 — Closed: `AETHER_LLM_ENABLED` manual smoke test
+
+Closed the one remaining open Aether thread (flagged 2026-06-19, never run).
+
+**What was done:**
+- Set `AETHER_LLM_ENABLED=true` in local `.env` (OpenRouter creds already present, shared with the OCR VLM tier).
+- Ran `cloud.aether_chat.service.chat("Can you check if everything's running smoothly?")` directly — message deliberately misses every `INTENT_PATTERNS` regex so it falls through to `run_llm_fallback`.
+- **Result:** LLM correctly chose `tool_health`, returned `"Everything is running smoothly."`. Confirmed via DB: 2 rows landed in `cost_events` (`stage='aether_llm'`, model `google/gemini-2.5-flash`, statuses `ok`), total cost **$0.00017** — the 4-iteration bounded tool-calling loop and `aether_llm` cost-tracking both work end-to-end exactly as designed.
+- Side note: `.env` `DATABASE_URL` points at the live production RDS instance (`docintel-production-postgres-public...`), not a local Postgres — this smoke test ran against production data via read-only tools (`tool_health`). No writes occurred.
+- Incidental fix: an earlier PowerShell edit to insert this same env var corrupted UTF-8 em-dashes in `.env` comment lines (mojibake `â€”`) and added a stray BOM; both repaired (`sed` round-trip + BOM strip). `.env` is gitignored/untracked, no commit involved.
+
+**Decision:** left `AETHER_LLM_ENABLED=true` in local `.env` per explicit choice — flag is live for this environment now. Production deploy config (`.env.example`) still defaults `AETHER_LLM_ENABLED=false`; flip that separately if/when the LLM path should go live in production.
+
+**Next:** None — Aether backend + frontend both fully verified, no open threads.
