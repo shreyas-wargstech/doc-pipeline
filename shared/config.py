@@ -125,6 +125,7 @@ class Settings(BaseSettings):
     self_healing_enabled: bool = Field(False, alias="SELF_HEALING_ENABLED")
     cost_router_v2_enabled: bool = Field(False, alias="COST_ROUTER_V2_ENABLED")
     monitor_enabled: bool = Field(False, alias="MONITOR_ENABLED")
+    aether_llm_enabled: bool = Field(False, alias="AETHER_LLM_ENABLED")
     monitor_interval_seconds: int = Field(30, alias="MONITOR_INTERVAL_SECONDS")
 
     # Environment
