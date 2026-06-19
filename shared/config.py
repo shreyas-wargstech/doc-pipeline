@@ -1,10 +1,9 @@
 """Shared configuration loaded from environment variables."""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,8 +14,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Database
-    database_url: str = Field(..., alias="DATABASE_URL")
+    # Database (raw URL — may be overridden by _resolve_database_url if RDS_HOST is set)
+    database_url: str = Field(
+        "postgresql+asyncpg://pipeline:pipeline@localhost:5432/doc_pipeline",
+        alias="DATABASE_URL",
+    )
 
     # S3 / MinIO
     s3_endpoint_url: str | None = Field(None, alias="S3_ENDPOINT_URL")
@@ -74,13 +76,9 @@ class Settings(BaseSettings):
         "google/gemini-2.5-flash", alias="OPENROUTER_MODEL"
     )
     # Text-only model — used by classifier LLM + structure LLM (no image input).
-    # Defaults to openrouter/free (auto-selects a working free model); override with OPENROUTER_TEXT_MODEL in .env.
     openrouter_text_model: str = Field(
         "openrouter/free", alias="OPENROUTER_TEXT_MODEL"
     )
-
-    # Retrieval cascade
-    retrieval_min_results: int = Field(3, alias="RETRIEVAL_MIN_RESULTS")
 
     # Structure stage
     structure_max_chars: int = Field(6000, alias="STRUCTURE_MAX_CHARS")
@@ -109,40 +107,30 @@ class Settings(BaseSettings):
             return f"redis://{self.redis_host}:{self.redis_port}"
         return None
 
-    # OpenRouter (VLM tier)
-    openrouter_api_key: str | None = Field(None, alias="OPENROUTER_API_KEY")
-    openrouter_base_url: str = Field(
-        "https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
-    )
-    openrouter_model: str = Field(
-        "google/gemini-2.5-flash", alias="OPENROUTER_MODEL"
-    )
-    openrouter_text_model: str = Field(
-        "openrouter/free", alias="OPENROUTER_TEXT_MODEL"
-    )
-
     # ── Phase 4 "Make It Smart" feature flags (default OFF — opt-in) ──
     self_healing_enabled: bool = Field(False, alias="SELF_HEALING_ENABLED")
     cost_router_v2_enabled: bool = Field(False, alias="COST_ROUTER_V2_ENABLED")
     monitor_enabled: bool = Field(False, alias="MONITOR_ENABLED")
+    aether_llm_enabled: bool = Field(False, alias="AETHER_LLM_ENABLED")
     monitor_interval_seconds: int = Field(30, alias="MONITOR_INTERVAL_SECONDS")
 
     # Environment
     environment: str = Field("development", alias="ENVIRONMENT")
 
-    # ── Derived property: DATABASE_URL ─────────────────────────────────────
-    @property
-    def database_url(self) -> str:
-        # If RDS_HOST is set, use RDS. Otherwise, fall back to local DATABASE_URL.
+    @model_validator(mode="after")
+    def _resolve_database_url(self) -> "Settings":
+        """Override database_url with RDS connection string when RDS_HOST is set."""
         if self.rds_host:
             password = self.rds_password
             if not password and self.secrets_manager_arn:
                 password = self._load_secret_value("RDS_PASSWORD")
-            return (
+            object.__setattr__(
+                self,
+                "database_url",
                 f"postgresql+asyncpg://{self.rds_username}:{password}"
-                f"@{self.rds_host}:{self.rds_port}/{self.rds_database}"
+                f"@{self.rds_host}:{self.rds_port}/{self.rds_database}",
             )
-        return os.environ.get("DATABASE_URL", "postgresql+asyncpg://pipeline:pipeline@localhost:5432/doc_pipeline")
+        return self
 
     def _load_secret_value(self, key: str) -> str:
         """Fetch a key from AWS Secrets Manager (used in Lambda/ECS)."""

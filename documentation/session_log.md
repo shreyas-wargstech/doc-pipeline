@@ -1,4 +1,48 @@
 
+## [CLAUDE] 2026-06-19 — DB fully initialized on public RDS
+
+**Stage:** Schema + reference data load on public RDS
+
+**What was done:**
+- `apply_schema.py` (semicolon-split approach) failed to apply triggers/functions (dollar-quoted blocks broken by naive split). Fixed by applying `db/schema.sql` directly via `psql -f` in Docker — all tables + indexes + triggers created correctly.
+- Re-ran all migration scripts successfully: `apply_status_structuring`, `apply_eval_table`, `apply_admin_rbac`, `apply_bookmarks`, `apply_consistency`, `apply_index_schema`, `apply_pipeline_runs`, `seed_tuning_defaults`.
+- `apply_corrections` skipped — runtime script, not a schema migration.
+- `load_reference_data` run (~92K practitioner rows loaded).
+- Admin user created via `add_dashboard_user shreyas --role administrator`.
+- Private RDS instance `docintel-production-postgres` deleted (confirmed zero app connections since deployment; both instances were uninitialized at migration time).
+- ECS task def `:12` DATABASE_URL confirmed pointing to public endpoint.
+
+**Rule added to error_fixes.md:** Never use semicolon-split to execute schema SQL with dollar-quoted trigger bodies — always use `psql -f schema.sql` directly.
+
+**Next:** Full AWS e2e smoke test (S3 upload → Lambda → pipeline → DB write).
+
+## [CLAUDE] 2026-06-19 — RDS made publicly accessible
+
+**Stage:** AWS infrastructure — RDS public access
+
+**What was done:**
+- Updated `cloud/infrastructure/sam/template.yaml`: added `RdsAllowedCidr` + `DBSnapshotIdentifier` params, `HasRdsPublicCidr`/`HasDBSnapshot` conditions, `PublicDatabaseSubnetGroup` resource (public subnets), conditional 5432 SG ingress rule, `PubliclyAccessible: true` on `Database`.
+- Created public DB subnet group `docintel-production-db-public` (subnets `ap-south-1a` + `ap-south-1c`) via AWS CLI.
+- Snapshot `docintel-public-migration-snap` → restored to `docintel-production-postgres-public` in public subnets with `PubliclyAccessible: true`.
+- Reset master password; updated `RDS_PASSWORD` in Secrets Manager (`docintel/production/credentials`).
+- Registered ECS task def revision `:12` with new `DATABASE_URL` pointing to public endpoint; force-redeployed `docintel-production-api` service.
+- Added `make rds-allow-ip` + `make rds-list-ips` to `Makefile` for dynamic IP management.
+- `/health` confirmed `{"status":"ok"}` post-deploy.
+
+**Key facts:**
+- Public RDS endpoint: `docintel-production-postgres-public.cbcc084q6q9j.ap-south-1.rds.amazonaws.com`
+- RDS SG: `sg-0ceba0205d1b03e41` — port 5432, IP-restricted (not open to world)
+- Old private instance `docintel-production-postgres` still exists — can be deleted once stable
+- IP is dynamic; use `make rds-allow-ip` to add current IP when blocked
+
+**Next:** ~~Delete old private RDS instance~~ — deletion in progress. Consider static IP (ISP static or VPN egress) to avoid repeat SG updates.
+
+**DB init completed:**
+- `db/schema.sql` applied via psql directly (Python `apply_schema.py` splits on `;` and breaks dollar-quoted trigger functions — root cause documented)
+- All `apply_*.py` migrations ran successfully after base schema was in place
+- `load_reference_data` + `add_dashboard_user shreyas --role administrator` complete
+- Private instance `docintel-production-postgres` deletion in progress (`--skip-final-snapshot --delete-automated-backups`)
+
 ## 2026-06-19 — Cleanup deferred threads: cost_router_v2, S3PrefixSource, batch_upload, tuning calibration, EventBridge monitor
 
 **Stage:** Backend deferred-thread cleanup (5 open items from TASKS.md)
@@ -172,3 +216,113 @@
 - `web/__tests__/document-detail.test.tsx`, `web/__tests__/document-overview.test.tsx`, `web/__tests__/app-shell.test.tsx`
 
 **Next:** Next.js `next build` full verification (timed out in this environment, but tsc clean). Backend full suite verification. AWS e2e smoke test.
+
+## 2026-06-19 — [CLAUDE] Aether redesign (Phase 5, item 1)
+
+**Stage:** Frontend feature build-out — Aether Chat Interface, full redesign per
+`docs/superpowers/specs/2026-06-19-aether-redesign-design.md` and
+`docs/superpowers/plans/2026-06-19-aether-redesign.md` (17 TDD tasks, all complete).
+
+**What was done:**
+- **Backend** — extracted the 6 existing Aether intent handlers into 7 independently callable
+  tool functions (`cloud/aether_chat/tools.py`, incl. new `tool_search` wrapping
+  `retrieve_documents`), each returning a `kind`-discriminated dict. `service.py` orchestrator
+  now: fast-path regex → gated LLM tool-calling fallback (`cloud/aether_chat/llm.py`, bounded
+  4-iteration loop over the 7 tools, cost-tracked via `shared.llm_usage.chat_completion` under
+  site `aether_llm`) → static help. New `aether_llm_enabled` config flag (default `False`) in
+  `shared/config.py`; HTTP envelope `{role, content, tool_calls[]}` unchanged.
+- **Frontend** — typed `ToolResult` discriminated union (`web/lib/types.ts`); discriminated
+  `ToolResultCard` renderer with unknown-kind fallback; 7 purpose-built cards (Autopsy,
+  Narrative, Context, Identity w/ SVG consistency gauge, Inspector w/ horizontal pipeline rail,
+  Health status grid, SearchResults w/ retrieval deep-link); template catalog
+  (`templates.ts`) + `useChat` recent-threads (localStorage); `Composer` (slash trigger +
+  chips); `CommandPalette` (grouped templates, keyboard nav, Radix `Dialog`); `WelcomeHero`
+  (capability gallery + recent); `MessageBubble`/`TypingIndicator` extracted from the old
+  page; `/aether` page rewritten to orchestrate the 4 states (welcome / palette / canvas /
+  cards).
+
+**Verify:**
+- `uv run pytest -m "not integration" -q` → **794 passed, 1 skipped** ✅ (incl. new
+  `tests/cloud/aether_chat/{test_tools,test_service,test_llm}.py`)
+- `cd web && npx tsc --noEmit` → **0 errors** ✅
+- `cd web && npx next build` → all 14 routes compile, incl. `/aether` ✅
+- `cd web && npx vitest run <each new aether test file>` → all green individually. A
+  full-suite `vitest run` hits a pre-existing Windows tinypool segfault on worker teardown
+  (after all visible test files print ✓, no FAIL lines) — same class of environmental issue
+  noted for `action-bar.test.tsx`; not caused by this work.
+
+**Files touched:** `cloud/aether_chat/{tools,llm}.py` (new), `cloud/aether_chat/service.py`,
+`shared/config.py`, `.env.example`, `tests/cloud/aether_chat/*` (new),
+`web/lib/types.ts`, `web/hooks/useChat.ts`,
+`web/components/aether/{templates,Composer,CommandPalette,WelcomeHero,MessageBubble,TypingIndicator,ToolResultCard}.tsx`,
+`web/components/aether/cards/*.tsx` (new), `web/app/(dash)/aether/page.tsx`,
+`web/__tests__/aether-{templates,page}.test.ts(x)`,
+`web/components/aether/__tests__/*`, `web/components/aether/cards/__tests__/*`.
+
+**Next:** Manual smoke test against a running local stack (`make up && make serve && make
+web-dev`, open `/aether`, verify hero/palette/cards, then flip `AETHER_LLM_ENABLED=true` with
+an OpenRouter key to confirm the LLM fallback path also renders cards) — not run in this
+session (requires local stack). Engine Room and Document Autopsy redesigns remain separate
+Phase 5 items.
+
+## 2026-06-19 — [CLAUDE] Fix: Aether chat always returned the generic help message
+
+**Stage:** Bug fix — `/api/chat`
+
+**What was done:**
+- Root cause: `cloud/aether_chat/service.py` imported `tool_search` (added in the Phase 5
+  Aether redesign) but `INTENT_PATTERNS` had no `"search"` entry and `chat()` had no
+  `if intent == "search"` branch. Any query that should route to search (e.g. "Find all
+  pages for NAINSI RAMESH GUPTA") matched no intent, fell through to the no-fast-path-matched
+  case, and — since `aether_llm_enabled` defaults to `False` — always returned
+  `_help_response()` regardless of what was asked.
+- Added a `"search"` entry to `INTENT_PATTERNS` (matches "find all pages", leading "find"/
+  "search", "look up", "find document") and the missing handler branch calling
+  `tool_search(message)`, appending a `ToolCall("search", result)` and a short content summary.
+
+**Verify:**
+- `uv run pytest tests/cloud/aether_chat/ -v` → **9 passed** (including the previously
+  failing `test_fast_path_search_still_works`).
+
+**Files touched:** `cloud/aether_chat/service.py`
+
+**Next:** None — isolated fix. Manual smoke test of `/aether` search queries still pending
+from the prior entry's "Next" (full local-stack smoke test).
+
+## [CLAUDE] 2026-06-19 — Fix shared/config.py: dead property, duplicate fields, missing default
+
+**Stage:** Config cleanup / bug fix
+
+**What was done:**
+- Diagnosed `POST /api/login` 500 "Could not parse SQLAlchemy URL from given URL string". Error was transient (resolved by server restart after local `.env` was restored in prior session), but root cause was architectural bugs in `shared/config.py`.
+- **Dead property removed:** `@property database_url` was silently dropped by Pydantic v2's metaclass — a field annotation + property of same name causes the property to lose. The RDS URL construction logic (`if self.rds_host`) was completely unreachable. Replaced with `@model_validator(mode="after")` which runs correctly after all fields are populated.
+- **Safe default added:** `database_url` was `Field(..., alias="DATABASE_URL")` (required, no default). If `DATABASE_URL` was absent, Pydantic raised `ValidationError` instead of using a fallback. Now defaults to `postgresql+asyncpg://pipeline:pipeline@localhost:5432/doc_pipeline`.
+- **Duplicate fields removed:** `openrouter_api_key`, `openrouter_base_url`, `openrouter_model`, `openrouter_text_model`, and `retrieval_min_results` were each declared twice in the class body. Removed second occurrences.
+- `import os` removed (was only used by the dead property).
+
+**Verify:**
+- `python -c "from shared.config import get_settings; s = get_settings(); print(s.database_url)"` → `postgresql+asyncpg://pipeline:pipeline@localhost:5432/doc_pipeline` ✅
+- SQLAlchemy `make_url(s.database_url)` → parses OK ✅
+- `POST /api/login` with bad creds → `{"detail":"invalid credentials"}` (no 500) ✅
+
+**Key rule:** In Pydantic v2 BaseSettings, a `@property` with the same name as a field annotation is silently removed by the metaclass — use `@model_validator(mode="after")` for derived field logic.
+
+**Files touched:** `shared/config.py`
+
+**Next:** AWS e2e smoke test (S3 event → Lambda → pipeline). Local stack must be fully up (`make up`) first.
+
+## [CLAUDE] 2026-06-19 — Proxy web dev server to ECS ALB instead of localhost:8000
+
+**Stage:** Local dev config
+
+**What was done:**
+- Created `web/.env.local` with `API_ORIGIN=http://docintel-production-api-alb-317524480.ap-south-1.elb.amazonaws.com`.
+- `web/next.config.mjs` already reads `API_ORIGIN` (falls back to `http://localhost:8000`), so `localhost:3000/api/*` now proxies to ECS with no code change.
+- ALB DNS fetched from CloudFormation stack `docintel-production` output `ApiEndpoint`.
+
+**Verify:**
+- Restart `make web-dev`; `POST /api/login` from browser should hit ECS.
+
+**Files touched:** `web/.env.local` (new, gitignored)
+
+**Next:** Confirm login works end-to-end via ECS. AWS e2e smoke test.

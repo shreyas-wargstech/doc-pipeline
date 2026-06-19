@@ -1,1 +1,0 @@
-{"containerOverrides":[{"name":"api","command":["sh","-c","cd /app && uv run python -c \"import asyncio, asyncpg, os; dsn=os.environ[\\\"DATABASE_URL\\\"].replace(\\\"/doc_pipeline\\\",\\\"/postgres\\\"); conn=asyncio.run(asyncpg.connect(dsn=dsn)); asyncio.run(conn.execute(\\\"CREATE DATABASE doc_pipeline\\\")); print(\\\"CREATED\\\"); asyncio.run(conn.close())\""]}]}

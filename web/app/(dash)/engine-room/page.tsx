@@ -440,10 +440,10 @@ function CostSummaryPanel() {
         {summary && (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiCard label="Total cost" value={`$${summary.total_cost.toFixed(4)}`} />
+              <KpiCard label="Total cost" value={`$${(summary.total_cost ?? 0).toFixed(4)}`} />
               <KpiCard label="Runs" value={summary.total_runs} />
-              <KpiCard label="Avg / run" value={`$${summary.avg_cost_per_run.toFixed(4)}`} />
-              <KpiCard label="Avg / page" value={`$${summary.avg_cost_per_page.toFixed(4)}`} />
+              <KpiCard label="Avg / run" value={`$${(summary.avg_cost_per_run ?? 0).toFixed(4)}`} />
+              <KpiCard label="Avg / page" value={`$${(summary.avg_cost_per_page ?? 0).toFixed(4)}`} />
             </div>
             {Object.keys(summary.per_stage).length > 0 && (
               <div>
@@ -587,7 +587,7 @@ export default function EngineRoomPage() {
         )}
         {health.data && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {health.data.checks.map((check, i) => (
+            {(health.data.checks ?? []).map((check, i) => (
               <HealthCard key={check.name} check={check} index={i} />
             ))}
           </div>

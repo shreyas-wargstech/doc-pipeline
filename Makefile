@@ -277,3 +277,30 @@ aws-cost-estimate:  ## Estimate monthly AWS cost for the current configuration
 	@echo "  200 docs/month total:     ~₹7,932 / ~\$$95"
 	@echo "  2,000 docs/month total:   ~₹12,360 / ~\$$149"
 	@echo "  20,000 docs/month total:  ~₹57,240 / ~\$$689 (ECS Fargate workers recommended)"
+
+# ── AWS RDS Access ────────────────────────────────────────────────────────────
+
+RDS_SG      ?= sg-0ceba0205d1b03e41
+AWS_REGION  ?= ap-south-1
+
+## rds-allow-ip: Add current public IP to RDS security group (port 5432)
+##   Usage: make rds-allow-ip
+##   Override: make rds-allow-ip MY_IP=1.2.3.4
+rds-allow-ip:
+	$(eval MY_IP ?= $(shell curl -s checkip.amazonaws.com))
+	@echo "Adding $(MY_IP)/32 to RDS SG $(RDS_SG)..."
+	aws ec2 authorize-security-group-ingress \
+		--group-id $(RDS_SG) \
+		--protocol tcp --port 5432 \
+		--cidr $(MY_IP)/32 \
+		--region $(AWS_REGION) \
+		&& echo "Done — $(MY_IP)/32 can now reach RDS on port 5432." \
+		|| echo "Rule may already exist (duplicate ingress rules are rejected)."
+
+## rds-list-ips: Show all current IPs allowed into RDS on port 5432
+rds-list-ips:
+	aws ec2 describe-security-groups \
+		--group-ids $(RDS_SG) \
+		--region $(AWS_REGION) \
+		--query 'SecurityGroups[0].IpPermissions[?FromPort==`5432`].IpRanges[*].CidrIp' \
+		--output table

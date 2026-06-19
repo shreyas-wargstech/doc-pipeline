@@ -134,6 +134,20 @@ Parameters:
     Default: 0.0.0.0/0
     Description: CIDR block allowed to access the ALB. Restrict to your office IP for production.
 
+  RdsAllowedCidr:
+    Type: String
+    Default: ''
+    Description: >
+      CIDR block allowed direct access to RDS on port 5432 (e.g. 203.0.113.5/32).
+      Leave blank to disable public ingress (Lambda/ECS access still works via SG rules).
+
+  DBSnapshotIdentifier:
+    Type: String
+    Default: ''
+    Description: >
+      RDS snapshot ARN or identifier to restore from when the DB is replaced.
+      Required when subnet group changes (public access migration). Leave blank for a fresh DB.
+
 # ────────────────────────────────────────────────────────────────────────────
 # Globals
 # ────────────────────────────────────────────────────────────────────────────
@@ -187,6 +201,8 @@ Conditions:
   IsProduction: !Equals [!Ref Environment, production]
   CustomBucketName: !Not [!Equals [!Ref S3BucketName, '']]
   EnableMultiAzCondition: !Equals [!Ref EnableMultiAz, 'true']
+  HasRdsPublicCidr: !Not [!Equals [!Ref RdsAllowedCidr, '']]
+  HasDBSnapshot: !Not [!Equals [!Ref DBSnapshotIdentifier, '']]
 
 # ────────────────────────────────────────────────────────────────────────────
 # Resources
@@ -257,6 +273,14 @@ Resources:
           FromPort: 5432
           ToPort: 5432
           SourceSecurityGroupId: !Ref EcsSecurityGroup
+        - !If
+          - HasRdsPublicCidr
+          - IpProtocol: tcp
+            FromPort: 5432
+            ToPort: 5432
+            CidrIp: !Ref RdsAllowedCidr
+            Description: Direct public access from allowed CIDR
+          - !Ref AWS::NoValue
 
   RedisSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -489,6 +513,15 @@ Resources:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
 
+  PublicDatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Public subnets for DocIntel RDS (public access enabled)
+      DBSubnetGroupName: !Sub docintel-${Environment}-db-subnet-group-public
+      SubnetIds:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+
   Database:
     Type: AWS::RDS::DBInstance
     Properties:
@@ -502,10 +535,11 @@ Resources:
       MaxAllocatedStorage: 100
       StorageType: gp3
       MultiAZ: !If [EnableMultiAzCondition, true, false]
-      PubliclyAccessible: false
+      PubliclyAccessible: true
       VPCSecurityGroups:
         - !Ref RdsSecurityGroup
-      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DBSubnetGroupName: !Ref PublicDatabaseSubnetGroup
+      DBSnapshotIdentifier: !If [HasDBSnapshot, !Ref DBSnapshotIdentifier, !Ref AWS::NoValue]
       BackupRetentionPeriod: 7
       DeletionProtection: false
       EnablePerformanceInsights: true

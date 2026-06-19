@@ -23,18 +23,12 @@ async def main():
     # Read schema.sql
     schema_path = Path("db/schema.sql")
     schema_sql = schema_path.read_text(encoding="utf-8")
-    
+
     print(f"Applying schema ({len(schema_sql)} chars)...")
-    
-    # Execute each statement
-    statements = [s.strip() for s in schema_sql.split(";") if s.strip() and not s.strip().startswith("--")]
-    for stmt in statements:
-        try:
-            await conn.execute(stmt)
-        except asyncpg.exceptions.DuplicateTableError:
-            print(f"  [skip] Table/index already exists")
-        except Exception as e:
-            print(f"  [warn] {e}")
+
+    # Execute the whole file at once — split-on-semicolon breaks dollar-quoted
+    # trigger functions (they contain semicolons inside $$...$$).
+    await conn.execute(schema_sql)
     
     await conn.close()
     print("Schema applied successfully.")
