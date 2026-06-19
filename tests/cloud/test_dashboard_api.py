@@ -105,61 +105,6 @@ async def test_metrics_returns_counts(client: AsyncClient, as_user):
 
 
 @pytest.mark.asyncio
-async def test_audit_returns_rows(client: AsyncClient, as_user):
-    with patch("cloud.dashboard.api.audit.list_audit",
-               new=AsyncMock(return_value=[{"action": "ingest", "result": "ok"}])):
-        async with client as c:
-            resp = await c.get("/api/audit?action=ingest")
-    assert resp.status_code == 200
-    assert resp.json() == {"rows": [{"action": "ingest", "result": "ok"}]}
-
-
-@pytest.mark.asyncio
-async def test_audit_forwards_result_filter(client: AsyncClient, as_user):
-    spy = AsyncMock(return_value=[])
-    with patch("cloud.dashboard.api.audit.list_audit", new=spy):
-        async with client as c:
-            resp = await c.get("/api/audit?result=error")
-    assert resp.status_code == 200
-    assert spy.await_args.kwargs["result"] == "error"
-
-
-@pytest.mark.asyncio
-async def test_costs_returns_summary_and_breakdowns(client: AsyncClient, as_user):
-    with patch("cloud.dashboard.api.cost_queries.cost_summary",
-               new=AsyncMock(return_value={"cost": 0.5, "total_tokens": 1200, "calls": 7, "errors": 1})), \
-         patch("cloud.dashboard.api.cost_queries.cost_by_stage",
-               new=AsyncMock(return_value={"ocr_vlm": {"cost": 0.4, "total_tokens": 900, "calls": 3}})), \
-         patch("cloud.dashboard.api.cost_queries.cost_by_model",
-               new=AsyncMock(return_value={"m": {"cost": 0.5, "total_tokens": 1200, "calls": 7}})):
-        async with client as c:
-            resp = await c.get("/api/costs")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["summary"]["cost"] == 0.5
-    assert body["by_stage"]["ocr_vlm"]["calls"] == 3
-    assert "by_model" in body
-
-
-@pytest.mark.asyncio
-async def test_cost_events_forwards_stage_and_limit(client: AsyncClient, as_user):
-    spy = AsyncMock(return_value=[])
-    with patch("cloud.dashboard.api.cost_queries.recent_cost_events", new=spy):
-        async with client as c:
-            resp = await c.get("/api/costs/events?stage=ocr_vlm&limit=10")
-    assert resp.status_code == 200
-    assert spy.await_args.kwargs["stage"] == "ocr_vlm"
-    assert spy.await_args.kwargs["limit"] == 10
-
-
-@pytest.mark.asyncio
-async def test_costs_requires_auth(client: AsyncClient):
-    async with client as c:
-        resp = await c.get("/api/costs")
-    assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
 async def test_doc_detail_404_when_missing(client: AsyncClient, as_user):
     repo = AsyncMock()
     repo.get = AsyncMock(return_value=None)

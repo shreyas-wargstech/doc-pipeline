@@ -64,31 +64,7 @@ export interface DocDetailResponse { doc: DocFull; pages: PageRow[]; ocr_done: n
 export interface PageDetailResponse { page: PageRow; structured_json: Record<string, unknown> | null; raw_text: string | null; }
 export interface MetricsResponse { status_counts: Record<string, number>; match_counts: Record<string, number>; }
 
-export interface AuditRow {
-  id: number; ts: string; username: string; action: string;
-  document_id: string | null; params: Record<string, unknown>;
-  result: "ok" | "error"; detail: string | null;
-}
-export interface AuditResponse { rows: AuditRow[]; }
 export interface ActionResult { ok: boolean; message: string; }
-
-export interface CostSummary {
-  cost: number; prompt_tokens?: number; completion_tokens?: number;
-  total_tokens: number; calls: number; errors: number;
-}
-export interface CostBreakdownEntry { cost: number; total_tokens: number; calls: number; }
-export interface CostsResponse {
-  summary: CostSummary;
-  by_stage: Record<string, CostBreakdownEntry>;
-  by_model: Record<string, CostBreakdownEntry>;
-}
-export interface CostEventRow {
-  id: number; ts: string; stage: string; model: string;
-  document_id: string | null; page_num: number | null;
-  prompt_tokens: number; completion_tokens: number; total_tokens: number;
-  cost: number; status: "ok" | "error"; detail: string | null;
-}
-export interface CostEventsResponse { rows: CostEventRow[]; }
 
 export interface StreamEvent {
   document_id: string; status: DocStatus; match_status: MatchStatus;
@@ -159,67 +135,6 @@ export interface CorrectionResult {
   doc: DocFull;
   match_result: MatchResultOut;
 }
-
-export type RunItemStatus = "pending" | "running" | "done" | "skipped" | "failed";
-export type RunStatus = "running" | "paused" | "completed" | "cancelled" | "failed";
-
-export interface RunItem {
-  filename: string;
-  status: RunItemStatus;
-  document_id: string | null;
-  stage: string | null;
-  error: string | null;
-}
-
-export interface RunState {
-  run_id: string;
-  folder: string;
-  category: string;
-  force: boolean;
-  status: RunStatus;
-  total: number;
-  done: number;
-  skipped: number;
-  failed: number;
-  running: number;
-  items: RunItem[];
-}
-
-// SSE frames: {type:"item",...partial item}, {type:"summary"|"update",...RunState},
-// {type:"done",...RunState}. The store-backed API emits summary/update/done
-// (full RunState); "item" remains for the reducer's partial-item branch.
-export interface RunEvent {
-  type: "item" | "summary" | "update" | "done";
-  filename?: string;
-  status?: RunItemStatus;
-  stage?: string | null;
-  document_id?: string | null;
-  error?: string | null;
-  // summary/done frames carry the full RunState shape too:
-  [key: string]: unknown;
-}
-
-export interface RetrievalHit {
-  document_id: string;
-  s3_key_pdf: string;
-  document_type: string | null;
-  score: number;
-  tier: 1 | 2 | 3;
-  why_matched: string;
-}
-export interface SearchResponse { count: number; hits: RetrievalHit[]; }
-
-export interface SearchPageHit {
-  page_id: string;
-  page_num: number;
-  page_type: string | null;
-  s3_key_image: string;
-  page_summary: string | null;
-  search_keywords: string[];
-  entities: { type: string; value: string }[];
-  index_status: string;
-}
-export interface SearchPagesResponse { document_id: string; count: number; hits: SearchPageHit[]; }
 
 export type UserRole = "administrator" | "reviewer" | "operator" | "viewer";
 

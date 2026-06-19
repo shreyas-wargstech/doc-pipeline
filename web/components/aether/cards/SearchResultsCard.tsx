@@ -24,8 +24,8 @@ export function SearchResultsCard({ result }: { result: Extract<ToolResult, { ki
           </Link>
         ))}
       </div>
-      <Link href="/retrieval" className="inline-flex items-center gap-1 text-xs text-primary">
-        See all in retrieval <ArrowRight className="h-3.5 w-3.5" />
+      <Link href="/documents" className="inline-flex items-center gap-1 text-xs text-primary">
+        Browse all documents <ArrowRight className="h-3.5 w-3.5" />
       </Link>
     </div>
   );

@@ -26,18 +26,21 @@ vi.mock("@/lib/theme", () => ({
 }));
 
 describe("AppShell", () => {
-  it("renders all nine top-level nav groups", () => {
+  it("renders all six top-level nav groups", () => {
     usePathname.mockReturnValue("/");
     render(<AppShell><div>content</div></AppShell>);
-    for (const label of ["Documents", "Bookmarks", "Evaluation", "Pipelines", "Retrieval", "Observability", "Engine Room", "Aether", "Admin"]) {
+    for (const label of ["Documents", "Bookmarks", "Evaluation", "Engine Room", "Aether", "Admin"]) {
       expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
+    }
+    for (const label of ["Pipelines", "Retrieval", "Observability"]) {
+      expect(screen.queryByText(label)).toBeNull();
     }
   });
 
   it("marks the active route with aria-current", () => {
-    usePathname.mockReturnValue("/pipelines");
+    usePathname.mockReturnValue("/engine-room");
     render(<AppShell><div>content</div></AppShell>);
-    expect(screen.getByRole("link", { name: /pipelines/i })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /engine room/i })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: /documents/i })).not.toHaveAttribute("aria-current");
   });
 
