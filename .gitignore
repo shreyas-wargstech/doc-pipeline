@@ -60,3 +60,6 @@ infra/tfplan
 # Tooling
 .understand-anything/
 docintel-production-outputs.json
+
+
+env.json

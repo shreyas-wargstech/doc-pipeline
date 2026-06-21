@@ -8,18 +8,30 @@ FROM public.ecr.aws/lambda/python:3.12
 RUN dnf install -y glib2 \
     && dnf clean all
 
-RUN pip install --no-cache-dir uv
-
 WORKDIR /var/task
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev --extra ml
+
+# Install deps into the SYSTEM Python. The Lambda runtime client invokes the
+# handler with /var/lang/bin/python, NOT a uv/.venv — installing into a venv
+# (the old `uv sync` approach) made both the build prefetch and the runtime
+# handler fail with ModuleNotFoundError. requirements.txt is the base set
+# (generated from pyproject.toml; no torch, so no GPU bloat).
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install sentence-transformers with CPU torch from PyTorch's own wheel index.
+# This keeps the image ~2 GB instead of 8 GB.
+RUN pip install --no-cache-dir sentence-transformers \
+    --extra-index-url https://download.pytorch.org/whl/cpu
 
 COPY shared/ shared/
 COPY nas/ nas/
 COPY cloud/ cloud/
 
-# Pre-download the embedding model so no network call at Lambda cold start
-RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
+# Bake the embedding model into the image so there's no network call at Lambda
+# cold start (Lambdas run in a private VPC with no outbound internet). Pin the
+# HF cache under /var/task so it ships in the image and is readable at runtime.
+ENV HF_HOME=/var/task/hf-cache
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
 
 # CMD overridden per-function in Terraform:
 #   persist: cloud.persist.consumer.handler

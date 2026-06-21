@@ -6,11 +6,14 @@ FROM public.ecr.aws/lambda/python:3.12
 RUN dnf install -y glib2 \
     && dnf clean all
 
-RUN pip install --no-cache-dir uv
-
 WORKDIR /var/task
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev
+
+# Install deps into the SYSTEM Python. The Lambda runtime client invokes the
+# handler with /var/lang/bin/python, NOT a uv/.venv — installing into a venv
+# (the old `uv sync` approach) made the handler fail with ModuleNotFoundError
+# at runtime. requirements.txt is generated from pyproject.toml (base, no ml).
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY shared/ shared/
 COPY nas/ nas/

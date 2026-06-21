@@ -13,7 +13,8 @@ When the user wants to build, fix, test, or deploy something — that's your job
 1. Read `PROJECT_MEMORY.md` — recover project state, locked decisions, active threads.
 2. Read `documentation/session_log.md` — last work done + who did it.
 3. Read `documentation/error_fixes.md` — known bugs + rules.
-4. Treat `make test` as ground truth. Confirm scope before writing code.
+4. Read `documentation/scorecard.md` **Current Standing** — your latest score + Claude's improvement asks. Apply those asks this job.
+5. Treat `make test` as ground truth. Confirm scope before writing code.
 
 ## Rules
 
@@ -22,6 +23,7 @@ When the user wants to build, fix, test, or deploy something — that's your job
 - **Prefix every `session_log.md` entry with `[KIMI]`** so we know who did what.
 - **Handoff**: When you finish a task, append a clear handoff note to `session_log.md` saying what's done + what's next.
 - **No overlap**: If you see `[CLAUDE]` has an active task in the last 2 `session_log.md` entries, check with the user before starting conflicting work.
+- **Reviewed work**: Claude reviews + scores your executions in `documentation/scorecard.md`. Before each job, read **Current Standing** and act on the improvement asks. Do NOT edit `scorecard.md` — it's Claude's to write.
 
 ## Communication Style
 
