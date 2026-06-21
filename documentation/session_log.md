@@ -709,9 +709,9 @@ Recovered the stack from `UPDATE_ROLLBACK_FAILED` twice via `continue-update-rol
 4. **Lambda env vars scrambled** — `OPENROUTER_API_KEY`=Qdrant JWT (176 chars → 401), `NEO4J_PASSWORD`=42 chars (missing N). Built from the scrambled secret. Fixed live env from `.env` via boto3 `update_function_configuration`.
 5. **RDS auto-minor-version-upgrade race** — a run stalled at page 5 with `ConnectionRefusedError`; `describe-events` showed an auto upgrade 16.9→16.13 with ~40s downtime *coinciding with the run*. Not a bug; re-ran after it finished → green. Recommended `--no-auto-minor-version-upgrade`.
 
-**Verify:** `pytest tests/shared/test_db_engine.py tests/cloud/test_ingest_sqs.py` → green locally. Production: smoke test PASS (above). Standalone asyncpg probe confirmed `ssl=require`+`DocIntel2026Dev` authenticates.
+**Verify:** `pytest tests/shared/test_db_engine.py tests/cloud/test_ingest_sqs.py` → green locally. Production: smoke test PASS (above). Standalone asyncpg probe confirmed `ssl=require`+`<redacted: RDS master pw — in Secrets Manager `docintel/production/credentials` + local `.env`>` authenticates.
 
-**Files (code):** `shared/db.py`, `tests/shared/test_db_engine.py` (new), `scripts/smoke_test_aws.py`, `cloud/ingest/sqs.py`. **Live ops (not in code):** secret `docintel/production/credentials` rewritten via boto3 (valid JSON, `RDS_PASSWORD=DocIntel2026Dev`); pipeline Lambda env vars corrected from `.env`. Temp debug scripts removed.
+**Files (code):** `shared/db.py`, `tests/shared/test_db_engine.py` (new), `scripts/smoke_test_aws.py`, `cloud/ingest/sqs.py`. **Live ops (not in code):** secret `docintel/production/credentials` rewritten via boto3 (valid JSON, `RDS_PASSWORD=<redacted: RDS master pw — in Secrets Manager `docintel/production/credentials` + local `.env`>`); pipeline Lambda env vars corrected from `.env`. Temp debug scripts removed.
 
 **Not yet done / follow-ups (none blocking the green smoke test):**
 - **Durable secret fix (recommended next):** make `DocIntelSecrets` deterministic — replace `GenerateSecretString`/`GenerateStringKey: RDS_PASSWORD` with a plain `SecretString` from a NoEcho `RdsPassword` param, so deploys stop regenerating RDS_PASSWORD. Until then, **every** `sam deploy` that changes a secret param will re-break RDS auth and re-corrupt env — fix the secret + Lambda env after each deploy.
@@ -720,3 +720,36 @@ Recovered the stack from `UPDATE_ROLLBACK_FAILED` twice via `continue-update-rol
 - Pre-existing bug found in passing: `cloud/corrections/service.py:195` `analyze_match_thresholds` passes a `TextClause` where a `cutoff` date param belongs → 500 on the Engine Room tuning-suggestions endpoint.
 - Observation: this run's `match_status` was `unmatched` (an earlier run got `matched` on the same doc) — worth confirming the match stage once the durable fixes land.
 - Code changes uncommitted — offer to commit `shared/db.py` + tests + smoke-test + `cloud/ingest/sqs.py`.
+
+## [CLAUDE] 2026-06-21 — HANDOFF → NEXT SESSION (commit done; deploy + 3 follow-ups deferred)
+
+Smoke test is **green** and the fixes are **committed** on branch `fix/aws-pipeline-ssl-secret-per-page-ocr` (commit `e639b7d`) — incl. the durable deterministic-secret template fix (new NoEcho `RdsPassword` param, `GenerateSecretString` removed). Branch is **local, not pushed**. User asked to handle the rest next session. Pick up here:
+
+1. **Push branch + open PR** (or merge to `main`) — `fix/aws-pipeline-ssl-secret-per-page-ocr` (`e639b7d`).
+2. **Deploy the template fix** — the NEXT `sam deploy` MUST add `RdsPassword=<redacted: RDS master pw — in Secrets Manager `docintel/production/credentials` + local `.env`>` to the params (it's a new NoEcho param; build it into `$secretMap` since describe-stacks masks NoEcho). After this one deploy the regeneration trap is gone for good. **Build/deploy procedure + the corrected `$secretMap` snippet are in error_fixes.md FIX-074.** RDS master pw = `<redacted: RDS master pw — in Secrets Manager `docintel/production/credentials` + local `.env`>`; asyncpg needs `ssl="require"`; write secrets only via boto3 `json.dumps` (never PowerShell `ConvertTo-Json`→`--secret-string`).
+3. **Activate per-page OCR concurrency** — rebuild + redeploy the **ECS ingest** image (it's the producer; Lambda-only deploy left OCR serial). Then re-run `uv run python -m scripts.smoke_test_aws` to confirm OCR drains in ~1 min, not ~7.
+4. **Harden RDS** — `aws rds modify-db-instance --db-instance-identifier docintel-production-postgres-public --no-auto-minor-version-upgrade --apply-immediately --region ap-south-1` (the maintenance-window race that stalled a run).
+5. **Fix the Engine Room 500** — `cloud/corrections/service.py:195` `analyze_match_thresholds` passes a `TextClause` where the `cutoff` date param belongs (breaks tuning-suggestions endpoint).
+6. **Verify the match outcome** — this run got `match_status=unmatched` vs an earlier `matched` on the same doc; confirm once the above lands.
+
+Context note: the auto-memory dir for this project was missing on disk this session, so the durable record lives entirely in `error_fixes.md` (FIX-073 corrected + FIX-074 full chain) and this log.
+
+## [CLAUDE] 2026-06-21 — Cleared the full handoff: all 6 deferred follow-ups DONE
+
+**Stage:** Executed every item from the prior handoff, plus root-caused + fixed a new prod bug surfaced during verification.
+
+**Done (all on `main`, pushed):**
+1. **Engine Room 500 fixed** — `cloud/corrections/service.py` bound a `text("NOW() - INTERVAL ...")` fragment as the `:cutoff` *param value* in 5 functions; asyncpg can't encode a `TextClause` as a bind → 500 on tuning-suggestions. Now binds a real `datetime`. Regression test added (`tests/cloud/corrections/test_loop_closure.py`, 8 pass). Commit `66c0937`.
+2. **Merged to main + pushed** — fast-forwarded `main` to the branch (`e639b7d` + new commits), pushed to origin.
+3. **Durable-secret `sam deploy` DONE** — deployed the deterministic-`SecretString` template (new NoEcho `RdsPassword` param). Ran `sam build` + hand-assembled `sam deploy` with `--parameter-overrides RdsPassword=<redacted: RDS master pw — in Secrets Manager `docintel/production/credentials` + local `.env`> OpenRouterTextModel=google/gemini-2.5-flash` + the 3 scrambled-risk secrets (OpenRouter/Qdrant/Neo4j) from `.env`; rest kept previous values. **Verified:** secret is valid JSON, 5 keys, `RDS_PASSWORD=<redacted: RDS master pw — in Secrets Manager `docintel/production/credentials` + local `.env`>`. GenerateSecretString regeneration trap gone. (deploy.py still interactive/not RdsPassword-aware — future deploys need the same hand-assembled overrides; see FIX-074/075.)
+4. **Per-page OCR concurrency LIVE** — rebuilt+redeployed the ECS API image (`make deploy-api`, task def `:13`). OCR drains 13→0 in ~90s (was ~7 min serial). Built from a clean HEAD (stashed unrelated WIP) so only the committed change shipped.
+5. **RDS hardened** — `--no-auto-minor-version-upgrade` on `docintel-production-postgres-public` (`AutoMinor: false`).
+6. **Match outcome verified** — earlier `unmatched`/`None` was NOT a match bug; root-caused to the structure stage (FIX-075). Post-fix the test doc reaches `match_status=matched`, `index_status=done`, `registration_no=92008` end-to-end.
+
+**New bug found + fixed (FIX-075):** structure stage used the slow `openrouter/free` text model (`OPENROUTER_TEXT_MODEL` never set) under a 30s Lambda timeout → timeouts → `structure-dlq` → docs stuck at `structuring`, match never ran. Fix: `OpenRouterTextModel` param (default `google/gemini-2.5-flash`) wired into Globals env + `StructureFunction` Timeout 30→120, deployed via the same `sam deploy`; live-mitigated first via `update_function_configuration`. Commit `c5323c0`.
+
+**Loose ends (non-blocking):**
+- One **stale** `structure-dlq` message (obsolete 11:29 structure failure) — safety classifier blocked deletion. Harmless; purge `docintel-production-structure-dlq.fifo` when convenient (its doc is now fully processed).
+- `shared/config.py` still defaults `openrouter_text_model="openrouter/free"` (prod now overrides via env). Consider a fast default so local/unconfigured paths aren't slow.
+- Smoke test counts any DLQ message as failure — it reported ❌ only due to the stale message above; pipeline ran fully green.
+- Pre-existing uncommitted WIP left untouched (health.py contract change + test, aether frontend tweaks, docs) — not mine to commit.

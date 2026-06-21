@@ -1635,3 +1635,25 @@ put_secret_value(secret_string=json.dumps(d))     # compact JSON string arg
 - Windows AWS-CLI log reads: `MSYS_NO_PATHCONV=1` + `PYTHONUTF8=1` are mandatory.
 
 **Files:** `shared/db.py` (Lambda `ssl="require"`), `tests/shared/test_db_engine.py` (new), `scripts/smoke_test_aws.py` (drain timeout 300→600), `cloud/ingest/sqs.py` (per-page `MessageGroupId`, FIX-073a). Live ops: secret rewritten via boto3, pipeline Lambda env vars corrected from `.env`.
+
+
+## 2026-06-21 — Docs stuck at `structuring`, match never runs (FIX-075)
+
+**Symptom:** Smoke test went green at the queue/OCR level (all SQS queues drained, 13/13 pages OCR'd) but the document never reached a terminal state — it sat at `status=structuring`, `match_status=None` for hours, and `structure-dlq` held a message. Looked like a match-stage bug; was actually upstream.
+
+**Root cause (two compounding faults in the structure stage):**
+1. **Wrong model.** `shared/config.py` `openrouter_text_model` (the classifier + structure text LLM) defaults to `"openrouter/free"`. The free tier is slow/rate-limited. The StructureFunction Lambda env set `OPENROUTER_MODEL` (VLM) but **never set `OPENROUTER_TEXT_MODEL`**, so structure used the slow free default.
+2. **Timeout too tight.** `StructureFunction` had `Timeout: 30`. When the free model took >30s, the Lambda timed out (`Status: timeout` at exactly 30000ms, only `structure_llm_requesting` logged), SQS redelivered, and after `maxReceiveCount` the message dead-lettered → doc never advanced to match. Flaky: runs that squeaked under 30s succeeded, which is why earlier smoke tests sometimes reached `matched` and sometimes `unmatched`/stuck.
+
+**Fix (template, FIX-075):** added `OpenRouterTextModel` param (default `google/gemini-2.5-flash`) wired to `OPENROUTER_TEXT_MODEL` in `Globals.Function.Environment`, and bumped `StructureFunction` `Timeout` 30→120 (kept ≤ `StructureQueue` VisibilityTimeout of 120 so SQS doesn't redeliver a still-running message). Live mitigation before the deploy: `update_function_configuration` to merge-set `OPENROUTER_TEXT_MODEL=google/gemini-2.5-flash` on Structure + Ocr functions.
+
+**Verify:** post-deploy structure logs show `model=google/gemini-2.5-flash` and clear in seconds; the test doc reached `match_status=matched`, `index_status=done`, `registration_no=92008` end-to-end.
+
+**Key rules:**
+- A `text()` SQL fragment is **not** a valid bind value — passing `text("NOW() - INTERVAL ...")` as `params={"cutoff": ...}` makes asyncpg 500. Bind a real `datetime` (or inline the interval in the SQL). (Engine Room tuning-suggestions 500; `cloud/corrections/service.py`.)
+- Production LLM calls must use a fast paid model, never `openrouter/free` — free-tier latency blows Lambda timeouts. Set `OPENROUTER_TEXT_MODEL` explicitly; don't rely on the code default.
+- Keep a Lambda `Timeout` ≤ its source SQS queue `VisibilityTimeout`, and large enough for the slowest external call (LLM) it makes.
+- A green smoke test that only checks queue-drain + OCR can hide a stuck doc — assert the document reaches a terminal `status`/`match_status`, not just that queues emptied.
+- `update_function_configuration` **replaces** the env map — always read current env and merge, or you wipe other vars. A later `sam deploy` resets env from template params, so bake durable env changes into the template (don't leave them only as live overrides).
+
+**Files:** `cloud/infrastructure/sam/template.yaml` (`OpenRouterTextModel` param + Globals env + StructureFunction Timeout 30→120), `cloud/corrections/service.py` + `tests/cloud/corrections/test_loop_closure.py` (datetime cutoff bind). Live ops: RDS `--no-auto-minor-version-upgrade`; structure/ocr Lambda `OPENROUTER_TEXT_MODEL` merge-set; ECS API image redeployed for per-page OCR concurrency; deterministic-secret `sam deploy` (new `RdsPassword` param).
