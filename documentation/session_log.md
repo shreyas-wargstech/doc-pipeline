@@ -809,3 +809,17 @@ Not redeployed — the live env already matches intent and the deployed Timeout 
 - **Test isolation** — two autouse guards in `test_sweeper_integration.py`: (1) `_require_local_db` skips the module unless the resolved DB host is local (the root-cause guard — suite can't touch prod again); (2) `_clean_sweep_fixtures` deletes `sweep_%` before+after each test. **Verified:** suite now skips (3 skipped) against the prod `.env` with a clear reason; collection clean.
 
 **Open (non-blocking):** code change uncommitted (`tests/cloud/test_sweeper_integration.py`) alongside the pre-existing WIP; offer to commit. The 690-flagged "fix the sweeper integration isolation" follow-up is now **DONE**.
+
+## [CLAUDE] 2026-06-21 — Finished + committed the health.py/RecentDrawer WIP (`6c3de7d`)
+
+**Stage:** Closed out the two pre-existing uncommitted threads flagged in the prior handoff (line 795).
+
+**What was verified then committed:**
+- `cloud/engine_room/health.py::HealthReport.to_dict` — renamed `probes`→`checks`, `error`→`detail` (default `"OK"`), and remapped `overall` (`ok|degraded|down` → `ok|warn|error`). Confirmed this was a **real, already-live contract mismatch**: `cloud/aether_chat/service.py:181` and `web/lib/types.ts` (`HealthReport`/`HealthCheck`) were already committed on `main` expecting the new `checks`/`detail`/`warn`/`error` shape — the backend just hadn't caught up. Not a style change.
+- Aether `RecentDrawer.tsx` (new) + wiring: `WelcomeHero` no longer renders inline recent chips; a History button on `aether/page.tsx` opens the drawer (pick/clear), backed by `useChat`'s new `clearRecent()`. `.no-scrollbar` utility added to `globals.css` for the chat scroll area. Checked the `group`/`group-hover` pairing in both `WelcomeHero.tsx` and `RecentDrawer.tsx` — correct in both (last review's ask).
+
+**Verified green:** `tests/cloud/engine_room/test_health.py` 14/14; full backend suite 700 passed / 1 pre-existing-environmental fail (`test_aether_llm_enabled_defaults_false` — local `.env` intentionally has `AETHER_LLM_ENABLED=true`) / 1 skipped; web `components/aether` 9 files / 12 tests pass; `tsc --noEmit` 0; `next build` 9/9 routes.
+
+**Left untouched (separate, unrelated threads still uncommitted):** `.gitignore`, `AGENTS.md`/`CLAUDE.md` (review-loop docs), `cloud/infrastructure/sam/.aws-sam/build.toml`, `infra/docker/Dockerfile.{light,persist-index}`, `tests/cloud/test_sweeper_integration.py` (FIX-076, flagged above), plus untracked `test_db.py` / `infra/_lambda_backup/`.
+
+**Next:** none required; flag to owner that the remaining uncommitted files above are still open if they want those committed too.
