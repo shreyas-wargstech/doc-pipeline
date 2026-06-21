@@ -40,6 +40,19 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: Enable Multi-AZ for RDS (adds cost, provides HA). Set to 'true' for production.
 
+  RdsEndpointAddress:
+    Type: String
+    Description: >-
+      Endpoint address of the externally-managed RDS instance (not created by
+      this stack — provisioned manually, e.g. docintel-production-postgres-public).
+
+  RdsInstanceIdentifier:
+    Type: String
+    Default: ''
+    Description: >-
+      DBInstanceIdentifier of the externally-managed RDS instance, used only
+      for the CloudWatch dashboard widget dimension. Optional.
+
   EcsTaskCount:
     Type: Number
     Default: 1
@@ -129,6 +142,16 @@ Parameters:
     Description: Neo4j Aura password (stored in Secrets Manager).
     NoEcho: true
 
+  RdsPassword:
+    Type: String
+    Description: >-
+      RDS master password, written verbatim to Secrets Manager as RDS_PASSWORD.
+      MUST match the actual RDS instance master password. Supplied as a deploy
+      param (not CFN-generated) so the secret is deterministic across deploys —
+      see FIX-074 (GenerateSecretString regenerated this on every secret-param
+      change and desynced it from RDS). Keep JSON-safe (no " } \ or ${...}).
+    NoEcho: true
+
   AllowedCidr:
     Type: String
     Default: 0.0.0.0/0
@@ -171,7 +194,7 @@ Globals:
         SQS_MATCH_QUEUE_URL: !Ref MatchQueue
         SQS_PERSIST_QUEUE_URL: !Ref PersistQueue
         SQS_INDEX_QUEUE_URL: !Ref IndexQueue
-        RDS_HOST: !GetAtt Database.Endpoint.Address
+        RDS_HOST: !Ref RdsEndpointAddress
         RDS_PORT: '5432'
         RDS_DATABASE: 'doc_pipeline'
         RDS_USERNAME: 'pipeline'
@@ -179,18 +202,21 @@ Globals:
         REDIS_PORT: '6379'
         OPENROUTER_BASE_URL: !Ref OpenRouterBaseUrl
         OPENROUTER_MODEL: !Ref OpenRouterModel
-        # QDRANT_URL / NEO4J_URI / NEO4J_USER are required by shared/config.py;
-        # secrets (QDRANT_API_KEY, NEO4J_PASSWORD) are read from Secrets Manager
-        # at runtime via _load_secret_value (Lambda env can't reference SM).
         QDRANT_URL: !Ref QdrantUrl
         NEO4J_URI: !Ref Neo4jUri
         NEO4J_USER: !Ref Neo4jUser
-    VpcConfig:
-      SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+        # Sourced directly from deploy parameters (fresh each deploy). config.py
+        # reads these as plain env vars; only RDS_PASSWORD is fetched from Secrets
+        # Manager at runtime. DocIntelSecrets is now a deterministic SecretString
+        # built from the same params (see FIX-074), so env and secret stay in sync.
+        OPENROUTER_API_KEY: !Ref OpenRouterApiKey
+        QDRANT_API_KEY: !Ref QdrantApiKey
+        NEO4J_PASSWORD: !Ref Neo4jPassword
+    # NOTE: Functions are intentionally NOT in the VPC. A VPC Lambda has no
+    # internet without a NAT Gateway / interface endpoints, and the pipeline
+    # calls external SaaS (OpenRouter, Qdrant, Neo4j) + AWS APIs (Secrets
+    # Manager, SQS). Outside the VPC they get free public egress and reach RDS
+    # via its public endpoint. See FIX-071 in documentation/error_fixes.md.
     Tracing: Active
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -219,18 +245,20 @@ Resources:
     Properties:
       Name: !Sub docintel/${Environment}/credentials
       Description: All credentials for DocIntel pipeline and services
-      GenerateSecretString:
-        SecretStringTemplate: !Sub |
-          {
-            "RDS_PASSWORD": "",
-            "OPENROUTER_API_KEY": "${OpenRouterApiKey}",
-            "DASHBOARD_SESSION_SECRET": "${DashboardSessionSecret}",
-            "QDRANT_API_KEY": "${QdrantApiKey}",
-            "NEO4J_PASSWORD": "${Neo4jPassword}"
-          }
-        GenerateStringKey: RDS_PASSWORD
-        PasswordLength: 32
-        ExcludeCharacters: '"@/\\'
+      # Deterministic SecretString built entirely from deploy params — NOT
+      # GenerateSecretString. The old GenerateStringKey: RDS_PASSWORD generated a
+      # fresh random password whenever any embedded param changed, desyncing it
+      # from the RDS master and breaking auth on the next deploy (FIX-074).
+      # RDS_PASSWORD now comes from the RdsPassword param, so every deploy writes
+      # the same known-good value.
+      SecretString: !Sub |
+        {
+          "RDS_PASSWORD": "${RdsPassword}",
+          "OPENROUTER_API_KEY": "${OpenRouterApiKey}",
+          "DASHBOARD_SESSION_SECRET": "${DashboardSessionSecret}",
+          "QDRANT_API_KEY": "${QdrantApiKey}",
+          "NEO4J_PASSWORD": "${Neo4jPassword}"
+        }
       KmsKeyId: !Ref SecretsKmsKey
 
   SecretsKmsKey:
@@ -441,7 +469,9 @@ Resources:
       QueueName: !Sub docintel-${Environment}-ocr-queue.fifo
       FifoQueue: true
       ContentBasedDeduplication: true
-      VisibilityTimeout: 120
+      # Must be >= the OcrFunction timeout (300s); AWS recommends 6x. The OCR
+      # tier ladder (tesseract + VLM/OpenRouter escalation) is the slowest stage.
+      VisibilityTimeout: 1800
       MessageRetentionPeriod: 1209600
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt OcrDeadLetterQueue.Arn
@@ -480,7 +510,8 @@ Resources:
       QueueName: !Sub docintel-${Environment}-persist-queue.fifo
       FifoQueue: true
       ContentBasedDeduplication: true
-      VisibilityTimeout: 120
+      # >= PersistFunction timeout (300s)
+      VisibilityTimeout: 1800
       MessageRetentionPeriod: 1209600
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt PersistDeadLetterQueue.Arn
@@ -493,7 +524,8 @@ Resources:
       QueueName: !Sub docintel-${Environment}-index-queue.fifo
       FifoQueue: true
       ContentBasedDeduplication: true
-      VisibilityTimeout: 120
+      # >= IndexFunction timeout (300s)
+      VisibilityTimeout: 1800
       MessageRetentionPeriod: 1209600
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt IndexDeadLetterQueue.Arn
@@ -501,56 +533,10 @@ Resources:
       KmsMasterKeyId: !Ref SecretsKmsKey
 
   # ─────────────────────────────────────────────────────────────────────────
-  # RDS — PostgreSQL 16
+  # RDS — PostgreSQL 16 is provisioned and managed OUTSIDE this stack
+  # (docintel-production-postgres-public, created manually via AWS CLI).
+  # See RdsEndpointAddress parameter for the wiring into Lambda/ECS env vars.
   # ─────────────────────────────────────────────────────────────────────────
-
-  DatabaseSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Subnets for DocIntel RDS
-      DBSubnetGroupName: !Sub docintel-${Environment}-db-subnet-group
-      SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
-
-  PublicDatabaseSubnetGroup:
-    Type: AWS::RDS::DBSubnetGroup
-    Properties:
-      DBSubnetGroupDescription: Public subnets for DocIntel RDS (public access enabled)
-      DBSubnetGroupName: !Sub docintel-${Environment}-db-subnet-group-public
-      SubnetIds:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
-
-  Database:
-    Type: AWS::RDS::DBInstance
-    Properties:
-      DBInstanceIdentifier: !Sub docintel-${Environment}-postgres
-      DBInstanceClass: !Ref RdsInstanceClass
-      Engine: postgres
-      EngineVersion: '16.9'
-      MasterUsername: pipeline
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DocIntelSecrets}:SecretString:RDS_PASSWORD}}'
-      AllocatedStorage: !Ref RdsAllocatedStorage
-      MaxAllocatedStorage: 100
-      StorageType: gp3
-      MultiAZ: !If [EnableMultiAzCondition, true, false]
-      PubliclyAccessible: true
-      VPCSecurityGroups:
-        - !Ref RdsSecurityGroup
-      DBSubnetGroupName: !Ref PublicDatabaseSubnetGroup
-      DBSnapshotIdentifier: !If [HasDBSnapshot, !Ref DBSnapshotIdentifier, !Ref AWS::NoValue]
-      BackupRetentionPeriod: 7
-      DeletionProtection: false
-      EnablePerformanceInsights: true
-      PerformanceInsightsRetentionPeriod: 7
-      EnableCloudwatchLogsExports:
-        - postgresql
-      Tags:
-        - Key: Environment
-          Value: !Ref Environment
-        - Key: Project
-          Value: DocIntel
 
   # ─────────────────────────────────────────────────────────────────────────
   # ELASTICACHE — Redis
@@ -775,19 +761,22 @@ Resources:
       Dockerfile: infra/docker/Dockerfile.ocr
       DockerContext: ../../..
     Properties:
-      FunctionName: !Sub docintel-${Environment}-ocr
       Role: !GetAtt LambdaExecutionRole.Arn
       PackageType: Image
       ImageConfig:
         Command: ["cloud.ocr.consumer.handler"]
       MemorySize: 1024
-      Timeout: 60
+      # 300s: a page can hit tesseract (~12s) AND escalate to the VLM tier
+      # (OpenRouter, tens of seconds). BatchSize 1 so one slow/failing page
+      # can't blow the whole batch past the timeout (the consumer has no
+      # mid-batch checkpoint — it processes the batch then returns failures).
+      Timeout: 300
       Events:
         SQSJob:
           Type: SQS
           Properties:
             Queue: !GetAtt OcrQueue.Arn
-            BatchSize: 10
+            BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
       # Reserved concurrency caps (not throughput guarantees). Sum must stay
@@ -800,7 +789,6 @@ Resources:
       Dockerfile: infra/docker/Dockerfile.ocr
       DockerContext: ../../..
     Properties:
-      FunctionName: !Sub docintel-${Environment}-vlm
       Role: !GetAtt LambdaExecutionRole.Arn
       PackageType: Image
       ImageConfig:
@@ -817,7 +805,6 @@ Resources:
       Dockerfile: infra/docker/Dockerfile.light
       DockerContext: ../../..
     Properties:
-      FunctionName: !Sub docintel-${Environment}-structure
       Role: !GetAtt LambdaExecutionRole.Arn
       PackageType: Image
       ImageConfig:
@@ -840,7 +827,6 @@ Resources:
       Dockerfile: infra/docker/Dockerfile.light
       DockerContext: ../../..
     Properties:
-      FunctionName: !Sub docintel-${Environment}-match
       Role: !GetAtt LambdaExecutionRole.Arn
       PackageType: Image
       ImageConfig:
@@ -863,19 +849,21 @@ Resources:
       Dockerfile: infra/docker/Dockerfile.persist-index
       DockerContext: ../../..
     Properties:
-      FunctionName: !Sub docintel-${Environment}-persist
       Role: !GetAtt LambdaExecutionRole.Arn
       PackageType: Image
       ImageConfig:
         Command: ["cloud.persist.consumer.handler"]
-      MemorySize: 512
-      Timeout: 30
+      # Bakes the sentence-transformers embedding model (torch). 512 MB OOM'd
+      # (Max Memory Used 509/512) and throttled CPU → 30s timeouts. 2048 MB
+      # gives model headroom + ~4x CPU; 300s covers embed + Qdrant + Neo4j.
+      MemorySize: 2048
+      Timeout: 300
       Events:
         SQSJob:
           Type: SQS
           Properties:
             Queue: !GetAtt PersistQueue.Arn
-            BatchSize: 5
+            BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
       ReservedConcurrentExecutions: 20
@@ -886,19 +874,20 @@ Resources:
       Dockerfile: infra/docker/Dockerfile.persist-index
       DockerContext: ../../..
     Properties:
-      FunctionName: !Sub docintel-${Environment}-index
       Role: !GetAtt LambdaExecutionRole.Arn
       PackageType: Image
       ImageConfig:
         Command: ["cloud.index.consumer.handler"]
-      MemorySize: 512
-      Timeout: 30
+      # Same persist-index image (embedding model + torch) → same sizing as
+      # PersistFunction. 512 MB/30s was too small; 2048 MB/300s for embed+Qdrant.
+      MemorySize: 2048
+      Timeout: 300
       Events:
         SQSJob:
           Type: SQS
           Properties:
             Queue: !GetAtt IndexQueue.Arn
-            BatchSize: 5
+            BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
       ReservedConcurrentExecutions: 20
@@ -925,6 +914,31 @@ Resources:
       Environment:
         Variables:
           MONITOR_ENABLED: "true"
+
+  # Fan-in sweeper: the per-page OCR fan-out has no single invocation that owns
+  # a document, so "all pages OCR'd" is detected by this scheduled poll, which
+  # latches the doc processing→structuring and enqueues the Structure stage.
+  # Downstream stages (Structure→Match→Persist→Index) chain inline, so this is
+  # the only cross-stage trigger that needs a schedule. rate(1 minute) keeps
+  # happy-path latency low; the MonitorFunction (>10min) is the stuck fallback.
+  SweeperFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: infra/docker/Dockerfile.light
+      DockerContext: ../../..
+    Properties:
+      Role: !GetAtt LambdaExecutionRole.Arn
+      PackageType: Image
+      ImageConfig:
+        Command: ["cloud.orchestration.sweeper.handler"]
+      MemorySize: 256
+      Timeout: 60
+      Events:
+        SweepSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+      ReservedConcurrentExecutions: 2
 
   # ─────────────────────────────────────────────────────────────────────────
   # ECR — API Docker Image Repository
@@ -983,7 +997,7 @@ Resources:
             - Name: ENVIRONMENT
               Value: !Ref Environment
             - Name: DATABASE_URL
-              Value: !Sub postgresql+asyncpg://pipeline:{{resolve:secretsmanager:${DocIntelSecrets}:SecretString:RDS_PASSWORD}}@${Database.Endpoint.Address}:5432/doc_pipeline
+              Value: !Sub postgresql+asyncpg://pipeline:{{resolve:secretsmanager:${DocIntelSecrets}:SecretString:RDS_PASSWORD}}@${RdsEndpointAddress}:5432/doc_pipeline
             - Name: S3_BUCKET
               Value: !Ref DocumentsBucket
             - Name: SQS_OCR_QUEUE_URL
@@ -1147,7 +1161,7 @@ Resources:
               "properties": {
                 "title": "OCR Lambda Invocations",
                 "metrics": [
-                  [ "AWS/Lambda", "Invocations", "FunctionName", "docintel-${Environment}-ocr", { "stat": "Sum" } ]
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${OcrFunction}", { "stat": "Sum" } ]
                 ],
                 "period": 60,
                 "region": "${AWS::Region}",
@@ -1160,7 +1174,7 @@ Resources:
               "properties": {
                 "title": "VLM Lambda Invocations",
                 "metrics": [
-                  [ "AWS/Lambda", "Invocations", "FunctionName", "docintel-${Environment}-vlm", { "stat": "Sum" } ]
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${VlmFunction}", { "stat": "Sum" } ]
                 ],
                 "period": 60,
                 "region": "${AWS::Region}",
@@ -1190,11 +1204,11 @@ Resources:
               "properties": {
                 "title": "Lambda Error Rate",
                 "metrics": [
-                  [ "AWS/Lambda", "Errors", "FunctionName", "docintel-${Environment}-ocr", { "stat": "Sum" } ],
-                  [ "...", "docintel-${Environment}-structure" ],
-                  [ "...", "docintel-${Environment}-match" ],
-                  [ "...", "docintel-${Environment}-persist" ],
-                  [ "...", "docintel-${Environment}-index" ]
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${OcrFunction}", { "stat": "Sum" } ],
+                  [ "...", "${StructureFunction}" ],
+                  [ "...", "${MatchFunction}" ],
+                  [ "...", "${PersistFunction}" ],
+                  [ "...", "${IndexFunction}" ]
                 ],
                 "period": 60,
                 "region": "${AWS::Region}",
@@ -1300,7 +1314,7 @@ Resources:
       Namespace: AWS/RDS
       Dimensions:
         - Name: DBInstanceIdentifier
-          Value: !Ref Database
+          Value: !Ref RdsInstanceIdentifier
       Statistic: Average
       Period: 300
       EvaluationPeriods: 1
@@ -1351,14 +1365,14 @@ Outputs:
       Name: !Sub ${AWS::StackName}-S3Bucket
 
   RdsEndpoint:
-    Description: RDS PostgreSQL endpoint
-    Value: !GetAtt Database.Endpoint.Address
+    Description: RDS PostgreSQL endpoint (externally-managed instance)
+    Value: !Ref RdsEndpointAddress
     Export:
       Name: !Sub ${AWS::StackName}-RdsEndpoint
 
   RdsPort:
     Description: RDS PostgreSQL port
-    Value: !GetAtt Database.Endpoint.Port
+    Value: '5432'
     Export:
       Name: !Sub ${AWS::StackName}-RdsPort
 

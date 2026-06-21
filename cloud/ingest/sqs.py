@@ -22,8 +22,12 @@ async def enqueue_page(
     Send one OCR page message to SQS. Returns MessageId.
 
     FIFO queue (URL ends in .fifo):
-        Adds MessageGroupId = document_id and
-        MessageDeduplicationId = "<document_id>:<page_num>".
+        Adds MessageGroupId = MessageDeduplicationId = "<document_id>:<page_num>".
+        A per-page group id makes each page its own FIFO ordering group, so
+        SQS/Lambda process the pages of one document CONCURRENTLY (a shared
+        document-id group would serialize them ~7 min for 13 pages). The fan-in
+        sweeper still gates Structure on all pages being OCR-terminal, so
+        out-of-order page completion is safe (see cloud/orchestration/sweeper.py).
         SQS deduplicates within the 5-minute window — safe to re-enqueue
         on retry without double-processing.
 
@@ -44,8 +48,9 @@ async def enqueue_page(
         "MessageBody": msg.model_dump_json(),
     }
     if queue_url.endswith(".fifo"):
-        send_kwargs["MessageGroupId"] = msg.document_id
-        send_kwargs["MessageDeduplicationId"] = f"{msg.document_id}:{msg.page_num}"
+        page_key = f"{msg.document_id}:{msg.page_num}"
+        send_kwargs["MessageGroupId"] = page_key
+        send_kwargs["MessageDeduplicationId"] = page_key
 
     try:
         if sqs_client is not None:

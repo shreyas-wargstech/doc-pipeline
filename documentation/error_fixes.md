@@ -1528,3 +1528,110 @@ Started Docker Desktop. Verified with `docker ps` (should return empty list with
 - Always check `docker ps` before running `sam build` with image functions. If Docker isn't running, SAM will fail silently or with cryptic API errors rather than saying "Docker not found".
 
 **Files:** none (system dependency)
+
+---
+
+## 2026-06-20 — VPC Lambda hangs on every external call; then async DB pool breaks across event loops (FIX-071)
+
+**Symptom (two stacked failures, found during AWS e2e smoke test):**
+1. All pipeline Lambdas time out at exactly 60s with **zero log output** — they hang during `Settings()` init on a synchronous boto3 Secrets Manager call (`config.py:_load_secret_value`, fetching `RDS_PASSWORD`). The VPC had no NAT Gateway and no interface endpoints, so any call to a public AWS/SaaS endpoint (Secrets Manager, SQS, OpenRouter, Qdrant, Neo4j) hangs until boto3's default 60s timeout = the Lambda timeout.
+2. After fixing egress, OCR processes some pages (~27s, cold start) but others time out at 60s with `RuntimeError: Event loop is closed`, `Exception terminating connection <asyncpg...>`, and asyncpg queries hanging with `timeout=None`.
+
+**Root causes:**
+1. A VPC-attached Lambda has NO internet unless the VPC provides NAT or interface endpoints. Lambda ENIs never get public IPs, so an IGW route is useless to them.
+2. `shared/db.py` cached a module-level async engine with a real connection pool (`pool_size=10`). Every Lambda invocation runs a fresh event loop (`anyio.run`), but a pooled asyncpg connection is bound to the loop that created it. Reusing it on a later invocation's loop → "Event loop is closed" / hung query until timeout. Cold starts (fresh connection) succeed; warm-container reuse fails. `pool_pre_ping` does NOT help — the ping itself runs on the dead loop.
+
+**Fix:**
+1. Cost-free egress: detached all 7 pipeline Lambdas from the VPC (`--vpc-config '{"SubnetIds":[],"SecurityGroupIds":[]}'`) so they use AWS-managed public internet; reach RDS via its public endpoint (`PubliclyAccessible: true`) with the RDS SG opened to `0.0.0.0/0:5432`. Removed `VpcConfig` from `Globals.Function` in the SAM template so deploys don't re-attach. (Redis/ElastiCache is the only VPC-only dependency and is unused by the pipeline stages.) Alternative if private networking is required: NAT Gateway (~$32/mo) or interface endpoints — but external SaaS (OpenRouter/Qdrant/Neo4j) still need NAT.
+2. In `shared/db.py`, use `poolclass=NullPool` when `AWS_LAMBDA_FUNCTION_NAME` is set (fresh connection per session in the current loop), plus asyncpg `connect_args={"timeout": 10, "command_timeout": 30}` so hangs fail fast. Long-running services (ECS API, single event loop) keep the real `pool_size=10` pool.
+
+**Rule:**
+- A Lambda in a VPC reaches the internet ONLY via NAT Gateway or VPC interface/gateway endpoints — never via an Internet Gateway (ENIs have no public IP). A 60s timeout with no logs = it hung on the first external network call during init. Cheapest fix when private networking isn't required: take the function OUT of the VPC.
+- NEVER share a pooled async SQLAlchemy/asyncpg engine across Lambda invocations. Each invocation = new event loop; pooled connections are loop-bound. Use `NullPool` (or dispose the engine per invocation) under `AWS_LAMBDA_FUNCTION_NAME`. Keep real pooling only for single-loop long-running processes.
+- Always set asyncpg `command_timeout` in Lambda so a stuck query fails well under the function timeout (→ `batchItemFailure` + retry) instead of burning the whole budget silently.
+
+**Files:** `shared/db.py`, `cloud/infrastructure/sam/template.yaml` (remove `Globals.Function.VpcConfig`)
+
+---
+
+## 2026-06-21 — Frozen `GenerateSecretString` secret + several Lambda pipeline sizing/wiring gaps (FIX-072)
+
+Found while driving the AWS e2e smoke test to a full green pass. Several distinct defects, grouped because they were all uncovered in one run:
+
+**1. Corrupted, frozen Secrets Manager secret.**
+- Symptom: persist failed with `Neo.ClientError.Security.Unauthorized` (Neo4j auth). The Lambda's resolved `NEO4J_PASSWORD` was `3ZsG0L8-...` but the working value (`.env`, verified by direct `neo4j` driver connect) was `N3ZsG0L8-...` — the leading `N` was missing.
+- Root cause: `DocIntelSecrets` uses `GenerateSecretString`, which only writes on resource CREATE. The secret was created once with a corrupted Neo4j value and CloudFormation never updates it on subsequent deploys. The Lambda env vars were `{{resolve:secretsmanager:...}}` dynamic refs snapshotting that stale secret.
+- Fix: source `OPENROUTER_API_KEY` / `QDRANT_API_KEY` / `NEO4J_PASSWORD` Lambda env vars from the deploy **parameters** (`!Ref OpenRouterApiKey` etc., fresh from `.env` each deploy) instead of the frozen secret. Note `RDS_PASSWORD` is fine — it's the generated key and is still fetched from SM at runtime by `config.py`.
+- TODO (not yet done): repair the secret itself via `put-secret-value` so ECS / other readers get correct values.
+
+**2. SQS visibility timeout must be ≥ function timeout.**
+- Symptom: ESM update failed — `Queue visibility timeout: 120 seconds is less than Function timeout: 300 seconds`, which then cascaded into `UPDATE_ROLLBACK_FAILED`.
+- Fix: any queue feeding a Lambda must have `VisibilityTimeout >= function Timeout` (AWS recommends 6x). Set OCR/Persist/Index queues to 1800 for their 300s functions.
+
+**3. Embedding-model Lambdas OOM/throttled at 512 MB.**
+- Symptom: persist/index timed out at 30s, `Max Memory Used: 509/512 MB`, never reaching the embed/Qdrant/Neo4j calls.
+- Fix: persist-index image bakes `sentence-transformers`+torch → bump `MemorySize` to 2048 (also ~4x CPU) and `Timeout` to 300.
+
+**4. Batch can't finish in the function timeout.**
+- Symptom: OCR persisted a few pages then got killed mid-batch (`BatchSize:10` × ~12-40s/page ≫ 60s), whole batch redelivered → reprocess loop → DLQ. Not a hang (so `command_timeout` didn't catch it — wall-clock).
+- Fix: `BatchSize:1` for the slow OCR/persist/index consumers (they have no mid-batch checkpoint) and generous per-function timeouts.
+
+**5. Fan-in sweeper was never deployed.**
+- Symptom: OCR completed but nothing advanced the doc to Structure (queues stayed empty); only the >10min self-healing monitor would eventually move it.
+- Root cause: `cloud.orchestration.sweeper.handler` (the OCR→Structure fan-in poll) had no Lambda in the template — only `MonitorFunction` (stuck-doc healing) was deployed.
+- Fix: added `SweeperFunction` (Dockerfile.light) on `rate(1 minute)`. Downstream stages (Structure→Match→Persist→Index) chain inline via `enqueue_stage`, so the sweeper is the only cross-stage trigger that needs a schedule.
+
+**Rule:**
+- `GenerateSecretString` is CREATE-only. Never treat such a secret as a live source of truth you can update by redeploying — to change it you must `put-secret-value`, or source the value elsewhere. Lambda env `{{resolve:secretsmanager}}` dynamic refs snapshot at deploy time and do NOT re-resolve when only the secret content changes.
+- SQS→Lambda: `queue VisibilityTimeout >= function Timeout` (6x recommended). Bump the queue whenever you raise a function timeout, or the ESM update fails.
+- VPC-less Lambdas that bake ML models need ≥2048 MB (memory == CPU); 512 MB OOMs sentence-transformers.
+- A per-item-expensive SQS consumer with no mid-batch checkpoint should use `BatchSize:1` so one slow item can't blow the whole batch past the timeout.
+- Per-page fan-out needs a scheduled fan-in poll to advance the document; verify every cross-stage transition has either an inline `enqueue_stage` or a deployed scheduled trigger.
+
+**Files:** `cloud/infrastructure/sam/template.yaml` (env vars → params, OCR/Persist/Index sizing + queue visibility, new `SweeperFunction`)
+
+## 2026-06-21 — Repairing a drifted Secrets Manager secret without leaking/retyping it (FIX-073)
+
+**Symptom:** A Secrets Manager value (`NEO4J_PASSWORD` in `docintel/production/credentials`) had drifted from the real value in `.env` — a leading `N` was dropped when the corrupted `GenerateSecretString` was first written (see FIX-072). Lambdas bypassed it via deploy params (e2e was green), but ECS and any other reader still consumed the broken secret, so a single ECS restart would silently break the Neo4j auth path.
+
+**Root cause:** The secret is the source of truth for non-Lambda readers, but it was never reconciled against `.env` after the FIX-072 corruption was discovered.
+
+**Fix — idempotent read-mutate-write (never retype the secret by hand):**
+```python
+d = json.loads(get_secret_value(...))            # read current from AWS
+if not d["NEO4J_PASSWORD"].startswith("N"):       # idempotent guard — safe to re-run
+    d["NEO4J_PASSWORD"] = "N" + d["NEO4J_PASSWORD"]
+put_secret_value(secret_string=json.dumps(d))     # compact JSON string arg
+# then force ECS redeploy — tasks cache secrets at task start
+```
+
+**Rules:**
+- Repair drifted secrets with a programmatic **read-from-AWS → mutate → put-secret-value** transform, gated by an idempotent check. Never hand-retype a secret (re-introduces typos / the exact drift you're fixing).
+- **CORRECTED 2026-06-21 (see FIX-074):** do NOT pass JSON to `--secret-string` from PowerShell. PowerShell strips the `"` quotes when handing a JSON string to a native exe, producing an unquoted `{KEY:value,...}` secret that no JSON parser can read. **Always write secrets via Python `boto3` `put_secret_value(SecretString=json.dumps(d))`** — never PowerShell `ConvertTo-Json` → `aws --secret-string`.
+- After any secret change, **force an ECS redeploy** (`update-service --force-new-deployment`) — running tasks snapshot secrets at start and won't pick up the new value otherwise. Same snapshot-at-deploy caveat as Lambda `{{resolve:secretsmanager}}` dynamic refs (FIX-072).
+- Verify structurally (key presence, length, prefix) without printing values; final functional proof is `/health` 200 on the new task.
+
+**Files:** AWS Secrets Manager `docintel/production/credentials` (updated in place, VersionId `281e48a7…`); ECS service `docintel-production-api` force-redeployed.
+
+## 2026-06-21 — Five-cause AWS pipeline outage after a Lambda `sam deploy` (FIX-074)
+
+**Symptom:** After redeploying the pipeline Lambdas (to ship the per-page-`MessageGroupId` OCR change, FIX-073a), the smoke test stalled with `ocr` stuck and **0 pages processed**. Each re-run peeled back a *different* root cause. Documented as a chain because the interactions are the lesson.
+
+**Investigation (systematic-debugging, ~6 cycles):** OCR queue `NotVisible:1` (FIFO single-group → one in-flight at a time, so one stuck message blocks the whole document). CloudWatch Lambda logs were the decisive evidence at every step — read them with `aws logs filter-log-events` and these Windows guards: `export MSYS_NO_PATHCONV=1` (else Git Bash mangles `/aws/lambda/...`), `PYTHONIOENCODING=utf-8 PYTHONUTF8=1` (else cp1252 chokes on Rich tracebacks).
+
+**The five causes, in the order they surfaced:**
+1. **RDS enforces SSL; asyncpg defaulted to non-SSL.** `default.postgres16` sets `rds.force_ssl=1`. The Lambda URL had no sslmode → asyncpg `prefer` → tries SSL, **silently falls back to non-SSL**, which RDS rejects: `no pg_hba.conf entry ... no encryption`. **Fix:** `shared/db.py` Lambda branch `connect_args={..., "ssl": "require"}` (forces SSL, no fallback). Verified by a standalone asyncpg connect: `ssl="require"` reached auth, `ssl="disable"` got the encryption error. (ECS path connects fine via `prefer`; local dev is plaintext localhost — so force SSL **only** in the Lambda branch.)
+2. **CFN `GenerateSecretString` regeneration trap.** `DocIntelSecrets` uses `GenerateStringKey: RDS_PASSWORD`. Its `SecretStringTemplate` embeds the other secret *params* (`${Neo4jPassword}` …). Because FIX-073 had changed `NEO4J_PASSWORD`, the template string differed from the prior deploy → CFN **regenerated the entire secret, including a fresh random `RDS_PASSWORD`** that no longer matched the RDS master → `InvalidPasswordError`. Any deploy that changes a secret param re-breaks RDS auth. **Durable fix (still TODO):** stop CFN owning `RDS_PASSWORD` — replace `GenerateSecretString` with a plain `SecretString` built from a NoEcho `RdsPassword` param so it is deterministic.
+3. **PowerShell corrupted the secret on write.** The interim repair `aws secretsmanager put-secret-value --secret-string ($d | ConvertTo-Json)` produced an **unquoted** `{QDRANT_API_KEY:eyJ...}` blob — PowerShell strips `"` from a JSON string passed to a native exe. `_load_secret_value`'s `json.loads` then threw and returned `""` (empty password). **Fix + rule:** repair/write secrets only via Python `boto3` `put_secret_value(SecretString=json.dumps(d))`. (This corrected the FIX-073 guidance above.)
+4. **Lambda env vars were scrambled.** `OPENROUTER_API_KEY` env was 176 chars (the *Qdrant* JWT) → OpenRouter `401 Missing Authentication`; `NEO4J_PASSWORD` env was 42 chars (missing the `N`). These come from the deploy params, which had been built from the already-scrambled secret. **Fix:** set the live env directly from `.env` (the clean source) via boto3 `update_function_configuration` per pipeline function — no redeploy, no regeneration. After this, OCR drained 13→0 and the doc reached `processed`.
+5. **RDS auto-minor-version-upgrade race.** A later run stalled at page 5 with `ConnectionRefusedError` (not auth/SSL). `describe-events` showed an **auto minor-version upgrade (16.9→16.13) with ~40s downtime that coincided exactly with the run** — RDS was shut down mid-run. Not a bug. **Hardening:** `modify-db-instance --no-auto-minor-version-upgrade`. Re-ran after upgrade completed → **green**.
+
+**Key rules:**
+- RDS Postgres 16 defaults to `rds.force_ssl=1`. Any asyncpg client to RDS must use `ssl="require"` (or stricter) — never rely on `prefer`, which falls back to a non-SSL connection RDS rejects.
+- Never let CloudFormation `GenerateSecretString` own a password that must match an external system (RDS master) — a param change regenerates it. Make secrets deterministic from NoEcho params.
+- Write Secrets Manager values **only** via Python `boto3`/`json.dumps`. PowerShell `ConvertTo-Json` → `aws --secret-string` strips quotes (unquoted-key corruption) and/or adds a BOM.
+- When a `sam deploy` resets Lambda config, the env vars come from the deploy params — if the secret/param source is corrupt, the live env is corrupt too. `.env` is the clean source of truth; reconcile the live env against it.
+- Before declaring a pipeline failure a code bug, check `aws rds describe-events` — a maintenance/upgrade downtime can produce `ConnectionRefusedError` that looks like an app failure.
+- Windows AWS-CLI log reads: `MSYS_NO_PATHCONV=1` + `PYTHONUTF8=1` are mandatory.
+
+**Files:** `shared/db.py` (Lambda `ssl="require"`), `tests/shared/test_db_engine.py` (new), `scripts/smoke_test_aws.py` (drain timeout 300→600), `cloud/ingest/sqs.py` (per-page `MessageGroupId`, FIX-073a). Live ops: secret rewritten via boto3, pipeline Lambda env vars corrected from `.env`.

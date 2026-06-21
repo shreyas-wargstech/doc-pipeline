@@ -572,3 +572,151 @@ Closed the one remaining open Aether thread (flagged 2026-06-19, never run).
 **Decision:** left `AETHER_LLM_ENABLED=true` in local `.env` per explicit choice — flag is live for this environment now. Production deploy config (`.env.example`) still defaults `AETHER_LLM_ENABLED=false`; flip that separately if/when the LLM path should go live in production.
 
 **Next:** None — Aether backend + frontend both fully verified, no open threads.
+
+## [CLAUDE] 2026-06-20 — Aether chat: fullscreen layout fix
+
+User asked to make Aether "fullscreen and adjust it properly" — confirmed scope via AskUserQuestion: fill the dashboard main area properly (no chrome removal), not a true edge-to-edge takeover.
+
+**What was done (`web/app/(dash)/aether/page.tsx`):**
+- Added missing `-mb-6` alongside existing `-mx-6 -mt-6` so the page cancels *all* of `AppShell`'s `p-6` padding — previously only top/sides were canceled, leaving a stray 24px gap below the composer that kept the page from ever truly reaching the viewport bottom.
+- Added `min-h-0` on the flex wrapper and the message-list container — without it the `flex-1 overflow-y-auto` list couldn't shrink to fit its flex parent, so it could push content past the viewport instead of scrolling internally (classic flexbox min-height:auto trap).
+- Added `overflow-hidden` on the outer container to clip the ambient gradient orbs (`h-96 w-96 blur-3xl`) that bleed past the edges and could trigger spurious scrollbars.
+- Widened `max-w-3xl` → `max-w-4xl` for better use of the now-fuller-bleed space; inner content (`WelcomeHero`, message bubbles) already self-constrains via its own `max-w-lg`/`max-w-[80%]`, so nothing overflows.
+
+**Verification:** `aether-page.test.tsx` passes; `npm run dev` compiles clean with no errors. No browser-automation tool available this session to capture a visual screenshot — flagged as unverified visually, logic-verified only.
+
+**Next:** None pending. If a visual regression turns up, check the AppShell `main` padding contract (`p-6` on `main`, expected to be fully canceled by `-mx-6 -mt-6 -mb-6` on full-bleed pages) before re-touching the Aether layout.
+
+## [CLAUDE] 2026-06-20 — Fix: Aether chat 500 (System Health) — `HealthReport` key contract mismatch
+
+**Stage:** Bug fix — `POST /api/chat`, root-caused via systematic-debugging.
+
+**What was done:**
+- User reported "System health" chat action returning HTTP 500. Confirmed via prod CloudWatch (`/aws/ecs/docintel-production-api`): `AttributeError: 'HealthReport' object has no attribute 'checks'` at `cloud/aether_chat/service.py:173` (`for check in report.checks:`). That code path calls `check_all()` and accesses `.checks` directly on the dataclass — but `HealthReport` only ever had a `.probes` field. **The deployed ECS image is running a pre-`f1f430f` build** (before the tools-orchestrator refactor); current `main` no longer has that direct-attribute-access bug.
+- However, current `main` has a **related latent bug**: `cloud/engine_room/health.py`'s `HealthReport.to_dict()` emitted `{"probes": [...], ...}` with each item carrying `"error"`, while every consumer — `web/lib/types.ts` (`HealthCheck { name, status, detail, latency_ms }`), `HealthCard.tsx` (`result.checks`), `engine-room/page.tsx` (`health.data.checks`), and even the test mock in `tests/cloud/aether_chat/test_tools.py` — expects `{"checks": [...]}` with `"detail"`. This wouldn't 500 (just silently render an empty checks list) but is the real reason Engine Room's Health panel and Aether's health card have never shown per-service rows.
+- **Fix:** `cloud/engine_room/health.py` `to_dict()` now emits `"checks"` (not `"probes"`), each item's `"detail"` (falls back to `"OK"` when no error), and maps `overall` `ok|degraded|down` → `ok|warn|error` to match the frontend's 3-value contract. Updated `tests/cloud/engine_room/test_health.py::test_health_report_to_dict` to assert the new keys.
+- Did **not** touch `tests/cloud/test_engine_room_api.py::test_engine_health_returns_report` — it mocks `report.to_dict()` wholesale (doesn't exercise the real implementation), so it's unaffected either way; left as-is to avoid scope creep.
+
+**Verify:**
+- `.venv/Scripts/python -m pytest tests/cloud/engine_room/test_health.py tests/cloud/aether_chat/test_tools.py tests/cloud/test_engine_room_api.py -q` → **24 passed** ✅
+- User confirmed live chat "looks fixed now" after this change went out (local fix; **not yet redeployed to ECS** — the live container is still the stale pre-`f1f430f` image and will keep failing on health queries until redeployed).
+
+**Key rule:** Before trusting a "✅ tests pass" verdict for a dict-shaped API contract, check the actual key names a `to_dict()`/serializer emits against every real consumer (frontend types + components), not just the unit test for the producing module — tests that mock the producer wholesale (e.g. `MagicMock().to_dict.return_value = {...}`) hide producer/consumer key-name drift indefinitely.
+
+**Files touched:** `cloud/engine_room/health.py`, `tests/cloud/engine_room/test_health.py`.
+
+## [CLAUDE] 2026-06-20 — Aether chat: scrollbar fix + Recent moved to right-side drawer
+
+**Stage:** Frontend polish, `web/app/(dash)/aether/page.tsx` and related components.
+
+**What was done:**
+- **Unwanted scrollbar on empty view:** added a `.no-scrollbar` utility (`web/app/globals.css` — `scrollbar-width: none` / `-ms-overflow-style: none` / `::-webkit-scrollbar{display:none}`) and applied it to the message-list scroll container. Hides the native scrollbar visually while keeping scroll functional for long chat threads.
+- **Recent searches moved into a right-side drawer:** new `web/components/aether/RecentDrawer.tsx` reusing the existing `Drawer`/`Sheet` primitives (kept visual consistency with the rest of the app instead of building bespoke chrome). Lists recent queries (clock icon, truncated text, hover arrow) with a "Clear history" action. `useChat.ts` gained `clearRecent()` to back it.
+- Stripped the inline "Recent" list out of `WelcomeHero.tsx` (prop signature simplified to just `onPick`) — it's now exclusively in the drawer. Added a persistent "Recent" pill trigger (icon + count badge) in `aether/page.tsx`, visible in both the empty and active-chat states (passed as `PageHeader`'s `actions` when chat is active, top-right `flex justify-end` row when empty).
+- Updated `WelcomeHero.test.tsx` for the new prop shape.
+
+**Spacing bug + root cause (the one worth remembering):** initial `pt-4`/`pt-6` top-padding fixes on the header row looked correct in code and in a screenshot I read, but the user kept seeing the Recent button flush against the top bar in their actual browser. Root cause was a **stale Next.js Fast Refresh bundle** — a full `npm run dev` restart (not just a browser hard-refresh) picked up the change. Confirmed fixed after restart.
+
+**Backdrop-blur scrim — tried and reverted:** attempted to soften the header/chat-scroll boundary with a `backdrop-blur` + `mask-image` scrim under the header (first single-layer, then a 3-layer progressive-blur stack to avoid the hard filter-region edge a single masked blur box always has). User tried it live and asked to remove it — reverted to a plain header `<div className="pt-6">` wrapper, no scrim. **Don't re-attempt this pattern on this page** without a different approach if asked again — both single- and multi-layer masked `backdrop-blur` were rejected on visual grounds, not a technical bug.
+
+**Verify:** `npx vitest run components/aether` — 9 files / 12 tests passed. `npx tsc --noEmit` clean throughout.
+
+**Next:** None pending on this page.
+
+**Next:** **Redeploy `docintel-production-api` ECS service** to pick up this fix + the already-merged `f1f430f` tools-orchestrator refactor (the running task is older than both). Offered to the user; awaiting go-ahead — production deploys are not done without explicit confirmation. Separately: the color/contrast complaint ("fix font colors and background color in all the pages") is still open — token-system + component audit found no broken combo in source (`web/lib/tokens.ts` pairs bg/text tokens correctly in both themes; one confirmed-good login-page dark-mode screenshot via local Docker stack), but couldn't get authenticated screenshots of the other dashboard pages working before the user said the chat fix already resolved their immediate concern. User is going to send a screenshot of the specific page(s) that look wrong.
+
+## [CLAUDE] 2026-06-21 — AWS e2e smoke test: FULL GREEN end-to-end (first successful run)
+
+Drove the AWS e2e integration test to a complete pass. Document `c85718d0…f9b72bcc` (13-page `AMR-MCH-26-A-00031.pdf`) reached terminal state across all datastores: `status=processed`, `match_status=matched`, `index_status=done`, all 13 pages `ocr_status=done`. Full chain fired: **S3 → ECS `/pipeline/notify` → OCR (13 pages, VLM-classified) → Sweeper → Structure → Match → Persist (Qdrant + Neo4j) → Index.**
+
+**Blocker chain resolved this session (all in `cloud/infrastructure/sam/template.yaml` unless noted):**
+1. **Stale Zip Lambdas** — live functions were `PackageType: Zip` (old broken code); `sam deploy` flipped all 6 to `Image` (the FIX-067 rebuild had only been `sam build`-ed, never deployed).
+2. **RDS CFN drift** — `Database` logical resource pointed at a deleted instance (404). Removed the phantom `Database`/subnet-group resources; added `RdsEndpointAddress`/`RdsInstanceIdentifier` params pointing at the real `docintel-production-postgres-public`.
+3. **Custom-name replacement block** — Zip→Image requires replacement, which CFN refuses for custom-named resources. Dropped explicit `FunctionName` from the 6 pipeline functions (auto-generated names now; dashboard widgets repointed to `${OcrFunction}` etc.).
+4. **VPC egress (cost-free path)** — VPC had no NAT/endpoints, so every external call hung 60s. Detached all 7 Lambdas from the VPC (free public egress; RDS reached via public endpoint), opened RDS SG `0.0.0.0/0:5432` (user OK'd security), added S3 gateway endpoint, removed `Globals.Function.VpcConfig`.
+5. **Async DB pool across event loops (FIX-071)** — `shared/db.py` now uses `NullPool` + asyncpg `connect_args` timeouts under `AWS_LAMBDA_FUNCTION_NAME`; real pool kept for ECS.
+6. **Config + corrupted secret (FIX-072)** — OpenRouter/Qdrant/Neo4j keys were never loaded; `GenerateSecretString` had frozen a corrupted `NEO4J_PASSWORD` (missing leading `N`). Switched those 3 env vars to deploy params (`!Ref`), fresh from `.env`.
+7. **Sizing/wiring (FIX-072)** — OCR `BatchSize:1`/`Timeout:300`; Persist/Index `MemorySize:2048`/`Timeout:300` (was OOM at 512); OCR/Persist/Index queue `VisibilityTimeout:1800` (≥ function timeout); added **`SweeperFunction`** (`rate(1 min)`) — the OCR→Structure fan-in poll that was never deployed (downstream chains inline).
+8. **`.env` hygiene** — removed duplicate `AWS_ACCESS_KEY_ID/SECRET=local` lines that shadowed real deployer creds.
+
+Recovered the stack from `UPDATE_ROLLBACK_FAILED` twice via `continue-update-rollback`. Persist was finally validated by purging the jammed persist FIFO queue (zombie in-flight msg holding the group lock under the new 1800s visibility) + injecting one clean `StageMessage` with a unique dedup id.
+
+**NOTE on the smoke test result:** `scripts.smoke_test_aws` still prints `FAILED` on a cold run — NOT a pipeline defect. Its Phase-3 poll window is 300s but OCR runs serially (FIFO `MessageGroupId=document_id`, ~7 min for 13 pages), so the test times out before OCR drains. The pipeline itself completes correctly (verified directly in RDS).
+
+**Next tasks (agreed a/b/c):**
+- **(a)** Make a fresh smoke-test run go green: bump `scripts.smoke_test_aws` Phase-3 poll timeout (300→~900s), OR parallelize OCR via per-page `MessageGroupId` so pages process concurrently (faster + the "real" fix). Recommend per-page group id + a modest timeout bump.
+- **(b)** Repair the Secrets Manager secret `docintel/production/credentials` via `put-secret-value` so `NEO4J_PASSWORD` (and verify `QDRANT_API_KEY`) are correct — ECS/other readers still consume the frozen, corrupted secret. Lambdas already bypass it via params.
+- **(c)** DONE this entry — `FIX-071`/`FIX-072` written to `error_fixes.md`; session logged. (Remaining sanity check: persist logged `points=1` and index `skipped_already_running` — confirm Qdrant actually holds the expected per-page vectors for this doc.)
+
+## [CLAUDE] 2026-06-21 — Task (b) DONE: repaired Secrets Manager `docintel/production/credentials`
+
+**Stage:** Production secret repair (the corrupted `NEO4J_PASSWORD` that ECS/non-Lambda readers still consumed).
+
+**What was found (read-only diff vs `.env` source-of-truth):**
+- `NEO4J_PASSWORD` in the secret was `3ZsG0L8-…` (42 chars) — **missing leading `N`**; `.env` (the values the green e2e Lambdas used) has `N3ZsG0L8-…` (43 chars). Confirmed the documented corruption.
+- `QDRANT_API_KEY` — **byte-for-byte match** with `.env`. No fix needed (earlier suspicion cleared).
+- `RDS_PASSWORD` / `OPENROUTER_API_KEY` / `DASHBOARD_SESSION_SECRET` — all consistent, untouched.
+- Secret was already valid JSON (the BOM corruption from the 2026-06-19 ECS-500 fix stayed fixed).
+
+**What was done (user ran the mutations under their creds — prod secret writes are not auto-executed):**
+- `put-secret-value` with an idempotent N-prepend: read secret → `if not NEO4J_PASSWORD.startswith("N"): prepend "N"` → write back compact JSON. New VersionId `281e48a7-8f17-4931-ae07-833e30ec5993`. (PowerShell `ConvertTo-Json -Compress` passed as a string arg, not a file → no BOM trap.)
+- Forced ECS redeploy (`update-service --force-new-deployment` on cluster `docintel-production-api-cluster`, service `docintel-production-api`) so the running task reloads the corrected secret (secrets are cached at task start).
+
+**Verify (user-run, since classifier blocks me reading prod secrets into transcript):**
+- Structural check: `NEO4J_PASSWORD[0]=='N'`, len 43, all 5 keys present.
+- ECS rollout reaches a single `PRIMARY`/`COMPLETED` deployment; `/health` 200 confirms the Neo4j auth path works with the corrected password.
+
+**Key rule (added to error_fixes.md):** When a Secrets Manager value drifts from `.env`/deploy-param truth, repair it with an **idempotent transform read-from-AWS → mutate → put-secret-value** (never retype the secret by hand); pass the JSON as a string arg (not `file://`) to dodge the PowerShell UTF-8 BOM bug. Always force an ECS redeploy after — tasks cache secrets at start.
+
+**Next:** Task (a) — make a fresh `scripts.smoke_test_aws` run go green. Recommend per-page `MessageGroupId` (concurrent OCR, ~7min→~1min) + a modest Phase-3 timeout bump (300→~600s). Then (c) sanity check on Qdrant per-page vector count.
+
+## [CLAUDE] 2026-06-21 — Task (a) code-complete: per-page OCR concurrency + smoke-test timeout
+
+**Stage:** Parallelize OCR fan-out so the smoke test (and prod) drains fast. TDD.
+
+**Decision (user-picked):** per-page `MessageGroupId` + timeout bump (the "real" throughput fix, not just a longer wait).
+
+**Safety check first (read-only):** confirmed the change can't make Structure fire on a half-OCR'd doc. The fan-in is DB-driven and order-independent — `DocumentRepository.ocr_complete_processing_ids()` selects `status='processing'` docs with `NOT EXISTS (pages WHERE ocr_status IN ('pending','queued'))`, and `try_advance_status` is a guarded `UPDATE … WHERE status=:expect` latch (`cloud/orchestration/sweeper.py` + `cloud/ingest/storage_db.py:301,321`). Pages may finish in any order; Structure only fires when none are pending/queued.
+
+**What changed:**
+- `cloud/ingest/sqs.py` — OCR `MessageGroupId` `document_id` → `f"{document_id}:{page_num}"` (now == `MessageDeduplicationId`). Each page is its own FIFO ordering group → SQS/Lambda process a doc's pages concurrently instead of serially (~7min → ~1min for 13 pages). Dedup/retry-safety unchanged. Docstring updated to explain the fan-in guarantee.
+- `scripts/smoke_test_aws.py` — `QUEUE_DRAIN_TIMEOUT` 300 → 600 (headroom for the whole chain now that OCR is concurrent).
+- `tests/cloud/test_ingest_sqs.py` (new) — there was NO direct unit test for `enqueue_page`'s FIFO attributes. Added 3: standard-queue (no FIFO attrs), FIFO per-page group id (two pages → distinct groups), empty-url raises. TDD: the per-page-group test failed red (`'doc123' == 'doc123:1'`) before the fix, green after.
+
+**Verify:**
+- `pytest tests/cloud/test_ingest_sqs.py tests/cloud/test_ingest_service.py tests/cloud/test_orchestration_sqs.py -m "not integration"` → **15 passed** ✅
+- Sweeper *integration* suite has a PRE-EXISTING isolation bug unrelated to this change (see below) — surfaces only under `-m integration`, which the green-e2e suite excludes.
+
+**Found, not fixed (flagged for decision):** `tests/cloud/test_sweeper_integration.py` — `test_ocr_complete_processing_ids_selects_only_ready` seeds `sweep_ready_1` into local Postgres and never tears it down, so a subsequent `test_sweep_once_latches_and_enqueues` sweeps up both docs → `call_count==2` (expected 1). Pre-existing (these `@pytest.mark.integration` tests need per-test cleanup or a unique-id-per-run scheme). Not caused by the OCR change (which only touches `enqueue_page`; the sweeper uses `enqueue_stage`).
+
+**NOT YET DEPLOYED / not yet proven green:** the group-id change is Lambda producer code — it only takes effect after `sam deploy`, and a fresh `scripts.smoke_test_aws` can only be *verified* green post-deploy (purge OCR/structure DLQs first per the e2e entry). Until deployed, prod OCR still serializes per document.
+
+**Next:**
+- Deploy: `sam build && sam deploy` (full `--parameter-overrides`, per the e2e-green entry) → confirm all 7 `PackageType: Image` → purge OCR/structure DLQs → `uv run python -m scripts.smoke_test_aws` should now reach all-drained inside 600s and print PASS.
+- (c) sanity check: confirm Qdrant holds the expected per-page vectors for the e2e doc (persist logged `points=1`, index `skipped_already_running`).
+- Optional: fix the pre-existing sweeper integration-test isolation bug (per-test row cleanup or run-unique ids).
+
+## [CLAUDE] 2026-06-21 — Task (a) GREEN, but the deploy surfaced a 5-cause outage (FIX-074)
+
+**Stage:** Deployed the per-page OCR change, then drove the smoke test back to **✅ PASS** through a multi-cause production debug (systematic-debugging skill, ~6 cycles).
+
+**Result:** `scripts.smoke_test_aws` → **✅ SMOKE TEST PASSED** — all 5 queues drained, DLQs empty, 13/13 pages OCR'd with real classifications (application_form/sbi_receipt/aadhaar/marks_statement/passing_cert/…); doc advances to `processed` via the sweeper just after the drain check.
+
+**What it took (full chain in error_fixes.md FIX-074):** the `sam deploy` (which resets Lambda env from params) unmasked five independent faults that had to be cleared in order:
+1. **RDS `force_ssl=1` vs asyncpg `prefer`** → non-SSL fallback rejected (`no pg_hba … no encryption`). Fixed in `shared/db.py`: Lambda branch now forces `connect_args={..., "ssl": "require"}`. TDD'd in `tests/shared/test_db_engine.py` (lambda forces ssl, non-lambda doesn't — protects localhost dev).
+2. **CFN `GenerateSecretString` regeneration trap** — changing a secret param (the FIX-073 Neo4j edit) made CFN regenerate the whole secret incl. a fresh random `RDS_PASSWORD` ≠ RDS master → `InvalidPasswordError`.
+3. **PowerShell corrupted the secret** — `ConvertTo-Json` → `aws --secret-string` strips quotes → unquoted `{KEY:val}` blob → `_load_secret_value` json.loads failed → empty password. Re-wrote secret via Python boto3 `json.dumps`. **Corrected the FIX-073 guidance** (it had recommended the PowerShell path).
+4. **Lambda env vars scrambled** — `OPENROUTER_API_KEY`=Qdrant JWT (176 chars → 401), `NEO4J_PASSWORD`=42 chars (missing N). Built from the scrambled secret. Fixed live env from `.env` via boto3 `update_function_configuration`.
+5. **RDS auto-minor-version-upgrade race** — a run stalled at page 5 with `ConnectionRefusedError`; `describe-events` showed an auto upgrade 16.9→16.13 with ~40s downtime *coinciding with the run*. Not a bug; re-ran after it finished → green. Recommended `--no-auto-minor-version-upgrade`.
+
+**Verify:** `pytest tests/shared/test_db_engine.py tests/cloud/test_ingest_sqs.py` → green locally. Production: smoke test PASS (above). Standalone asyncpg probe confirmed `ssl=require`+`DocIntel2026Dev` authenticates.
+
+**Files (code):** `shared/db.py`, `tests/shared/test_db_engine.py` (new), `scripts/smoke_test_aws.py`, `cloud/ingest/sqs.py`. **Live ops (not in code):** secret `docintel/production/credentials` rewritten via boto3 (valid JSON, `RDS_PASSWORD=DocIntel2026Dev`); pipeline Lambda env vars corrected from `.env`. Temp debug scripts removed.
+
+**Not yet done / follow-ups (none blocking the green smoke test):**
+- **Durable secret fix (recommended next):** make `DocIntelSecrets` deterministic — replace `GenerateSecretString`/`GenerateStringKey: RDS_PASSWORD` with a plain `SecretString` from a NoEcho `RdsPassword` param, so deploys stop regenerating RDS_PASSWORD. Until then, **every** `sam deploy` that changes a secret param will re-break RDS auth and re-corrupt env — fix the secret + Lambda env after each deploy.
+- **Task (a) per-page concurrency is NOT live** — the producer is ECS ingest; only Lambda images were redeployed. OCR still drains serially (~7 min). Needs an ECS image rebuild+redeploy to activate concurrent OCR.
+- `aws rds modify-db-instance --no-auto-minor-version-upgrade` to prevent the maintenance race.
+- Pre-existing bug found in passing: `cloud/corrections/service.py:195` `analyze_match_thresholds` passes a `TextClause` where a `cutoff` date param belongs → 500 on the Engine Room tuning-suggestions endpoint.
+- Observation: this run's `match_status` was `unmatched` (an earlier run got `matched` on the same doc) — worth confirming the match stage once the durable fixes land.
+- Code changes uncommitted — offer to commit `shared/db.py` + tests + smoke-test + `cloud/ingest/sqs.py`.
