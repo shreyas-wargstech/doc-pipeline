@@ -116,12 +116,13 @@ Parameters:
 
   OpenRouterTextModel:
     Type: String
-    Default: google/gemini-2.5-flash
+    Default: openrouter/free
     Description: >-
       OpenRouter model ID for text-only LLM calls (classifier + structure
-      extraction). The old code default `openrouter/free` was slow/rate-limited
-      and routinely exceeded the StructureFunction timeout, dead-lettering the
-      structure stage so docs stalled before match. Use a fast paid model.
+      extraction). The free tier is intentional here for cost — text jobs
+      tolerate its latency now that StructureFunction Timeout is 120s (the real
+      fix for the structure stall; FIX-075). `google/gemini-2.5-flash` is
+      reserved for the VLM (OpenRouterModel) only.
 
   DashboardSessionSecret:
     Type: String

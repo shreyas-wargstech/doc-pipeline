@@ -751,7 +751,7 @@ Context note: the auto-memory dir for this project was missing on disk this sess
 **Loose ends (non-blocking):**
 - ~~One stale `structure-dlq` message~~ — **cleared** (deleted via boto3; depth 0/0).
 - ~~`deploy.py` interactive/not RdsPassword-aware~~ — **fixed** (see follow-up below).
-- `shared/config.py` still defaults `openrouter_text_model="openrouter/free"` (prod now overrides via env). Consider a fast default so local/unconfigured paths aren't slow.
+- `shared/config.py` defaults `openrouter_text_model="openrouter/free"` — **correct/intended** (free tier for text-only jobs; the 120s timeout, not the model, was the structure-stall fix). gemini-2.5-flash is VLM-only.
 - Smoke test counts any DLQ message as failure — it reported ❌ only due to the (now-deleted) stale message; pipeline ran fully green.
 - Pre-existing uncommitted WIP left untouched (health.py contract change + test, aether frontend tweaks, docs) — not mine to commit.
 
@@ -761,6 +761,15 @@ Context note: the auto-memory dir for this project was missing on disk this sess
 - **`deploy.py` fixed** (`cloud/infrastructure/scripts/deploy.py`):
   - `get_sam_config` now takes `interactive: bool`; in `--non-interactive` it reads optional config from env (no `input()` → no hang) and **omits empty params** so a stack *update* keeps the existing stack value (sam UsePreviousValue) for things with no clean local source (VPC, sizing, `DashboardSessionSecret`).
   - Added `RdsPassword` (new required NoEcho param): `_rds_password_from_env()` prefers `RDS_PASSWORD`, falls back to the password embedded in `DATABASE_URL` (the `pipeline` user shares the RDS master pw).
-  - Added `OpenRouterTextModel` via `_safe_text_model()`, which hard-guards against `openrouter/free` (FIX-075) → defaults to `google/gemini-2.5-flash`.
+  - Added `OpenRouterTextModel` via `_text_model()` (defaults to `openrouter/free`; honors any explicit value).
   - Interactive mode now also prompts for the text model + RDS password.
-  - Net effect: `make aws-deploy-non-interactive` (with `.env` loaded) now performs the same minimal, correct param set I assembled by hand for the durable-secret deploy — repeatable, no scramble risk, no hang. Verified via `py_compile` + unit checks of the helpers (URL-decode, free-model guard, empty-omit).
+  - Net effect: `make aws-deploy-non-interactive` (with `.env` loaded) now performs the same minimal, correct param set I assembled by hand for the durable-secret deploy — repeatable, no scramble risk, no hang. Verified via `py_compile` + unit checks of the helpers.
+
+## [CLAUDE] 2026-06-21 — Correction: keep `openrouter/free` for text; gemini-2.5-flash is VLM-only
+
+User clarified the structure-stall fix: the **120s timeout** was the real fix, not the model. `openrouter/free` is the intended (cost) model for text-only LLM jobs (classifier + structure); `google/gemini-2.5-flash` is reserved for the VLM. Reverted the model swap:
+- **Live:** `OPENROUTER_TEXT_MODEL=openrouter/free` on Structure (120s) + Ocr (300s) Lambdas.
+- **Template:** `OpenRouterTextModel` default `google/gemini-2.5-flash` → `openrouter/free` (kept the param/env wiring + Timeout 120).
+- **deploy.py:** `_safe_text_model` (free-model guard) → `_text_model` (defaults to free, honors explicit override).
+- **Docs:** FIX-075 reframed (timeout was the fix); correction note added.
+Not redeployed — the live env already matches intent and the deployed Timeout is already 120s; the template/param change takes effect on the next `sam deploy` (no drift that affects behavior).

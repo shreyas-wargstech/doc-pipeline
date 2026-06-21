@@ -176,17 +176,14 @@ def _rds_password_from_env() -> str:
     return ""
 
 
-def _safe_text_model(val: str | None) -> str:
-    """Return a production-safe OPENROUTER_TEXT_MODEL.
+def _text_model(val: str | None) -> str:
+    """Resolve OPENROUTER_TEXT_MODEL (classifier + structure LLM).
 
-    Guards against `openrouter/free` — the free tier is slow/rate-limited and
-    routinely exceeded the StructureFunction timeout, dead-lettering the
-    structure stage so docs stalled before match (FIX-075).
+    Defaults to `openrouter/free` — the free tier is intentional for the
+    text-only jobs (cost), tolerated now that StructureFunction Timeout is 120s
+    (FIX-075). `google/gemini-2.5-flash` is reserved for the VLM only.
     """
-    model = (val or "").strip()
-    if not model or model == "openrouter/free":
-        return "google/gemini-2.5-flash"
-    return model
+    return (val or "").strip() or "openrouter/free"
 
 
 def get_external_service_params() -> dict:
@@ -200,9 +197,9 @@ def get_external_service_params() -> dict:
     print("\n   OpenRouter (https://openrouter.ai/)")
     print("   For VLM tier (Gemini 2.5 Flash).")
     params["OpenRouterApiKey"] = input("   OpenRouter API Key: ").strip()
-    params["OpenRouterTextModel"] = _safe_text_model(
+    params["OpenRouterTextModel"] = _text_model(
         input("   OpenRouter TEXT model (classifier+structure) "
-              "[google/gemini-2.5-flash]: ").strip()
+              "[openrouter/free]: ").strip()
     )
 
     # RDS master password (deterministic SecretString param — see FIX-074)
@@ -268,8 +265,9 @@ def get_sam_config(
     put("OpenRouterApiKey", externals.get("OpenRouterApiKey"))
     put("OpenRouterBaseUrl", externals.get("OpenRouterBaseUrl"))
     put("OpenRouterModel", externals.get("OpenRouterModel"))
-    # Text-only model for the classifier + structure LLM. NEVER openrouter/free
-    # in production (FIX-075) — _safe_text_model() enforces a fast default.
+    # Text-only model for the classifier + structure LLM (free tier by design;
+    # the structure stall was fixed by the 120s timeout, not by the model —
+    # FIX-075). gemini-2.5-flash is reserved for the VLM (OpenRouterModel).
     put("OpenRouterTextModel", externals.get("OpenRouterTextModel"))
     put("DashboardSessionSecret", externals.get("DashboardSessionSecret"))
     put("QdrantUrl", externals.get("QdrantUrl"))
@@ -684,7 +682,7 @@ def main() -> int:
             "OpenRouterApiKey": os.environ.get("OPENROUTER_API_KEY", ""),
             "OpenRouterBaseUrl": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             "OpenRouterModel": os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash"),
-            "OpenRouterTextModel": _safe_text_model(os.environ.get("OPENROUTER_TEXT_MODEL")),
+            "OpenRouterTextModel": _text_model(os.environ.get("OPENROUTER_TEXT_MODEL")),
             "DashboardSessionSecret": os.environ.get("DASHBOARD_SESSION_SECRET", ""),
             "QdrantUrl": os.environ.get("QDRANT_URL", ""),
             "QdrantApiKey": os.environ.get("QDRANT_API_KEY", ""),
