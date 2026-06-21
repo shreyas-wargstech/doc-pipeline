@@ -47,6 +47,15 @@ html.large-text {
   font-size: 20px;
 }
 
+/* Hide scrollbar visually while keeping native scroll behavior */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Screen-reader-only text (visually hidden but accessible) */
 .sr-only {
   position: absolute;

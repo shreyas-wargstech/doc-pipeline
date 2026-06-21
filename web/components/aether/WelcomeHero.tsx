@@ -1,6 +1,6 @@
 ﻿"use client";
 import { motion } from "motion/react";
-import { Sparkles, Stethoscope, Users, ShieldCheck, Activity, Clock, ArrowUpRight } from "lucide-react";
+import { Sparkles, Stethoscope, Users, ShieldCheck, Activity } from "lucide-react";
 import { TEMPLATES } from "@/components/aether/templates";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -9,7 +9,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 
 const FEATURED = ["autopsy", "search", "identity", "health"];
 
-export function WelcomeHero({ recent, onPick }: { recent: string[]; onPick: (query: string) => void }) {
+export function WelcomeHero({ onPick }: { onPick: (query: string) => void }) {
   const cards = FEATURED.map((id) => TEMPLATES.find((t) => t.id === id)!).filter(Boolean);
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
@@ -40,20 +40,6 @@ export function WelcomeHero({ recent, onPick }: { recent: string[]; onPick: (que
           );
         })}
       </div>
-
-      {recent.length > 0 && (
-        <div className="mt-6 w-full max-w-lg text-left">
-          <div className="mb-2 text-[10.5px] uppercase tracking-wider text-muted-fg">Recent</div>
-          {recent.map((r) => (
-            <button key={r} type="button" onClick={() => onPick(r)}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-200 hover:bg-surface-hover">
-              <Clock className="h-3.5 w-3.5 text-muted-fg" />
-              <span className="flex-1 truncate text-[13px]">{r}</span>
-              <ArrowUpRight className="h-3.5 w-3.5 text-muted-fg" />
-            </button>
-          ))}
-        </div>
-      )}
     </motion.div>
   );
 }

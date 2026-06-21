@@ -192,6 +192,7 @@ def test_health_report_to_dict():
     )
     d = report.to_dict()
     assert d["overall"] == "ok"
-    assert len(d["probes"]) == 2
-    assert d["probes"][0]["name"] == "postgres"
-    assert d["probes"][0]["latency_ms"] == 12.0
+    assert len(d["checks"]) == 2
+    assert d["checks"][0]["name"] == "postgres"
+    assert d["checks"][0]["latency_ms"] == 12.0
+    assert d["checks"][0]["detail"] == "OK"

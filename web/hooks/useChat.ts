@@ -69,5 +69,14 @@ export function useChat() {
 
   const clearThread = () => setMessages([makeGreeting()]);
 
-  return { messages, send, isLoading: mutation.isPending, recent, clearThread };
+  const clearRecent = () => {
+    setRecent([]);
+    try {
+      localStorage.removeItem("aether:recent");
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return { messages, send, isLoading: mutation.isPending, recent, clearThread, clearRecent };
 }

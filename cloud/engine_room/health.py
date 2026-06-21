@@ -40,15 +40,16 @@ class HealthReport:
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict[str, Any]:
+        overall_map = {"ok": "ok", "degraded": "warn", "down": "error"}
         return {
-            "overall": self.overall,
+            "overall": overall_map.get(self.overall, self.overall),
             "checked_at": self.checked_at.isoformat(),
-            "probes": [
+            "checks": [
                 {
                     "name": p.name,
                     "status": p.status,
                     "latency_ms": round(p.latency_ms, 1),
-                    "error": p.error,
+                    "detail": p.error if p.error else "OK",
                 }
                 for p in self.probes
             ],
