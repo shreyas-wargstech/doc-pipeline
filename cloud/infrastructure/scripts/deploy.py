@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -157,6 +158,37 @@ def get_vpc_info(region: str) -> dict:
     }
 
 
+def _rds_password_from_env() -> str:
+    """Resolve the RDS master password for the RdsPassword deploy param.
+
+    Prefers an explicit RDS_PASSWORD env var; falls back to the password
+    embedded in DATABASE_URL (the `pipeline` user shares the RDS master
+    password — see the template's DATABASE_URL resolve). Required since
+    FIX-074 made the secret deterministic from this param (no CFN default).
+    """
+    pw = os.environ.get("RDS_PASSWORD", "").strip()
+    if pw:
+        return pw
+    m = re.search(r"://[^:/?#]+:([^@]+)@", os.environ.get("DATABASE_URL", ""))
+    if m:
+        from urllib.parse import unquote
+        return unquote(m.group(1))
+    return ""
+
+
+def _safe_text_model(val: str | None) -> str:
+    """Return a production-safe OPENROUTER_TEXT_MODEL.
+
+    Guards against `openrouter/free` — the free tier is slow/rate-limited and
+    routinely exceeded the StructureFunction timeout, dead-lettering the
+    structure stage so docs stalled before match (FIX-075).
+    """
+    model = (val or "").strip()
+    if not model or model == "openrouter/free":
+        return "google/gemini-2.5-flash"
+    return model
+
+
 def get_external_service_params() -> dict:
     """Prompt for external managed service credentials."""
     print("\n🔐 External Managed Services (these are NOT created by this stack)")
@@ -168,7 +200,17 @@ def get_external_service_params() -> dict:
     print("\n   OpenRouter (https://openrouter.ai/)")
     print("   For VLM tier (Gemini 2.5 Flash).")
     params["OpenRouterApiKey"] = input("   OpenRouter API Key: ").strip()
-    
+    params["OpenRouterTextModel"] = _safe_text_model(
+        input("   OpenRouter TEXT model (classifier+structure) "
+              "[google/gemini-2.5-flash]: ").strip()
+    )
+
+    # RDS master password (deterministic SecretString param — see FIX-074)
+    print("\n   RDS master password")
+    print("   Written verbatim to Secrets Manager as RDS_PASSWORD; MUST match "
+          "the RDS instance. Keep JSON-safe (no \" } \\ or ${...}).")
+    params["RdsPassword"] = input("   RDS master password: ").strip()
+
     # Dashboard Session Secret
     print("\n   Dashboard Session Secret (HMAC signing key)")
     import secrets
@@ -195,55 +237,76 @@ def get_external_service_params() -> dict:
     return params
 
 
-def get_sam_config(env: str, region: str, vpc: dict, externals: dict) -> dict:
-    """Build the SAM deploy configuration."""
-    config = {
-        "Environment": env,
-        "Region": region,
-        "VpcId": vpc["VpcId"],
-        "PublicSubnet1": vpc["PublicSubnet1"],
-        "PublicSubnet2": vpc["PublicSubnet2"],
-        "PrivateSubnet1": vpc["PrivateSubnet1"],
-        "PrivateSubnet2": vpc["PrivateSubnet2"],
-        "OpenRouterApiKey": externals["OpenRouterApiKey"],
-        "OpenRouterBaseUrl": externals.get("OpenRouterBaseUrl", "https://openrouter.ai/api/v1"),
-        "OpenRouterModel": externals.get("OpenRouterModel", "google/gemini-2.5-flash"),
-        "DashboardSessionSecret": externals["DashboardSessionSecret"],
-        "QdrantUrl": externals["QdrantUrl"],
-        "QdrantApiKey": externals["QdrantApiKey"],
-        "Neo4jUri": externals["Neo4jUri"],
-        "Neo4jUser": externals.get("Neo4jUser", "neo4j"),
-        "Neo4jPassword": externals["Neo4jPassword"],
-    }
-    
-    # Optional overrides
-    print("\n⚙️ Optional Configuration (press Enter to use defaults):")
-    
-    rds_class = input("   RDS instance class [db.t3.medium]: ").strip() or "db.t3.medium"
-    config["RdsInstanceClass"] = rds_class
-    
-    rds_storage = input("   RDS storage (GB) [20]: ").strip() or "20"
-    config["RdsAllocatedStorage"] = rds_storage
-    
-    multi_az = input("   Enable Multi-AZ RDS? [y/N]: ").strip().lower() or "n"
-    config["EnableMultiAz"] = "true" if multi_az == "y" else "false"
-    
-    ecs_cpu = input("   ECS API CPU (256/512/1024/2048) [512]: ").strip() or "512"
-    config["EcsCpu"] = ecs_cpu
-    
-    ecs_memory = input("   ECS API memory (MB) [1024]: ").strip() or "1024"
-    config["EcsMemory"] = ecs_memory
-    
-    ecs_count = input("   ECS API task count [1]: ").strip() or "1"
-    config["EcsTaskCount"] = ecs_count
-    
-    bucket_name = input("   S3 bucket name (blank for auto-generated): ").strip()
-    if bucket_name:
-        config["S3BucketName"] = bucket_name
-    
-    allowed_cidr = input("   Allowed CIDR for ALB [0.0.0.0/0]: ").strip() or "0.0.0.0/0"
-    config["AllowedCidr"] = allowed_cidr
-    
+def get_sam_config(
+    env: str,
+    region: str,
+    vpc: dict,
+    externals: dict,
+    interactive: bool = True,
+) -> dict:
+    """Build the SAM deploy configuration.
+
+    Empty values are omitted so that on a stack *update* sam keeps the stack's
+    existing value for that parameter (sam passes UsePreviousValue for any
+    parameter not in --parameter-overrides). This lets a non-interactive deploy
+    supply only the params it has clean values for (secrets from .env,
+    RdsPassword, text model) and leave VPC/sizing/DashboardSessionSecret —
+    which have no clean local source — at their previous stack values.
+    """
+    config: dict[str, str] = {"Environment": env, "Region": region}
+
+    def put(key: str, value: str | None) -> None:
+        if value not in (None, ""):
+            config[key] = value
+
+    put("VpcId", vpc.get("VpcId"))
+    put("PublicSubnet1", vpc.get("PublicSubnet1"))
+    put("PublicSubnet2", vpc.get("PublicSubnet2"))
+    put("PrivateSubnet1", vpc.get("PrivateSubnet1"))
+    put("PrivateSubnet2", vpc.get("PrivateSubnet2"))
+
+    put("OpenRouterApiKey", externals.get("OpenRouterApiKey"))
+    put("OpenRouterBaseUrl", externals.get("OpenRouterBaseUrl"))
+    put("OpenRouterModel", externals.get("OpenRouterModel"))
+    # Text-only model for the classifier + structure LLM. NEVER openrouter/free
+    # in production (FIX-075) — _safe_text_model() enforces a fast default.
+    put("OpenRouterTextModel", externals.get("OpenRouterTextModel"))
+    put("DashboardSessionSecret", externals.get("DashboardSessionSecret"))
+    put("QdrantUrl", externals.get("QdrantUrl"))
+    put("QdrantApiKey", externals.get("QdrantApiKey"))
+    put("Neo4jUri", externals.get("Neo4jUri"))
+    put("Neo4jUser", externals.get("Neo4jUser"))
+    put("Neo4jPassword", externals.get("Neo4jPassword"))
+    # RDS master password — required (no template default); deterministic
+    # SecretString source so the secret stays in sync with RDS (FIX-074).
+    put("RdsPassword", externals.get("RdsPassword"))
+
+    if interactive:
+        print("\n⚙️ Optional Configuration (press Enter to use defaults):")
+        put("RdsInstanceClass",
+            input("   RDS instance class [db.t3.medium]: ").strip() or "db.t3.medium")
+        put("RdsAllocatedStorage",
+            input("   RDS storage (GB) [20]: ").strip() or "20")
+        multi_az = input("   Enable Multi-AZ RDS? [y/N]: ").strip().lower() or "n"
+        put("EnableMultiAz", "true" if multi_az == "y" else "false")
+        put("EcsCpu", input("   ECS API CPU (256/512/1024/2048) [512]: ").strip() or "512")
+        put("EcsMemory", input("   ECS API memory (MB) [1024]: ").strip() or "1024")
+        put("EcsTaskCount", input("   ECS API task count [1]: ").strip() or "1")
+        put("S3BucketName", input("   S3 bucket name (blank for auto-generated): ").strip())
+        put("AllowedCidr", input("   Allowed CIDR for ALB [0.0.0.0/0]: ").strip() or "0.0.0.0/0")
+    else:
+        # Non-interactive: take optional config from env. Anything unset is
+        # omitted → an update keeps the stack's previous value (a first-time
+        # create then relies on the template defaults).
+        put("RdsInstanceClass", os.environ.get("RDS_INSTANCE_CLASS"))
+        put("RdsAllocatedStorage", os.environ.get("RDS_ALLOCATED_STORAGE"))
+        put("EnableMultiAz", os.environ.get("ENABLE_MULTI_AZ"))
+        put("EcsCpu", os.environ.get("ECS_CPU"))
+        put("EcsMemory", os.environ.get("ECS_MEMORY"))
+        put("EcsTaskCount", os.environ.get("ECS_TASK_COUNT"))
+        put("S3BucketName", os.environ.get("S3_BUCKET_NAME"))
+        put("AllowedCidr", os.environ.get("ALLOWED_CIDR"))
+
     return config
 
 
@@ -621,14 +684,16 @@ def main() -> int:
             "OpenRouterApiKey": os.environ.get("OPENROUTER_API_KEY", ""),
             "OpenRouterBaseUrl": os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             "OpenRouterModel": os.environ.get("OPENROUTER_MODEL", "google/gemini-2.5-flash"),
+            "OpenRouterTextModel": _safe_text_model(os.environ.get("OPENROUTER_TEXT_MODEL")),
             "DashboardSessionSecret": os.environ.get("DASHBOARD_SESSION_SECRET", ""),
             "QdrantUrl": os.environ.get("QDRANT_URL", ""),
             "QdrantApiKey": os.environ.get("QDRANT_API_KEY", ""),
             "Neo4jUri": os.environ.get("NEO4J_URI", ""),
             "Neo4jUser": os.environ.get("NEO4J_USER", "neo4j"),
             "Neo4jPassword": os.environ.get("NEO4J_PASSWORD", ""),
+            "RdsPassword": _rds_password_from_env(),
         }
-        config = get_sam_config(args.env, args.region, vpc, externals)
+        config = get_sam_config(args.env, args.region, vpc, externals, interactive=False)
     else:
         vpc = get_vpc_info(args.region)
         externals = get_external_service_params()
