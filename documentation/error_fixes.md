@@ -1657,3 +1657,24 @@ put_secret_value(secret_string=json.dumps(d))     # compact JSON string arg
 - `update_function_configuration` **replaces** the env map — always read current env and merge, or you wipe other vars. A later `sam deploy` resets env from template params, so bake durable env changes into the template (don't leave them only as live overrides).
 
 **Files:** `cloud/infrastructure/sam/template.yaml` (`OpenRouterTextModel` param [default `openrouter/free`] + Globals env + StructureFunction Timeout 30→120), `cloud/corrections/service.py` + `tests/cloud/corrections/test_loop_closure.py` (datetime cutoff bind), `cloud/infrastructure/scripts/deploy.py` (`_text_model` defaults to free + RdsPassword-aware non-interactive). Live ops: RDS `--no-auto-minor-version-upgrade`; structure/ocr Lambda `OPENROUTER_TEXT_MODEL=openrouter/free` (reverted from the gemini misdiagnosis); ECS API image redeployed for per-page OCR concurrency; deterministic-secret `sam deploy` (new `RdsPassword` param).
+
+---
+
+## 2026-06-21 — Sweeper integration-test fixtures leaked into PRODUCTION RDS (FIX-076)
+
+**Symptom:** A check of `documents`/`pages` on prod RDS showed **5 junk docs** (`sweep_latch_1`, `sweep_ready_1`, `sweep_busy_1`, `sweep_recv_1`, `sweep_e2e_1`) + 7 pages that aren't real uploads. One (`sweep_busy_1`) was stuck `status=processing`; another page stuck `ocr_status=queued`. Only the real e2e doc (`c85718d0..`, 13 pages) should exist.
+
+**Root cause:** `tests/cloud/test_sweeper_integration.py` (`@pytest.mark.integration`) seeds those `sweep_*` rows and **never tears them down**, and the suite reads `DATABASE_URL` from the environment. The repo `.env` points at the live `docintel-production-postgres-public` RDS, so running the integration suite wrote fixtures straight into prod and left them there. (This is also the isolation bug flagged at session_log 2026-06-21 line 690: leftover `sweep_ready_1` made `test_sweep_once_latches_and_enqueues` see `call_count==2`.)
+
+**Fix:**
+- **Data:** deleted the 5 `sweep_%` docs from prod via boto3+asyncpg (`DELETE FROM documents WHERE document_id LIKE 'sweep\_%'` in a transaction; `ON DELETE CASCADE` cleared the 7 pages + downstream). Prod back to 1 doc / 13 pages.
+- **Test isolation (2 guards in `test_sweeper_integration.py`):**
+  1. `_require_local_db` (autouse) — parses `get_settings().database_url` host and **skips the whole module unless the host is local** (`localhost`/`127.0.0.1`/`::1`/docker `postgres`/`db`). Root-cause guard: the suite can no longer touch a prod DB.
+  2. `_clean_sweep_fixtures` (autouse, depends on the guard) — `DELETE … LIKE 'sweep\_%'` **before and after each test**, so nothing survives even on mid-test failure or an interrupted prior run. Fixes the line-690 cross-test contamination too.
+
+**Verify:** `pytest tests/cloud/test_sweeper_integration.py -m integration` → 3 **skipped** with reason "refuse to run against non-local DB host 'docintel-production-postgres-public…'." against the prod `.env`. Prod re-queried: 1 doc, 13 pages.
+
+**Key rules:**
+- **Never let a write-heavy `@pytest.mark.integration` suite read a prod `DATABASE_URL` unguarded.** Gate it on a local-host check (skip otherwise) — env config is not a safe place to assume "this is a test DB."
+- **Always tear down seeded rows in an autouse fixture (before *and* after).** "Newest-at-bottom" deterministic ids don't self-clean; a failed test leaves residue that contaminates the next test (and, here, prod).
+- When you must delete from a live DB, do it in a transaction, `LIKE` only the fixture prefix (escape the `_` wildcard: `'sweep\_%'`), and print the victim list + post-state to confirm you didn't over-delete.

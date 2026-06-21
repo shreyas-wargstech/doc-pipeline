@@ -1,12 +1,63 @@
-"""Gated integration tests for the fan-in repo methods + sweeper (real Postgres)."""
+"""Gated integration tests for the fan-in repo methods + sweeper (real Postgres).
+
+These tests WRITE rows into whatever database `DATABASE_URL`/`RDS_HOST` resolves to.
+A `.env` pointed at production RDS once leaked these `sweep_*` fixtures into prod and
+left a doc stuck `processing` (see error_fixes.md). Two guards prevent a repeat:
+
+  1. ``_require_local_db`` skips the whole module unless the resolved DB host is local.
+  2. ``_clean_sweep_fixtures`` deletes every ``sweep_%`` document before AND after each
+     test (cascade clears pages + downstream rows), so nothing survives a run — even if
+     a test fails mid-way or a prior run was interrupted.
+"""
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 import pytest
+from sqlalchemy import text
 
 from cloud.ingest.storage_db import DocumentRepository, DocumentStatus, PageRepository
+from shared.config import get_settings
 from shared.db import session_scope
 
 pytestmark = pytest.mark.integration
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "postgres", "db", ""}
+
+
+def _db_host() -> str:
+    """Host of the resolved DB URL (after RDS_HOST override), lower-cased."""
+    url = get_settings().database_url
+    # SQLAlchemy-style scheme (postgresql+asyncpg://) parses fine with urlparse.
+    return (urlparse(url).hostname or "").lower()
+
+
+@pytest.fixture(autouse=True)
+def _require_local_db():
+    """Refuse to run these write-heavy integration tests against a non-local DB.
+
+    This is the root-cause guard: the leak happened because the suite ran against a
+    production `DATABASE_URL`. Set DB host to localhost (or the docker `postgres`/`db`
+    service) to run them.
+    """
+    host = _db_host()
+    if host not in _LOCAL_HOSTS:
+        pytest.skip(
+            f"Sweeper integration tests refuse to run against non-local DB host {host!r}. "
+            "Point DATABASE_URL/RDS_HOST at a local/disposable Postgres."
+        )
+
+
+@pytest.fixture(autouse=True)
+async def _clean_sweep_fixtures(_require_local_db):
+    """Delete all `sweep_%` documents before and after each test (cascade clears pages)."""
+    async def _purge() -> None:
+        async with session_scope() as session:
+            await session.execute(text("DELETE FROM documents WHERE document_id LIKE 'sweep\\_%'"))
+
+    await _purge()
+    yield
+    await _purge()
 
 
 async def _seed_doc(doc_id: str, *, status: str, pages: list[tuple[int, str]]) -> None:
