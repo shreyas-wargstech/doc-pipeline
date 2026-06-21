@@ -114,6 +114,15 @@ Parameters:
     Default: google/gemini-2.5-flash
     Description: OpenRouter model ID for VLM.
 
+  OpenRouterTextModel:
+    Type: String
+    Default: google/gemini-2.5-flash
+    Description: >-
+      OpenRouter model ID for text-only LLM calls (classifier + structure
+      extraction). The old code default `openrouter/free` was slow/rate-limited
+      and routinely exceeded the StructureFunction timeout, dead-lettering the
+      structure stage so docs stalled before match. Use a fast paid model.
+
   DashboardSessionSecret:
     Type: String
     Description: HMAC secret for dashboard signed-cookie sessions.
@@ -202,6 +211,7 @@ Globals:
         REDIS_PORT: '6379'
         OPENROUTER_BASE_URL: !Ref OpenRouterBaseUrl
         OPENROUTER_MODEL: !Ref OpenRouterModel
+        OPENROUTER_TEXT_MODEL: !Ref OpenRouterTextModel
         QDRANT_URL: !Ref QdrantUrl
         NEO4J_URI: !Ref Neo4jUri
         NEO4J_USER: !Ref Neo4jUser
@@ -810,7 +820,11 @@ Resources:
       ImageConfig:
         Command: ["cloud.structure.consumer.handler"]
       MemorySize: 512
-      Timeout: 30
+      # 30s was too tight for the per-page structure LLM call and dead-lettered
+      # the stage on slow responses (FIX: structure stall). Stay <= the
+      # StructureQueue VisibilityTimeout (120s) so SQS doesn't redeliver a
+      # still-running message.
+      Timeout: 120
       Events:
         SQSJob:
           Type: SQS
