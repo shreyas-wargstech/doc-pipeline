@@ -61,5 +61,7 @@ infra/tfplan
 .understand-anything/
 docintel-production-outputs.json
 
-
 env.json
+
+# Incident-recovery scratch (contains AWS account ID/ARNs, not for git)
+infra/_lambda_backup/
