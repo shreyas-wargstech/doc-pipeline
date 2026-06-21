@@ -823,3 +823,14 @@ Not redeployed — the live env already matches intent and the deployed Timeout 
 **Left untouched (separate, unrelated threads still uncommitted):** `.gitignore`, `AGENTS.md`/`CLAUDE.md` (review-loop docs), `cloud/infrastructure/sam/.aws-sam/build.toml`, `infra/docker/Dockerfile.{light,persist-index}`, `tests/cloud/test_sweeper_integration.py` (FIX-076, flagged above), plus untracked `test_db.py` / `infra/_lambda_backup/`.
 
 **Next:** none required; flag to owner that the remaining uncommitted files above are still open if they want those committed too.
+
+## [CLAUDE] 2026-06-21 — Closed out remaining WIP threads (`4a10900`, `25009ab`)
+
+**Stage:** Finished the rest of the leftover uncommitted files from the prior handoff.
+
+- **`4a10900`** — `.gitignore` (excludes local `env.json`, confirmed it holds infra hostnames/ARNs not meant for git), `AGENTS.md`/`CLAUDE.md` (the scorecard review-loop wiring from PROJECT_MEMORY.md's 2026-06-20 entry), and `infra/docker/Dockerfile.{light,persist-index}` — switched from `uv sync` into a venv to `pip install -r requirements.txt` into system Python, because the Lambda runtime client invokes the handler with `/var/lang/bin/python` directly (not a venv), which was causing `ModuleNotFoundError` at cold start. **Verified by actually building both images locally** (`docker build`) and confirming `shared`/`cloud` import under `/var/lang/bin/python` inside the built container — not just a read of the diff. `cloud/infrastructure/sam/.aws-sam/build.toml` regenerated alongside (auto-generated SAM build IDs + the already-deployed `SweeperFunction` entry).
+- **`25009ab`** — `infra/_lambda_backup/` (PowerShell ECR/Lambda recovery scripts + JSON dumps from the 2026-06-20 incident; contains AWS account ID, IAM role ARN, subnet/SG/SQS ARNs) added to `.gitignore` per owner's call — kept on disk as a runbook, never enters git. Root-level `test_db.py` (SSL-mode probe against RDS, would've been auto-collected and executed by any bare `pytest` run since it sat outside `tests/`) moved to `tests/cloud/test_rds_ssl_connect.py` under `@pytest.mark.integration`, gated and deselected by default — owner's call over delete/leave-as-is.
+
+**Verified:** both Dockerfiles build clean + import-check pass; new integration test collects (2 tests) and is correctly deselected under `-m "not integration"`; `git status` clean except gitignored build artifacts.
+
+**Next:** none open. All threads from the prior two handoffs are closed.
