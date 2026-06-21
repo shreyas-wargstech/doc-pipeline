@@ -773,3 +773,25 @@ User clarified the structure-stall fix: the **120s timeout** was the real fix, n
 - **deploy.py:** `_safe_text_model` (free-model guard) → `_text_model` (defaults to free, honors explicit override).
 - **Docs:** FIX-075 reframed (timeout was the fix); correction note added.
 Not redeployed — the live env already matches intent and the deployed Timeout is already 120s; the template/param change takes effect on the next `sam deploy` (no drift that affects behavior).
+
+## [CLAUDE] 2026-06-21 — SESSION SUMMARY / HANDOFF
+
+**Scope:** Took the prior session's handoff (6 deferred AWS follow-ups) to completion, then handled two extra follow-ups + one user correction. Everything below is on `main`, pushed (tip `ee96362`).
+
+**Shipped:**
+1. Engine Room 500 fixed — datetime `:cutoff` bind in `cloud/corrections/service.py` (+test). `66c0937`
+2. Branch merged to `main` + pushed.
+3. Durable-secret `sam deploy` — deterministic `SecretString` from new `RdsPassword` param; secret verified valid JSON. Regeneration trap gone.
+4. Per-page OCR concurrency live (ECS API image, task def `:13`) — OCR drains ~90s vs ~7min. `c5323c0` (timeout) etc.
+5. RDS hardened — `--no-auto-minor-version-upgrade`.
+6. Match outcome verified end-to-end: `match_status=matched`, `index_status=done`, `reg=92008`.
+7. Root-caused + fixed the structure stall (FIX-075): `StructureFunction` Timeout 30→120 (the real fix). Text model stays `openrouter/free`; gemini-2.5-flash is VLM-only (per user correction). `ee96362`
+8. Cleared stale `structure-dlq` message (depth 0/0).
+9. `deploy.py` made non-interactive + `RdsPassword`-aware + update-safe (omits empty params → keeps previous). `f4bea93`
+
+**Prod state:** pipeline green end-to-end; secret deterministic; RDS stable; OCR concurrent; text=free@120s, VLM=gemini.
+
+**Open (non-blocking):**
+- Pre-existing uncommitted WIP still in the working tree (health.py contract change + test, aether frontend tweaks) — left for owner; not committed.
+- `deploy.py` non-interactive needs `.env` sourced into the environment (no `RDS_PASSWORD` key in `.env`; it falls back to parsing `DATABASE_URL`).
+- Next `sam deploy` will sync the template's `OpenRouterTextModel=openrouter/free` default into CFN (behavior already correct via live env).
