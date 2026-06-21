@@ -10,7 +10,7 @@ All functions accept an AsyncSession and are idempotent on
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -82,7 +82,7 @@ async def get_recent_corrections(
     limit: int = 100,
 ) -> list[HumanCorrection]:
     """Return corrections of a given type within the last `since` period."""
-    cutoff = text("NOW() - INTERVAL '%s seconds'" % since.total_seconds())
+    cutoff = datetime.now(timezone.utc) - since
     stmt = (
         select(text("*"))
         .select_from(text("human_corrections"))
@@ -107,7 +107,7 @@ async def analyze_page_type_corrections(
     since: timedelta,
 ) -> list[dict[str, Any]]:
     """Extract (original → corrected) page-type patterns and their counts."""
-    cutoff = text("NOW() - INTERVAL '%s seconds'" % since.total_seconds())
+    cutoff = datetime.now(timezone.utc) - since
     stmt = text(
         """
         SELECT original_value, corrected_value, COUNT(*) AS n
@@ -140,7 +140,7 @@ async def analyze_name_corrections(
     Example:  "Ash1sh Patil" → "Ashish Patil"  yields  {"Ash1sh": "Ashish"}
     Simple heuristic: compare token-by-token and keep mismatches.
     """
-    cutoff = text("NOW() - INTERVAL '%s seconds'" % since.total_seconds())
+    cutoff = datetime.now(timezone.utc) - since
     stmt = text(
         """
         SELECT original_value, corrected_value
@@ -179,7 +179,7 @@ async def analyze_match_thresholds(
     Returns the minimum ai_confidence among corrections that were later
     approved by a human, which can be used to lower the auto-accept threshold.
     """
-    cutoff = text("NOW() - INTERVAL '%s seconds'" % since.total_seconds())
+    cutoff = datetime.now(timezone.utc) - since
     stmt = text(
         """
         SELECT MIN(ai_confidence) AS min_conf, MAX(ai_confidence) AS max_conf,
@@ -214,7 +214,7 @@ async def analyze_ocr_routing_corrections(
     Returns a list of dicts with page features that caused the switch.
     For v1 this is just the (original_value, corrected_value) pair counts.
     """
-    cutoff = text("NOW() - INTERVAL '%s seconds'" % since.total_seconds())
+    cutoff = datetime.now(timezone.utc) - since
     stmt = text(
         """
         SELECT original_value, corrected_value, COUNT(*) AS n
