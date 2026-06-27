@@ -22,7 +22,7 @@ export function HealthCard({ result }: { result: Extract<ToolResult, { kind: "he
         </Badge>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {result.checks.map((c) => (
+        {(result.checks ?? []).map((c) => (
           <div key={c.name} className="rounded-lg bg-surface-alt p-2.5">
             <div className="flex items-center gap-1.5 mb-1">
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot(c.status) }} />

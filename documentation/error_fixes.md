@@ -1678,3 +1678,23 @@ put_secret_value(secret_string=json.dumps(d))     # compact JSON string arg
 - **Never let a write-heavy `@pytest.mark.integration` suite read a prod `DATABASE_URL` unguarded.** Gate it on a local-host check (skip otherwise) — env config is not a safe place to assume "this is a test DB."
 - **Always tear down seeded rows in an autouse fixture (before *and* after).** "Newest-at-bottom" deterministic ids don't self-clean; a failed test leaves residue that contaminates the next test (and, here, prod).
 - When you must delete from a live DB, do it in a transaction, `LIKE` only the fixture prefix (escape the `_` wildcard: `'sweep\_%'`), and print the victim list + post-state to confirm you didn't over-delete.
+
+---
+
+## 2026-06-22 — S3 RequestTimeout under slow uplink at scale + upload≠ingest gap (FIX-077)
+
+**Symptom:** `scripts/batch_upload.py --workers 4` against AWS prod (132-doc batch) threw repeated `RequestTimeout` on multi-MB page PNG `put_object` calls. Separately, after the run was stopped at 34 docs, those 34 sat fully uploaded in S3 with **zero** rows in `documents`.
+
+**Root cause 1 (timeouts):** `shared/storage_s3.py` built every `aioboto3` S3 client with bare botocore defaults (~60s read timeout, standard retry mode) and created a fresh client per call — no tuning for a slow/contended uplink (measured ~530 KiB/s). One stalled multi-MB PUT ate the whole timeout window before failing instead of backing off.
+
+**Root cause 2 (upload≠ingest):** `batch_upload.py` only performs the NAS-side steps (render → preprocess → upload to S3). It never calls `POST /pipeline/notify`. Production has **no S3 `ObjectCreated` event notification** on the bucket and **no `IngestFunction` Lambda** in the SAM template — the only ingestion trigger path is the ECS API route, which `smoke_test_aws.py` calls explicitly but `batch_upload.py` does not.
+
+**Fix:**
+- `shared/storage_s3.py` — module-level `_BOTO_CONFIG = Config(connect_timeout=30, read_timeout=120, retries={"max_attempts": 5, "mode": "adaptive"})`, passed as `config=_BOTO_CONFIG` to all 4 client-construction sites (`exists`, `put_if_absent`, `get_bytes`, `get_s3_client`). Combined with dropping `--workers` from 4→2, this eliminated all failures on retry.
+- New `scripts/trigger_uploaded_manifests.py` — lists `documents/*/manifest.json` in S3, diffs against existing `document_id`s in Postgres, POSTs each pending manifest to `/pipeline/notify`. Run once to close the gap for already-uploaded docs; safe to re-run (idempotent via the DB diff).
+
+**Side effect surfaced:** triggering 34 manifests near-simultaneously produced a *new* `structure-dlq` timeout cluster (2 docs stuck) — same 120s `StructureFunction` timeout from FIX-075, but now hit under concurrent burst load against `openrouter/free` rather than a single slow doc. Not yet resolved — if this recurs, consider staggering `/pipeline/notify` calls in batch/trigger scripts rather than firing all at once.
+
+**Rule:** Any script that does a **batch S3 upload at scale** must either (a) call `/pipeline/notify` itself after each successful manifest upload, or (b) be paired with a trigger script run immediately after — `batch_upload.py` intentionally does neither, so this is a manual step, not a bug, but it is easy to forget. Also: never construct an `aioboto3`/`boto3` S3 client without an explicit `Config(connect_timeout=, read_timeout=, retries=)` when the upload target is a real network (not local MinIO) — bare defaults fail ungracefully under contention.
+
+**Files:** `shared/storage_s3.py`, `scripts/trigger_uploaded_manifests.py` (new). Both uncommitted as of this entry.

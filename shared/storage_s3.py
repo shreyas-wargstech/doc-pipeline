@@ -2,6 +2,7 @@
 from typing import BinaryIO
 
 import aioboto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from shared.config import get_settings
@@ -12,6 +13,15 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Any
 
 log = get_logger(__name__)
+
+# Generous timeouts + adaptive backoff for slow/contended uplinks — a bare
+# botocore default (60s read timeout, standard retries) lets one stalled
+# multi-MB page PUT eat minutes before failing instead of backing off cleanly.
+_BOTO_CONFIG = Config(
+    connect_timeout=30,
+    read_timeout=120,
+    retries={"max_attempts": 5, "mode": "adaptive"},
+)
 
 
 class S3Storage:
@@ -36,7 +46,7 @@ class S3Storage:
             self._client_kwargs["endpoint_url"] = s.s3_endpoint_url
 
     async def exists(self, key: str) -> bool:
-        async with self._session.client("s3", **self._client_kwargs) as s3:
+        async with self._session.client("s3", config=_BOTO_CONFIG, **self._client_kwargs) as s3:
             try:
                 await s3.head_object(Bucket=self._bucket, Key=key)
                 return True
@@ -51,7 +61,7 @@ class S3Storage:
         if await self.exists(key):
             log.info("s3.put.skipped", key=key, reason="exists")
             return False
-        async with self._session.client("s3", **self._client_kwargs) as s3:
+        async with self._session.client("s3", config=_BOTO_CONFIG, **self._client_kwargs) as s3:
             try:
                 await s3.put_object(Bucket=self._bucket, Key=key, Body=body)
                 log.info("s3.put.ok", key=key)
@@ -60,7 +70,7 @@ class S3Storage:
                 raise StorageError(f"put_object failed for {key}") from e
 
     async def get_bytes(self, key: str) -> bytes:
-        async with self._session.client("s3", **self._client_kwargs) as s3:
+        async with self._session.client("s3", config=_BOTO_CONFIG, **self._client_kwargs) as s3:
             try:
                 obj = await s3.get_object(Bucket=self._bucket, Key=key)
                 return await obj["Body"].read()
@@ -87,5 +97,5 @@ async def get_s3_client() -> AsyncGenerator[Any, None]:
         kwargs["endpoint_url"] = s.s3_endpoint_url
 
     session = aioboto3.Session()
-    async with session.client("s3", **kwargs) as client:
+    async with session.client("s3", config=_BOTO_CONFIG, **kwargs) as client:
         yield client

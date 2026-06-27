@@ -834,3 +834,23 @@ Not redeployed — the live env already matches intent and the deployed Timeout 
 **Verified:** both Dockerfiles build clean + import-check pass; new integration test collects (2 tests) and is correctly deselected under `-m "not integration"`; `git status` clean except gitignored build artifacts.
 
 **Next:** none open. All threads from the prior two handoffs are closed.
+
+## [CLAUDE] 2026-06-22 — 132-doc prod batch test: 34/132 uploaded+triggered, S3 hardened, DLQ + frontend bugs found
+
+**Stage:** Production smoke at scale — batch upload of `C:\Users\Wargstech\Downloads\mch-pipeline-incoming\sample` (132 PDFs) via `scripts/batch_upload.py` against AWS prod.
+
+**What happened:**
+- First run (`--workers 4`) hit repeated S3 `RequestTimeout` (measured uplink ~530 KiB/s). Root cause: `shared/storage_s3.py` had no explicit botocore timeout/retry config (bare ~60s default). **Fixed:** added `_BOTO_CONFIG = Config(connect_timeout=30, read_timeout=120, retries={"max_attempts":5,"mode":"adaptive"})`, applied to all 4 client-construction sites. Restarted with `--workers 2` → 0 failures. **Uncommitted.**
+- User stopped the run at **34/132 docs uploaded**. Found those 34 sat in S3 with **0 rows in `documents`** — `batch_upload.py` only does the NAS-side render/upload, it never calls `POST /pipeline/notify` (no S3 event notification is wired in prod; no `IngestFunction` Lambda exists). **Fixed:** wrote `scripts/trigger_uploaded_manifests.py` (diffs S3 manifests against existing `document_id`s, POSTs each pending one to `/pipeline/notify`). Ran it — 34/34 triggered, 202 Accepted. **New file, uncommitted.**
+- DLQ check found `structure-dlq` had 3 dead-lettered messages from the resulting concurrent burst: 1 harmless stale dup (already `processed`/`matched`), but **2 genuinely stuck** at `status=structuring` — `StructureFunction` hit the 120s timeout 3x calling `model=openrouter/free` (recurrence of FIX-075, now under concurrent-burst load rather than a single doc). **Not yet fixed/decided** — owner has not yet said whether to re-drive the 2 stuck docs and/or raise the timeout further / stagger future trigger bursts.
+- Separately, owner reported a live frontend crash: `Cannot read properties of undefined (reading 'map')` in `HealthCard.tsx:25`. Traced to stale `localStorage`-persisted Aether chat history (`aether:recent`) saved before the `6c3de7d` `probes`→`checks` rename — old threads replay the old shape via `RecentDrawer`. **Fixed:** `web/components/aether/cards/HealthCard.tsx` — `result.checks.map` → `(result.checks ?? []).map`. Verified `tsc --noEmit` clean + `vitest run __tests__/aether` 5/5 pass. Deliberately left `AutopsyCard`/`InspectorCard`/`SearchResultsCard`'s similar unguarded `.map()`s alone — no schema change, no reported exposure. **Uncommitted.**
+- DPI reduction (300→150) + "text-only" preprocessing was raised by owner but **explicitly deferred until the current 132-doc batch finishes** — tracked in Claude's memory system (`dpi_preprocessing_followup.md`), not in this repo's docs.
+
+**Rule added to error_fixes.md:** FIX-077 (S3 timeout hardening) — see entry.
+
+**Open / next session:**
+1. Decide on the 2 stuck `structure-dlq` docs (`80e4f250...`, `ddf5c506...`) — re-drive and/or timeout/throttle fix.
+2. Delete the 1 harmless stale DLQ dup (`76fa5497...`).
+3. Upload + trigger the remaining **98 of 132** docs (run was deliberately stopped at 34).
+4. DPI/preprocessing change — deferred by owner, do only after #3 completes.
+5. Four files uncommitted: `shared/storage_s3.py`, `scripts/trigger_uploaded_manifests.py` (new), `web/components/aether/cards/HealthCard.tsx` — owner has not yet asked to commit.
